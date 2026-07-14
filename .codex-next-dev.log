@@ -52,3 +52,10 @@ Creating turbopack project { dir: 'D:\\WEB NOTA KMP', testMode: true }
  GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 62ms (next.js: 4ms, application-code: 58ms)
  GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 36ms (next.js: 4ms, application-code: 32ms)
  GET / 200 in 387ms (next.js: 54ms, application-code: 333ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/cek-nota 200 in 113ms (next.js: 26ms, application-code: 87ms)
+ GET /history 200 in 82ms (next.js: 55ms, application-code: 28ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/export 200 in 49ms (next.js: 22ms, application-code: 27ms)
+✓ Compiled in 79ms
+✓ Compiled in 58ms
+✓ Compiled in 162ms
+ GET / 200 in 41ms (next.js: 4ms, application-code: 37ms)

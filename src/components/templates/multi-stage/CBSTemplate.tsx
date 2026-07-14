@@ -33,11 +33,17 @@ const cbsSlots = [
 const cbsTableBox = { x: "0mm", y: "57mm", width: "297mm", height: "90mm" };
 
 const cbsNoteFrameSize: CSSProperties = {
+  width: `${cbsRenderedWidth}mm`,
+  height: `${cbsRenderedHeight}mm`,
+};
+
+const cbsNoteContentScale: CSSProperties = {
+  "--cbs-content-scale": CBS_DOCUMENT_LAYOUT.htmlContentScale,
   width: `${CBS_DOCUMENT_LAYOUT.sourceNoteWidthMm}mm`,
   height: `${CBS_DOCUMENT_LAYOUT.sourceNoteHeightMm}mm`,
   transform: `scale(${CBS_DOCUMENT_LAYOUT.htmlContentScale})`,
   transformOrigin: "top left",
-};
+} as CSSProperties;
 
 function CBSSlot({
   group,
@@ -53,7 +59,7 @@ function CBSSlot({
   const districtLine = `KECAMATAN ${project.districtName}`.toUpperCase();
 
   return (
-    <section className="multi-note cbs-slot" data-overlap-container data-overlap-label="CBS invoice">
+    <section className="multi-note cbs-slot" style={cbsNoteContentScale} data-overlap-container data-overlap-label="CBS invoice">
       <header className="cbs-header">
         <img src="/template-assets/multi-stage/cbs-logo.png" alt="" className="cbs-logo" />
         <div className="cbs-company">

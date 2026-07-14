@@ -2647,6 +2647,15 @@ textarea {
     min-height: 210mm !important;
   }
 
+  .multi-cbs-page .cbs-slot {
+    transform: none !important;
+    zoom: var(--cbs-content-scale, 0.63);
+  }
+
+  .multi-cbs-page .cbs-note-frame {
+    overflow: visible !important;
+  }
+
   .stage1-kwitansi-slip,
   .kwitansi-slot-position,
   .stage1-slot-position,
