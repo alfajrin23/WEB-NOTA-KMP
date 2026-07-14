@@ -22,5 +22,2649 @@
 body {
   background: var(--background);
   color: var(--foreground);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button,
+input,
+select,
+textarea {
+  letter-spacing: 0;
+}
+
+.nota-preview-shell {
+  width: calc(210mm * var(--preview-zoom, 1));
+  min-height: calc(297mm * var(--preview-zoom, 1));
+}
+
+.nota-sheet {
+  width: 210mm;
+  min-height: 297mm;
+  padding: 18mm;
+  transform: scale(var(--preview-zoom, 1));
+  transform-origin: top left;
+}
+
+.print-page-shell {
+  --preview-zoom: 1;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.print-page-shell-portrait {
+  width: calc(210mm * var(--preview-zoom));
+  min-height: calc(297mm * var(--preview-zoom));
+}
+
+.print-page-shell-landscape {
+  width: calc(297mm * var(--preview-zoom));
+  min-height: calc(210mm * var(--preview-zoom));
+}
+
+.print-page {
+  overflow: hidden;
+  background: #ffffff;
+  color: #000000;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 0.18);
+  transform: scale(var(--preview-zoom));
+  transform-origin: top left;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.print-page-portrait {
+  width: 210mm;
+  min-height: 297mm;
+}
+
+.print-page-landscape {
+  width: 297mm;
+  min-height: 210mm;
+}
+
+.stage1-landscape-page {
+  padding: 3mm 2mm;
+}
+
+.stage1-two-up {
+  display: flex;
+  gap: 4mm;
+  height: 204mm;
+}
+
+.stage1-note-slot {
+  position: relative;
+  width: 144.5mm;
+  height: 204mm;
+  flex: 0 0 144.5mm;
+  overflow: hidden;
+  background: #ffffff;
+  font-family: Calibri, Arial, sans-serif;
+  font-size: 8pt;
+  line-height: 1.12;
+}
+
+.stage1-note-slot img {
+  user-select: none;
+}
+
+.stage1-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+  position: relative;
+  z-index: 1;
+}
+
+.stage1-table th,
+.stage1-table td {
+  border: 0.28mm solid #000000;
+  padding: 0.7mm 1mm;
+  overflow: hidden;
+  vertical-align: middle;
+  white-space: normal;
+}
+
+.stage1-table th {
+  height: 8.8mm;
+  font-weight: 700;
+  text-align: center;
+}
+
+.stage1-table td {
+  height: 7.8mm;
+}
+
+.stage1-table .center {
+  text-align: center;
+}
+
+.stage1-table .right {
+  text-align: right;
+}
+
+.nota-number {
+  height: 5.2mm;
+  font-weight: 700;
+}
+
+.stage1-total-row {
+  display: grid;
+  grid-template-columns: 28mm 38mm;
+  justify-content: end;
+  min-height: 8.5mm;
+  align-items: center;
+  font-weight: 700;
+}
+
+.stage1-total-row span,
+.stage1-total-row strong {
+  border: 0.28mm solid #000000;
+  border-top: 0;
+  padding: 1.5mm 1.2mm;
+}
+
+.stage1-total-row span {
+  text-align: right;
+}
+
+.stage1-total-row strong {
+  text-align: right;
+}
+
+.stage1-note-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 4mm;
+  padding-top: 3mm;
+  font-size: 8pt;
+}
+
+.signature-line {
+  margin-top: 20mm;
+}
+
+.murah-header {
+  display: grid;
+  grid-template-columns: 71mm 1fr;
+  height: 39.5mm;
+}
+
+.murah-logo {
+  width: 64mm;
+  height: 20.8mm;
+  object-fit: contain;
+  object-position: left top;
+}
+
+.murah-address {
+  width: 64mm;
+  margin-top: 0.5mm;
+  text-align: center;
+  font-family: "Aptos Narrow", Arial Narrow, Arial, sans-serif;
+  font-size: 7pt;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.murah-recipient {
+  padding-top: 8.3mm;
+  font-family: "Aptos Narrow", Arial Narrow, Arial, sans-serif;
+  font-size: 8pt;
+}
+
+.murah-recipient .font-bold {
+  margin-top: 2.6mm;
+}
+
+.recipient-name {
+  margin-top: 1.8mm;
+}
+
+.murah-table th {
+  background: #d1d5db;
+  font-family: "Aptos Narrow", Arial Narrow, Arial, sans-serif;
+}
+
+.murah-table td {
+  font-family: "Aptos Narrow", Arial Narrow, Arial, sans-serif;
+}
+
+.murah-col-qty {
+  width: 32mm;
+}
+
+.murah-col-name {
+  width: 43mm;
+}
+
+.murah-col-price {
+  width: 28mm;
+}
+
+.murah-col-amount {
+  width: 41.5mm;
+}
+
+.murah-note {
+  width: 44mm;
+  margin-top: 4mm;
+  text-align: center;
+}
+
+.amanah-slot {
+  font-family: Calibri, Arial, sans-serif;
+}
+
+.amanah-watermark {
+  position: absolute;
+  z-index: 0;
+  left: 40mm;
+  top: 78mm;
+  width: 69mm;
+  opacity: 0.24;
+}
+
+.amanah-header {
+  display: grid;
+  grid-template-columns: 94mm 1fr;
+  height: 40.5mm;
+}
+
+.amanah-logo {
+  width: 92mm;
+  height: 39mm;
+  object-fit: contain;
+  object-position: left top;
+}
+
+.amanah-recipient {
+  padding-top: 4mm;
+  font-size: 8pt;
+}
+
+.amanah-recipient .font-bold {
+  margin-top: 3mm;
+}
+
+.recipient-underline {
+  margin-top: 6.3mm;
+  border-bottom: 0.25mm solid #000000;
+}
+
+.recipient-underline + .recipient-underline {
+  margin-top: 0;
+}
+
+.amanah-table th {
+  background: #d1d5db;
+}
+
+.amanah-col-qty {
+  width: 25mm;
+}
+
+.amanah-col-unit {
+  width: 17mm;
+}
+
+.amanah-col-name {
+  width: 35mm;
+}
+
+.amanah-col-price {
+  width: 27mm;
+}
+
+.amanah-col-amount {
+  width: 40.5mm;
+}
+
+.amanah-total-grid {
+  display: grid;
+  grid-template-columns: 30mm 38mm;
+  justify-content: end;
+  position: relative;
+  z-index: 1;
+  font-weight: 700;
+}
+
+.amanah-total-grid span,
+.amanah-total-grid strong {
+  min-height: 8.5mm;
+  border: 0.28mm solid #000000;
+  border-top: 0;
+  padding: 1.5mm 1mm;
+}
+
+.amanah-total-grid span {
+  text-align: right;
+}
+
+.amanah-total-grid strong {
+  text-align: right;
+}
+
+.amanah-footer {
+  position: relative;
+  z-index: 1;
+}
+
+.nota-kosong-slot {
+  font-family: Cambria, Georgia, serif;
+  font-size: 10.5pt;
+}
+
+.kosong-header {
+  display: grid;
+  grid-template-columns: 78mm 1fr;
+  height: 20mm;
+}
+
+.kosong-recipient {
+  margin-left: 77mm;
+  width: 47mm;
+  text-align: left;
+}
+
+.recipient-blank {
+  font-weight: 700;
+}
+
+.kosong-date {
+  padding-top: 15mm;
+  text-align: left;
+}
+
+.kosong-table th,
+.kosong-table td {
+  font-size: 10.5pt;
+}
+
+.kosong-table th {
+  height: 12.5mm;
+}
+
+.kosong-col-name {
+  width: 38mm;
+}
+
+.kosong-col-qty {
+  width: 30mm;
+}
+
+.kosong-col-unit {
+  width: 28mm;
+}
+
+.kosong-col-price {
+  width: 23mm;
+}
+
+.kosong-col-amount {
+  width: 25.5mm;
+}
+
+.kosong-total {
+  grid-template-columns: 29mm 40mm;
+}
+
+.mandau-slot {
+  font-family: "Bodoni MT", "Times New Roman", serif;
+  font-size: 10.5pt;
+}
+
+.mandau-header {
+  height: 28.5mm;
+  margin-left: 58mm;
+  font-size: 10.5pt;
+}
+
+.mandau-date {
+  margin-bottom: 2.5mm;
+}
+
+.mandau-table th,
+.mandau-table td {
+  border-color: #dc2626;
+  font-size: 10.5pt;
+}
+
+.mandau-table th {
+  height: 12.3mm;
+}
+
+.mandau-col-qty {
+  width: 27mm;
+}
+
+.mandau-col-name {
+  width: 39mm;
+}
+
+.mandau-col-price {
+  width: 30mm;
+}
+
+.mandau-col-amount {
+  width: 48.5mm;
+}
+
+.mandau-total span,
+.mandau-total strong {
+  border-color: #dc2626;
+}
+
+.mandau-warning {
+  width: 30mm;
+  height: 10.5mm;
+  margin-top: 1mm;
+  border: 0.28mm solid #b91c1c;
+  padding-top: 0.7mm;
+  text-align: center;
+  font-family: Arial, sans-serif;
+  font-size: 5.8pt;
+  line-height: 1.15;
+}
+
+.stage1-cbb-page {
+  padding: 17.8mm;
   font-family: Arial, Helvetica, sans-serif;
+  font-size: 9pt;
+}
+
+.cbb-header {
+  display: grid;
+  grid-template-columns: 112mm 1fr;
+  min-height: 55mm;
+}
+
+.cbb-logo {
+  width: 40mm;
+  height: 13mm;
+  object-fit: contain;
+  object-position: left top;
+}
+
+.cbb-company h1 {
+  margin: 1.2mm 0 1.2mm;
+  font-size: 16pt;
+  line-height: 1;
+}
+
+.cbb-company p {
+  margin: 0;
+  font-size: 9pt;
+  line-height: 1.25;
+}
+
+.cbb-date {
+  padding-top: 18mm;
+  font-size: 10pt;
+}
+
+.cbb-title {
+  margin: 0 0 8mm;
+  text-align: center;
+  font-size: 14pt;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.cbb-customer {
+  min-height: 25mm;
+  border-bottom: 0.35mm solid #000000;
+  padding-bottom: 2mm;
+}
+
+.cbb-customer h3,
+.cbb-payment h3,
+.cbb-terbilang h3 {
+  margin: 0 0 2mm;
+  font-size: 9pt;
+}
+
+.cbb-customer p {
+  display: grid;
+  grid-template-columns: 22mm 5mm 1fr;
+  margin: 0 0 1mm;
+}
+
+.cbb-table {
+  margin-top: 1mm;
+}
+
+.cbb-table th,
+.cbb-table td {
+  border-width: 0.25mm;
+  font-size: 9pt;
+}
+
+.cbb-table th {
+  height: 11.6mm;
+  background: #f1f5f9;
+}
+
+.cbb-table td {
+  height: 5.7mm;
+}
+
+.cbb-col-no {
+  width: 11mm;
+}
+
+.cbb-col-name {
+  width: 95mm;
+}
+
+.cbb-col-qty {
+  width: 21mm;
+}
+
+.cbb-col-price {
+  width: 24mm;
+}
+
+.cbb-col-amount {
+  width: 29mm;
+}
+
+.cbb-total-grid {
+  display: grid;
+  grid-template-columns: 24mm 29mm;
+  justify-content: end;
+}
+
+.cbb-total-grid span,
+.cbb-total-grid b,
+.cbb-total-grid strong {
+  min-height: 6.2mm;
+  border: 0.25mm solid #000000;
+  border-top: 0;
+  padding: 1mm 1.2mm;
+  text-align: right;
+}
+
+.cbb-total-grid strong:nth-child(4) {
+  background: #e2e8f0;
+}
+
+.cbb-footer-row {
+  display: grid;
+  grid-template-columns: 98mm 1fr;
+  margin-top: 2mm;
+}
+
+.cbb-payment {
+  min-height: 24mm;
+  border-top: 0.35mm solid #000000;
+  border-bottom: 0.35mm solid #000000;
+  padding: 1.5mm;
+}
+
+.cbb-payment p {
+  display: grid;
+  grid-template-columns: 43mm 1fr;
+  margin: 0 0 0.9mm;
+}
+
+.cbb-payment span {
+  font-weight: 700;
+}
+
+.cbb-sign {
+  padding-top: 3mm;
+  text-align: center;
+  line-height: 1.4;
+}
+
+.cbb-sign p {
+  margin: 0;
+}
+
+.cbb-sign-name {
+  margin-top: 20mm !important;
+}
+
+.cbb-terbilang {
+  width: 98mm;
+  min-height: 18mm;
+  margin-top: 2mm;
+  border-bottom: 0.35mm solid #000000;
+  padding: 1.5mm;
+}
+
+.cbb-terbilang p {
+  margin: 0;
+  line-height: 1.25;
+}
+
+.stage1-kwitansi-page {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7mm;
+  padding: 5mm 5mm 2.5mm;
+}
+
+.stage1-kwitansi-slip {
+  position: relative;
+  width: 170mm;
+  height: 70mm;
+  flex: 0 0 70mm;
+  overflow: hidden;
+}
+
+.stage1-kwitansi-bg {
+  position: absolute;
+  inset: 0;
+  width: 170mm;
+  height: 70mm;
+}
+
+.kwitansi-text {
+  position: absolute;
+  z-index: 1;
+  color: #000000;
+  font-family: Arial, Helvetica, sans-serif;
+  line-height: 1.12;
+  white-space: nowrap;
+}
+
+.kwitansi-from {
+  font-size: 8.2pt;
+}
+
+.kwitansi-words {
+  font-size: 8pt;
+  font-style: italic;
+}
+
+.kwitansi-purpose {
+  font-size: 7pt;
+  line-height: 1.16;
+  white-space: normal;
+}
+
+.kwitansi-purpose div + div {
+  margin-top: 1.05mm;
+}
+
+.kwitansi-project,
+.kwitansi-role {
+  text-align: center;
+  font-size: 7pt;
+  line-height: 1;
+  padding: 0.2mm 0.8mm;
+}
+
+.kwitansi-amount {
+  font-size: 9pt;
+}
+
+.kwitansi-receiver {
+  text-align: center;
+  font-size: 6.8pt;
+}
+
+.print-page {
+  position: relative;
+}
+
+.print-page-portrait {
+  height: 297mm;
+  min-height: 297mm;
+}
+
+.print-page-landscape {
+  height: 210mm;
+  min-height: 210mm;
+}
+
+.stage1-landscape-page,
+.stage1-kwitansi-page {
+  padding: 0;
+}
+
+.stage1-absolute-sheet {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.stage1-slot-position {
+  position: absolute;
+  overflow: visible;
+}
+
+.stage1-note-slot {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  line-height: 1.08;
+}
+
+.stage1-note-slot .nota-number {
+  position: absolute;
+  z-index: 2;
+  left: 0;
+  font-weight: 700;
+}
+
+.stage1-table {
+  position: absolute;
+  z-index: 2;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.stage1-table th,
+.stage1-table td {
+  overflow: hidden;
+  padding: 0.35mm 0.9mm;
+  white-space: normal;
+}
+
+.stage1-table th {
+  font-weight: 700;
+  text-align: center;
+}
+
+.stage1-table .center {
+  text-align: center;
+}
+
+.stage1-table .right {
+  text-align: right;
+}
+
+.stage1-total-row,
+.amanah-total-grid {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  align-items: stretch;
+  font-weight: 700;
+}
+
+.stage1-total-row span,
+.amanah-total-grid span {
+  border: 0;
+  padding: 1mm 1.1mm 0.6mm;
+  text-align: right;
+}
+
+.stage1-total-row strong,
+.amanah-total-grid strong {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 1mm 1.1mm 0.6mm;
+  text-align: right;
+}
+
+.stage1-note-footer {
+  position: absolute;
+  z-index: 2;
+  display: flex;
+  justify-content: space-between;
+  padding: 0;
+}
+
+.signature-line {
+  margin-top: 19mm;
+}
+
+.amanah-slot {
+  font-family: Calibri, Arial, sans-serif;
+  font-size: 6.6pt;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.amanah-header {
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  display: grid;
+  grid-template-columns: 68mm 25.8mm;
+  width: 93.8mm;
+  height: 31.5mm;
+}
+
+.amanah-logo {
+  width: 67mm;
+  height: 30mm;
+  object-fit: fill;
+  object-position: left top;
+}
+
+.amanah-recipient {
+  padding-top: 0.2mm;
+  font-size: 5.7pt;
+  line-height: 1.22;
+}
+
+.amanah-recipient .font-bold {
+  margin-top: 2.2mm;
+  font-weight: 700;
+}
+
+.recipient-underline {
+  margin-top: 4.3mm;
+  border-bottom: 0.18mm solid #000000;
+  line-height: 1.22;
+}
+
+.recipient-underline + .recipient-underline {
+  margin-top: 0;
+}
+
+.amanah-slot .nota-number {
+  top: 31.4mm;
+  height: 2.5mm;
+  font-size: 6.4pt;
+}
+
+.amanah-watermark {
+  left: 18.5mm;
+  top: 70mm;
+  width: 53mm;
+  height: 32mm;
+  overflow: hidden;
+  opacity: 0.3;
+  pointer-events: none;
+}
+
+.amanah-watermark img {
+  display: block;
+  width: 132mm;
+  height: auto;
+  max-width: none;
+  transform: translate(-2mm, -7mm);
+}
+
+.amanah-table {
+  left: 0;
+  top: 33.9mm;
+  width: 93.8mm;
+  font-size: 5.9pt;
+}
+
+.amanah-table th,
+.amanah-table td {
+  border: 0.32mm solid #000000;
+}
+
+.amanah-table th {
+  height: 6.8mm;
+  background: #808080;
+  line-height: 1;
+}
+
+.amanah-table td {
+  height: 6.72mm;
+  line-height: 1;
+}
+
+.amanah-col-qty {
+  width: 16.3mm;
+}
+
+.amanah-col-unit {
+  width: 11.1mm;
+}
+
+.amanah-col-name {
+  width: 22.5mm;
+}
+
+.amanah-col-price {
+  width: 14.8mm;
+}
+
+.amanah-col-amount {
+  width: 29.1mm;
+}
+
+.amanah-total-grid {
+  left: 49.9mm;
+  top: 134.8mm;
+  grid-template-columns: 14.8mm 29.1mm;
+  width: 43.9mm;
+  font-size: 5.9pt;
+}
+
+.amanah-total-grid span,
+.amanah-total-grid strong {
+  min-height: 6.7mm;
+  border-top: 0;
+}
+
+.amanah-total-grid strong {
+  border: 0.32mm solid #000000;
+}
+
+.amanah-footer {
+  left: 0;
+  top: 137.1mm;
+  width: 54mm;
+  font-size: 5.8pt;
+}
+
+.amanah-footer .signature-line {
+  margin-top: 20mm;
+}
+
+.murah-maju-slot {
+  font-family: "Aptos Narrow", "Arial Narrow", Arial, sans-serif;
+  font-size: 6.9pt;
+}
+
+.murah-header {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  grid-template-columns: 53.5mm 43.3mm;
+  width: 96.8mm;
+  height: 34.6mm;
+}
+
+.murah-logo-frame {
+  width: 52mm;
+  height: 15.4mm;
+  margin-left: 1.5mm;
+  overflow: hidden;
+}
+
+.murah-logo {
+  width: 62mm;
+  height: auto;
+  object-fit: contain;
+  object-position: left top;
+  transform: translate(-3mm, -11.2mm);
+}
+
+.murah-address {
+  width: 52mm;
+  margin-top: 0.2mm;
+  text-align: center;
+  font-size: 5.5pt;
+  font-weight: 700;
+  line-height: 1.18;
+}
+
+.murah-recipient {
+  padding-top: 5.2mm;
+  font-size: 6.3pt;
+  line-height: 1.38;
+}
+
+.murah-recipient .font-bold {
+  margin-top: 2.7mm;
+}
+
+.murah-recipient .recipient-name {
+  margin-top: 0.8mm;
+}
+
+.murah-maju-slot .nota-number {
+  display: none;
+}
+
+.murah-table {
+  left: 0;
+  top: 34.6mm;
+  width: 96.8mm;
+  font-size: 6.6pt;
+}
+
+.murah-table th,
+.murah-table td {
+  border: 0.32mm solid #000000;
+}
+
+.murah-table th {
+  height: 8.2mm;
+  background: #d9d9d9;
+  line-height: 1;
+}
+
+.murah-table td {
+  height: 7.29mm;
+  line-height: 1.05;
+}
+
+.murah-col-qty {
+  width: 22.4mm;
+}
+
+.murah-col-name {
+  width: 29.7mm;
+}
+
+.murah-col-price {
+  width: 15.9mm;
+}
+
+.murah-col-amount {
+  width: 28.8mm;
+}
+
+.murah-maju-slot .stage1-total-row {
+  left: 52.1mm;
+  top: 144.9mm;
+  grid-template-columns: 15.9mm 28.8mm;
+  width: 44.7mm;
+  font-size: 6.4pt;
+}
+
+.murah-maju-slot .stage1-total-row span,
+.murah-maju-slot .stage1-total-row strong {
+  height: 7.3mm;
+  padding: 0.7mm 1mm 0.4mm;
+}
+
+.murah-maju-slot .stage1-total-row strong {
+  border: 0.32mm solid #000000;
+}
+
+.murah-footer {
+  left: 0;
+  top: 153.2mm;
+  width: 96.8mm;
+  font-size: 6.2pt;
+}
+
+.murah-note {
+  width: 40mm;
+  margin-top: 6.5mm;
+  color: #666666;
+  text-align: center;
+  font-size: 5.9pt;
+  line-height: 1.25;
+}
+
+.murah-footer .signature-line {
+  margin-top: 15mm;
+}
+
+.nota-kosong-slot {
+  font-family: Cambria, Georgia, serif;
+  font-size: 7.2pt;
+}
+
+.kosong-header {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  width: 98.8mm;
+  height: 13.9mm;
+}
+
+.kosong-recipient {
+  position: absolute;
+  left: 59.2mm;
+  top: 0;
+  width: 39.6mm;
+  margin: 0;
+  text-align: left;
+  line-height: 1.2;
+}
+
+.recipient-blank {
+  font-weight: 700;
+}
+
+.kosong-date {
+  position: absolute;
+  left: 59.2mm;
+  top: 10.4mm;
+  padding: 0;
+  text-align: left;
+}
+
+.nota-kosong-slot .nota-number {
+  top: 10.4mm;
+  font-size: 7pt;
+}
+
+.kosong-table {
+  left: 0;
+  top: 13.9mm;
+  width: 98.8mm;
+  font-size: 6.9pt;
+}
+
+.kosong-table th,
+.kosong-table td {
+  border: 0.2mm solid #000000;
+}
+
+.kosong-table th {
+  height: 6.9mm;
+  line-height: 1;
+}
+
+.kosong-table td {
+  height: 5.99mm;
+  max-height: 5.99mm;
+  line-height: 1.05;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+
+.kosong-table tbody tr {
+  height: 5.99mm;
+  max-height: 5.99mm;
+}
+
+.kosong-col-name {
+  width: 21.7mm;
+}
+
+.kosong-col-qty {
+  width: 18.7mm;
+}
+
+.kosong-col-unit {
+  width: 18.7mm;
+}
+
+.kosong-col-price {
+  width: 16mm;
+}
+
+.kosong-col-amount {
+  width: 23.7mm;
+}
+
+.nota-kosong-slot .stage1-total-row {
+  left: 59.1mm;
+  top: 105.55mm;
+  grid-template-columns: 16mm 23.7mm;
+  width: 39.7mm;
+  font-size: 6.9pt;
+  line-height: 1;
+}
+
+.nota-kosong-slot .stage1-total-row span,
+.nota-kosong-slot .stage1-total-row strong {
+  display: flex;
+  height: 7.4mm;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0.4mm 0.8mm 0.2mm;
+}
+
+.nota-kosong-slot .stage1-total-row strong {
+  border: 0.2mm solid #000000;
+}
+
+.kosong-footer {
+  left: 0;
+  top: 116.8mm;
+  width: 98.8mm;
+  padding: 0 1.5mm;
+  font-size: 6.8pt;
+}
+
+.kosong-footer .signature-line {
+  margin-top: 14.5mm;
+}
+
+.mandau-slot {
+  font-family: "Bodoni MT", "Times New Roman", serif;
+  font-size: 8.4pt;
+}
+
+.mandau-header {
+  position: absolute;
+  left: 47.5mm;
+  top: 0;
+  width: 47.6mm;
+  height: 20mm;
+  margin: 0;
+  font-size: 8.4pt;
+  line-height: 1.22;
+}
+
+.mandau-date {
+  margin-bottom: 2mm;
+}
+
+.mandau-slot .nota-number {
+  top: 20.1mm;
+  font-size: 8.3pt;
+}
+
+.mandau-table {
+  left: 0;
+  top: 24.7mm;
+  width: 95.1mm;
+  font-size: 8.4pt;
+}
+
+.mandau-table th,
+.mandau-table td {
+  border-left: 0.24mm solid #000000;
+  border-right: 0.24mm solid #000000;
+  border-top: 0.28mm solid #ff0000;
+  border-bottom: 0.28mm solid #ff0000;
+}
+
+.mandau-table th {
+  height: 7.8mm;
+  line-height: 1;
+}
+
+.mandau-table td {
+  height: 6.78mm;
+  line-height: 1.05;
+  font-size: 8pt;
+  white-space: nowrap;
+}
+
+.mandau-col-qty {
+  width: 19.9mm;
+}
+
+.mandau-col-name {
+  width: 27.5mm;
+}
+
+.mandau-col-price {
+  width: 19.5mm;
+}
+
+.mandau-col-amount {
+  width: 28.2mm;
+}
+
+.mandau-slot .stage1-total-row {
+  left: 47.4mm;
+  top: 129.2mm;
+  grid-template-columns: 19.5mm 28.2mm;
+  width: 47.7mm;
+  min-height: 7mm;
+  font-size: 8.2pt;
+}
+
+.mandau-slot .stage1-total-row strong {
+  border-left: 0.24mm solid #000000;
+  border-right: 0.24mm solid #000000;
+  border-top: 0.28mm solid #ff0000;
+  border-bottom: 0.28mm solid #ff0000;
+}
+
+.mandau-footer {
+  left: 0;
+  top: 139mm;
+  width: 95.1mm;
+  font-size: 8.2pt;
+}
+
+.mandau-warning {
+  width: 18mm;
+  height: 6.8mm;
+  margin-top: -2mm;
+  border: 0.22mm solid #ef4444;
+  padding-top: 0.35mm;
+  text-align: center;
+  font-family: Arial, sans-serif;
+  font-size: 3.6pt;
+  line-height: 1.12;
+}
+
+.mandau-footer .signature-line {
+  margin-top: 19mm;
+}
+
+.stage1-cbb-page {
+  padding: 19mm 0 0 17.1mm;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 8pt;
+}
+
+.cbb-header {
+  display: grid;
+  grid-template-columns: 102mm 69mm;
+  width: 171mm;
+  min-height: 50mm;
+}
+
+.cbb-logo {
+  width: 38mm;
+  height: 12.7mm;
+  object-fit: contain;
+  object-position: left top;
+}
+
+.cbb-company h1 {
+  margin: 1.3mm 0 1.5mm;
+  font-size: 12pt;
+  line-height: 1;
+}
+
+.cbb-company p {
+  margin: 0;
+  font-size: 6.5pt;
+  line-height: 1.18;
+}
+
+.cbb-date {
+  padding-top: 23mm;
+  font-size: 7.4pt;
+}
+
+.cbb-title {
+  width: 171mm;
+  margin: 0 0 10.8mm;
+  text-align: center;
+  font-size: 10pt;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.cbb-customer {
+  width: 101mm;
+  min-height: 16mm;
+  border: 0.22mm solid #000000;
+  padding: 0.4mm 0.8mm;
+  font-size: 6.6pt;
+}
+
+.cbb-customer h3,
+.cbb-payment h3,
+.cbb-terbilang h3 {
+  margin: 0 0 1mm;
+  font-size: 6.8pt;
+}
+
+.cbb-customer p {
+  display: grid;
+  grid-template-columns: 15mm 3mm 1fr;
+  margin: 0;
+  line-height: 1.15;
+}
+
+.cbb-table {
+  position: static;
+  width: 171mm;
+  margin-top: 0;
+  font-size: 6.8pt;
+}
+
+.cbb-table th,
+.cbb-table td {
+  border: 0.22mm solid #000000;
+  padding: 0.35mm 0.7mm;
+}
+
+.cbb-table th {
+  height: 10.4mm;
+  background: #ffffff;
+  line-height: 1.05;
+}
+
+.cbb-table td {
+  height: 5.38mm;
+  line-height: 1.05;
+}
+
+.cbb-table tbody td {
+  border-top: 0;
+  border-bottom: 0;
+}
+
+.cbb-table tbody tr:last-child td {
+  border-bottom: 0.22mm solid #000000;
+}
+
+.cbb-col-no {
+  width: 10.3mm;
+}
+
+.cbb-col-name {
+  width: 90.2mm;
+}
+
+.cbb-col-qty {
+  width: 20.2mm;
+}
+
+.cbb-col-price {
+  width: 22.2mm;
+}
+
+.cbb-col-amount {
+  width: 28.1mm;
+}
+
+.cbb-total-grid {
+  display: grid;
+  grid-template-columns: 22.2mm 28.1mm;
+  justify-content: end;
+  width: 171mm;
+  font-size: 6.7pt;
+}
+
+.cbb-total-grid span,
+.cbb-total-grid b,
+.cbb-total-grid strong {
+  min-height: 5.3mm;
+  border: 0.22mm solid #000000;
+  border-top: 0;
+  padding: 0.6mm 0.8mm;
+  text-align: right;
+}
+
+.cbb-total-grid strong:nth-child(4) {
+  background: #d9e2f3;
+}
+
+.cbb-footer-row {
+  display: grid;
+  grid-template-columns: 101mm 70mm;
+  width: 171mm;
+  margin-top: 4.2mm;
+}
+
+.cbb-payment {
+  min-height: 20mm;
+  border: 0.22mm solid #000000;
+  padding: 1mm;
+  font-size: 6.6pt;
+}
+
+.cbb-payment p {
+  display: grid;
+  grid-template-columns: 36mm 1fr;
+  margin: 0;
+  line-height: 1.18;
+}
+
+.cbb-sign {
+  padding-top: 0;
+  text-align: center;
+  font-size: 7pt;
+  line-height: 1.35;
+}
+
+.cbb-sign-name {
+  margin-top: 21mm !important;
+}
+
+.cbb-terbilang {
+  width: 101mm;
+  min-height: 16mm;
+  margin-top: 1.6mm;
+  border: 0.22mm solid #000000;
+  padding: 1mm;
+  font-size: 6.6pt;
+}
+
+.cbb-terbilang p {
+  margin: 0;
+  line-height: 1.2;
+}
+
+.stage1-kwitansi-page {
+  position: relative;
+}
+
+.kwitansi-slot-position {
+  overflow: hidden;
+}
+
+.stage1-kwitansi-slip {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.stage1-kwitansi-bg {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+}
+
+.kwitansi-number-value {
+  font-size: 8.2pt;
+}
+
+.multi-absolute-sheet {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+}
+
+.multi-slot-position {
+  position: absolute;
+  overflow: visible;
+}
+
+.multi-note {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  color: #000000;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.multi-table {
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.multi-table th,
+.multi-table td {
+  overflow: hidden;
+  padding: 0.35mm 0.7mm;
+  vertical-align: middle;
+  white-space: normal;
+}
+
+.multi-table .center {
+  text-align: center;
+}
+
+.multi-table .right {
+  text-align: right;
+}
+
+.multi-cbs-page {
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.cbs-slot {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 10pt;
+  line-height: 1.14;
+}
+
+.cbs-header {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 297mm;
+  height: 56mm;
+}
+
+.cbs-logo {
+  position: absolute;
+  left: 10mm;
+  top: 1mm;
+  width: 26mm;
+  height: 27mm;
+  object-fit: contain;
+}
+
+.cbs-company {
+  position: absolute;
+  left: 38.5mm;
+  top: 1.7mm;
+  display: flex;
+  flex-direction: column;
+  gap: 1.7mm;
+}
+
+.cbs-company strong {
+  font-size: 11pt;
+  line-height: 1;
+}
+
+.cbs-invoice-meta {
+  position: absolute;
+  right: 0;
+  top: 1mm;
+  width: 88mm;
+  border: 0.25mm solid #000000;
+  border-bottom: 0;
+  font-size: 10pt;
+  line-height: 1.05;
+}
+
+.cbs-invoice-meta strong {
+  display: block;
+  text-align: right;
+  border-bottom: 0.25mm solid #000000;
+  padding: 0 2mm 0.7mm 0;
+  font-size: 10.4pt;
+  line-height: 1;
+}
+
+.cbs-invoice-meta div {
+  display: grid;
+  grid-template-columns: 44mm 44mm;
+  border-bottom: 0.22mm dotted #000000;
+}
+
+.cbs-invoice-meta span,
+.cbs-invoice-meta b {
+  min-height: 6.4mm;
+  font-weight: 400;
+  padding: 0.7mm 2mm 0;
+}
+
+.cbs-invoice-meta b {
+  border-left: 0.25mm solid #000000;
+  text-align: center;
+}
+
+.cbs-recipient {
+  position: absolute;
+  left: 0;
+  top: 25.8mm;
+  display: grid;
+  grid-template-columns: 37.5mm 92mm;
+  grid-template-rows: 12.7mm 12.7mm;
+  width: 129.5mm;
+  font-size: 10pt;
+  line-height: 1.18;
+}
+
+.cbs-recipient > div:not(.cbs-recipient-box) {
+  padding-top: 1mm;
+}
+
+.cbs-recipient-box {
+  display: flex;
+  min-height: 12.7mm;
+  flex-direction: column;
+  border: 0.25mm solid #000000;
+  padding: 0.8mm 1.2mm;
+}
+
+.cbs-recipient-bill {
+  border-bottom: 0.22mm dotted #000000;
+}
+
+.cbs-recipient-ship {
+  border-top: 0;
+}
+
+.cbs-table {
+  position: absolute;
+  left: 0;
+  top: 57mm;
+  width: 297mm;
+  font-size: 10pt;
+}
+
+.cbs-table th,
+.cbs-table td {
+  border-left: 0.25mm solid #000000;
+  border-right: 0.25mm solid #000000;
+  padding: 0.35mm 1.1mm;
+}
+
+.cbs-table th {
+  height: 6mm;
+  border-top: 0.25mm solid #000000;
+  border-bottom: 0.25mm solid #000000;
+  font-weight: 400;
+  text-align: center;
+  line-height: 1.05;
+}
+
+.cbs-table td {
+  height: 5.9mm;
+  border-top: 0;
+  border-bottom: 0;
+  line-height: 1.05;
+  vertical-align: top;
+}
+
+.cbs-table tbody tr:last-child td {
+  border-bottom: 0.25mm solid #000000;
+}
+
+.cbs-col-item {
+  width: 37.4mm;
+}
+
+.cbs-col-desc {
+  width: 70.5mm;
+}
+
+.cbs-col-qty {
+  width: 21.1mm;
+}
+
+.cbs-col-price {
+  width: 37.4mm;
+}
+
+.cbs-col-disc,
+.cbs-col-tax {
+  width: 21.4mm;
+}
+
+.cbs-col-amount {
+  width: 43.8mm;
+}
+
+.cbs-col-serial {
+  width: 44mm;
+}
+
+.cbs-description {
+  position: absolute;
+  left: 0;
+  top: 147mm;
+  width: 188mm;
+  font-size: 10pt;
+}
+
+.cbs-description div {
+  height: 12.5mm;
+  border-top: 0.25mm solid #000000;
+  border-left: 0.25mm solid #000000;
+  border-right: 0.25mm solid #000000;
+  padding: 1mm 1mm 0;
+}
+
+.cbs-description div + div {
+  border-bottom: 0.25mm solid #000000;
+}
+
+.cbs-total {
+  position: absolute;
+  right: 0;
+  top: 147mm;
+  display: grid;
+  grid-template-columns: 44mm 44mm;
+  width: 88mm;
+  font-size: 10pt;
+}
+
+.cbs-total span,
+.cbs-total b {
+  min-height: 6.25mm;
+  border: 0.25mm solid #000000;
+  border-top: 0;
+  padding: 0.65mm 1.5mm;
+  font-weight: 400;
+  text-align: right;
+}
+
+.cbs-total span:first-child,
+.cbs-total b:nth-child(2) {
+  border-top: 0.25mm solid #000000;
+}
+
+.cbs-signatures {
+  position: absolute;
+  left: 1mm;
+  top: 175mm;
+  display: grid;
+  grid-template-columns: 37mm 37mm;
+  gap: 92mm;
+  font-size: 10pt;
+}
+
+.cbs-signatures div {
+  display: flex;
+  height: 29mm;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.cbs-signatures i {
+  display: block;
+  width: 37mm;
+  border-bottom: 0.25mm solid #000000;
+}
+
+.multi-hpm-page {
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.hpm-document {
+  position: relative;
+  width: 210mm;
+  height: 297mm;
+  overflow: hidden;
+  background: #ffffff;
+  color: #000000;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.hpm-header {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 210mm;
+  height: 49mm;
+}
+
+.hpm-logo {
+  position: absolute;
+  left: 5mm;
+  top: 2mm;
+  width: 88mm;
+  height: 36mm;
+  object-fit: contain;
+  object-position: left top;
+}
+
+.hpm-invoice-title {
+  position: absolute;
+  left: 107mm;
+  top: 2mm;
+  width: 103mm;
+  font-size: 11pt;
+  line-height: 1.25;
+}
+
+.hpm-invoice-title h1 {
+  margin: 0 0 2mm;
+  border-bottom: 0.55mm solid #000000;
+  font-size: 24pt;
+  line-height: 1.05;
+  text-align: center;
+}
+
+.hpm-invoice-title div {
+  display: grid;
+  grid-template-columns: 24mm 6mm 1fr;
+}
+
+.hpm-recipient {
+  position: absolute;
+  left: 1mm;
+  top: 39mm;
+  display: grid;
+  grid-template-columns: 17mm 5mm 80mm;
+  width: 103mm;
+  font-size: 11pt;
+  line-height: 1.35;
+}
+
+.hpm-table {
+  position: absolute;
+  left: 0;
+  top: 58mm;
+  width: 210mm;
+  font-size: 11pt;
+}
+
+.hpm-table th {
+  height: 7mm;
+  background: #215f9a;
+  color: #ffffff;
+  font-weight: 400;
+  line-height: 1;
+}
+
+.hpm-table td {
+  height: 6mm;
+  padding: 0.35mm 1.3mm;
+  line-height: 1.05;
+}
+
+.hpm-col-no {
+  width: 21mm;
+}
+
+.hpm-col-name {
+  width: 68mm;
+}
+
+.hpm-col-qty {
+  width: 24mm;
+}
+
+.hpm-col-unit {
+  width: 28mm;
+}
+
+.hpm-col-price {
+  width: 33mm;
+}
+
+.hpm-col-total {
+  width: 36mm;
+}
+
+.hpm-separator {
+  position: absolute;
+  left: 0;
+  top: 114mm;
+  width: 210mm;
+  border-top: 0.55mm solid #000000;
+}
+
+.hpm-total-box {
+  position: absolute;
+  right: 0;
+  top: 121mm;
+  display: grid;
+  grid-template-columns: 47mm 29mm;
+  width: 76mm;
+  font-size: 11pt;
+}
+
+.hpm-total-box span,
+.hpm-total-box b,
+.hpm-total-box strong {
+  min-height: 6.8mm;
+  padding: 0.6mm 1.2mm;
+  text-align: right;
+}
+
+.hpm-total-box strong {
+  background: #215f9a;
+  color: #ffffff;
+}
+
+.hpm-total-box strong:nth-last-child(2) {
+  text-align: left;
+}
+
+.hpm-signature {
+  position: absolute;
+  right: 0;
+  top: 152mm;
+  width: 76mm;
+  text-align: center;
+  font-size: 11pt;
+}
+
+.hpm-signature p {
+  margin: 0 0 2mm;
+}
+
+.hpm-signature-space {
+  height: 34mm;
+}
+
+.hpm-signature strong {
+  display: block;
+  border-bottom: 0.35mm solid #000000;
+  font-weight: 400;
+}
+
+.hpm-signature span {
+  display: block;
+}
+
+.hpm-footer-img {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 210mm;
+  height: 21mm;
+  object-fit: fill;
+}
+
+.multi-ctk-page {
+  position: relative;
+  font-family: Calibri, Arial, sans-serif;
+}
+
+.ctk-page-sheet {
+  position: relative;
+  width: 210mm;
+  height: 297mm;
+  overflow: hidden;
+}
+
+.ctk-note-slot {
+  position: absolute;
+  left: 0;
+  top: 4mm;
+  width: 210mm;
+  height: 140mm;
+  overflow: hidden;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+.ctk-note-slot:nth-child(2) {
+  top: 151mm;
+}
+
+.ctk-note {
+  --ctk-content-scale: 0.96;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+  color: #000000;
+  font-family: Calibri, Arial, sans-serif;
+  font-size: 6.1pt;
+  line-height: 1.12;
+  transform: scale(var(--ctk-content-scale));
+  transform-origin: 18mm 0;
+}
+
+.ctk-header-frame {
+  position: absolute;
+  left: 14mm;
+  top: 2mm;
+  width: 105mm;
+  height: 30.2mm;
+  overflow: hidden;
+}
+
+.ctk-header-img {
+  position: absolute;
+  left: -6.6mm;
+  top: -21.3mm;
+  width: 118.7mm;
+  height: 77.5mm;
+  max-width: none;
+}
+
+.ctk-date {
+  position: absolute;
+  right: 18mm;
+  top: 29.5mm;
+  width: 50mm;
+  text-align: left;
+}
+
+.ctk-recipient {
+  position: absolute;
+  left: 18mm;
+  top: 33mm;
+  width: 55mm;
+}
+
+.ctk-recipient div + div {
+  margin-top: 0.7mm;
+}
+
+.ctk-table {
+  position: absolute;
+  left: 18mm;
+  top: 44mm;
+  width: 176mm;
+  font-size: 6pt;
+}
+
+.ctk-table th,
+.ctk-table td {
+  border: 0.25mm solid #000000;
+  padding: 0.45mm 1mm;
+}
+
+.ctk-table th {
+  height: 6.5mm;
+  background: #137f9d;
+  color: #ffffff;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+}
+
+.ctk-table td {
+  height: 6.2mm;
+  line-height: 1.05;
+}
+
+.ctk-col-qty {
+  width: 25mm;
+}
+
+.ctk-col-name {
+  width: 101mm;
+}
+
+.ctk-col-price {
+  width: 28mm;
+}
+
+.ctk-col-total {
+  width: 22mm;
+}
+
+.ctk-total {
+  position: absolute;
+  right: 18mm;
+  top: 100.2mm;
+  display: grid;
+  grid-template-columns: 28mm 22mm;
+  width: 50mm;
+  min-height: 6mm;
+  align-items: center;
+  font-size: 6pt;
+  font-weight: 700;
+}
+
+.ctk-total span,
+.ctk-total strong {
+  padding: 0.6mm 1mm;
+  text-align: right;
+}
+
+.ctk-signature {
+  position: absolute;
+  left: 22mm;
+  top: 108mm;
+  display: grid;
+  grid-template-columns: 55mm 55mm;
+  justify-content: space-between;
+  width: 162mm;
+  font-size: 6pt;
+}
+
+.ctk-signature div {
+  position: relative;
+  height: 29mm;
+}
+
+.ctk-signature div:last-child {
+  text-align: center;
+}
+
+.ctk-signature img {
+  position: absolute;
+  left: 50%;
+  top: 3.5mm;
+  display: block;
+  width: 20mm;
+  height: 20mm;
+  transform: translateX(-50%);
+  object-fit: contain;
+  object-position: center;
+}
+
+.ctk-signature i {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  font-style: normal;
+}
+
+.ctk-signature div:last-child i {
+  right: 0;
+  left: auto;
+}
+
+.multi-pln-page {
+  font-family: "Times New Roman", Times, serif;
+}
+
+.pln-slip {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  color: #000000;
+  font-family: "Times New Roman", Times, serif;
+  font-size: 9pt;
+  line-height: 1.18;
+}
+
+.pln-slip::after {
+  position: absolute;
+  left: -1mm;
+  bottom: 0;
+  width: 168mm;
+  border-bottom: 0.25mm solid #000000;
+  content: "";
+}
+
+.pln-logo {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 22mm;
+  height: 29mm;
+  object-fit: contain;
+}
+
+.pln-slip h2 {
+  position: absolute;
+  left: 64mm;
+  top: 5mm;
+  margin: 0;
+  width: 75mm;
+  font-size: 12pt;
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+}
+
+.pln-row {
+  position: absolute;
+  left: 0;
+  display: grid;
+  grid-template-columns: 32.5mm 12.5mm 1fr;
+  width: 150mm;
+}
+
+.pln-row span {
+  white-space: nowrap;
+}
+
+.pln-row strong {
+  border-bottom: 0.2mm solid #000000;
+  font-weight: 400;
+  line-height: 1.02;
+}
+
+.pln-number {
+  top: 34mm;
+}
+
+.pln-row:nth-of-type(2) {
+  top: 41mm;
+}
+
+.pln-row:nth-of-type(3) {
+  top: 47mm;
+}
+
+.pln-words {
+  position: absolute;
+  left: 47mm;
+  top: 45mm;
+  width: 107mm;
+  height: 9.8mm;
+  border: 0.25mm solid #000000;
+  background: #c9c9c9;
+  transform: skewX(-12deg);
+}
+
+.pln-words span {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 0 3mm;
+  transform: skewX(12deg);
+  font-size: 8.5pt;
+  font-style: italic;
+  line-height: 1.15;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.pln-purpose-label {
+  top: 57.5mm;
+}
+
+.pln-purpose {
+  position: absolute;
+  left: 45mm;
+  top: 56.8mm;
+  width: 104mm;
+  font-size: 9pt;
+  line-height: 1.18;
+}
+
+.pln-purpose div {
+  min-height: 5mm;
+  border-bottom: 0.2mm solid #000000;
+}
+
+.pln-amount {
+  position: absolute;
+  left: 2mm;
+  top: 73.5mm;
+  width: 42mm;
+  height: 9.7mm;
+  border: 0.25mm solid #000000;
+  background: #c9c9c9;
+  transform: skewX(-12deg);
+}
+
+.pln-amount span {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  transform: skewX(12deg);
+  white-space: nowrap;
+}
+
+.pln-signature {
+  position: absolute;
+  left: 81mm;
+  top: 86mm;
+  width: 48mm;
+  text-align: center;
+}
+
+.pln-signature p {
+  margin: 0;
+}
+
+.pln-signature i {
+  display: block;
+  width: 48mm;
+  margin-top: 30mm;
+  border-bottom: 0.25mm solid #000000;
+}
+
+.multi-jasa-page {
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.jasa-slot {
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 6.7pt;
+  line-height: 1.12;
+}
+
+.jasa-slot::after {
+  position: absolute;
+  left: 0;
+  top: 154mm;
+  width: 100mm;
+  border-bottom: 0.3mm solid #0042a4;
+  content: "";
+}
+
+.jasa-header {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: grid;
+  grid-template-columns: 58mm 42mm;
+  width: 100mm;
+  height: 29.5mm;
+}
+
+.jasa-logo {
+  width: 70mm;
+  height: 39mm;
+  object-fit: contain;
+  object-position: left top;
+}
+
+.jasa-recipient {
+  padding-top: 5.2mm;
+  font-size: 6.7pt;
+  line-height: 1.45;
+}
+
+.jasa-recipient div:first-child,
+.jasa-recipient div:nth-child(2) {
+  display: grid;
+  grid-template-columns: 17mm 4mm 1fr;
+}
+
+.jasa-nota-number {
+  position: absolute;
+  left: 0;
+  top: 29.5mm;
+  font-weight: 700;
+}
+
+.jasa-watermark {
+  position: absolute;
+  left: 30mm;
+  top: 63mm;
+  width: 41mm;
+  height: 58mm;
+  object-fit: contain;
+  opacity: 0.18;
+}
+
+.jasa-table {
+  position: absolute;
+  left: 0;
+  top: 32.5mm;
+  width: 100mm;
+  font-size: 6.5pt;
+  z-index: 2;
+}
+
+.jasa-table th,
+.jasa-table td {
+  border: 0.24mm solid #000000;
+  padding: 0.35mm 0.65mm;
+}
+
+.jasa-table th {
+  height: 7.7mm;
+  font-weight: 700;
+  text-align: center;
+}
+
+.jasa-table td {
+  height: 5.65mm;
+  line-height: 1.05;
+}
+
+.jasa-col-qty {
+  width: 17mm;
+}
+
+.jasa-col-name {
+  width: 43mm;
+}
+
+.jasa-col-price {
+  width: 16.5mm;
+}
+
+.jasa-col-total {
+  width: 23.5mm;
+}
+
+.jasa-total {
+  position: absolute;
+  right: 0;
+  top: 119.3mm;
+  display: grid;
+  grid-template-columns: 16.5mm 23.5mm;
+  width: 40mm;
+  height: 6.5mm;
+  align-items: stretch;
+  font-size: 6.5pt;
+  font-weight: 700;
+  z-index: 3;
+}
+
+.jasa-total span,
+.jasa-total strong {
+  display: flex;
+  height: 6.5mm;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0.65mm 0.75mm;
+  text-align: right;
+}
+
+.jasa-total strong {
+  border: 0.24mm solid #000000;
+}
+
+.jasa-footer {
+  position: absolute;
+  left: 0;
+  top: 129.2mm;
+  display: grid;
+  grid-template-columns: 28mm 31mm 28mm;
+  justify-content: space-between;
+  width: 100mm;
+  font-size: 6.5pt;
+}
+
+.jasa-footer div {
+  height: 12mm;
+}
+
+.jasa-footer i {
+  display: none;
+}
+
+.jasa-warning {
+  border: 0.25mm solid #2563eb;
+  padding-top: 0.7mm;
+  color: #2563eb;
+  text-align: center;
+  font-size: 3.9pt;
+  line-height: 1.2;
+}
+
+.stage1-debug-box {
+  display: none;
+}
+
+.stage1-debug-active::before {
+  content: "A4 " attr(data-layout-debug);
+  position: absolute;
+  inset: 0;
+  z-index: 90;
+  pointer-events: none;
+  border: 0.35mm dashed rgba(37, 99, 235, 0.8);
+  color: rgba(37, 99, 235, 0.9);
+  font: 700 7pt Arial, sans-serif;
+  padding: 1.5mm;
+}
+
+.stage1-debug-active .stage1-debug-box {
+  position: absolute;
+  z-index: 91;
+  display: block;
+  pointer-events: none;
+  border: 0.3mm dashed rgba(220, 38, 38, 0.8);
+  background: rgba(254, 226, 226, 0.12);
+}
+
+.stage1-debug-active .stage1-debug-table {
+  border-color: rgba(22, 163, 74, 0.9);
+  background: rgba(220, 252, 231, 0.12);
+}
+
+.stage1-debug-active .stage1-debug-box span {
+  position: absolute;
+  left: 1mm;
+  top: 1mm;
+  background: rgba(255, 255, 255, 0.92);
+  color: #111827;
+  font: 700 6pt Arial, sans-serif;
+  line-height: 1.2;
+  padding: 0.8mm 1mm;
+  white-space: nowrap;
+}
+
+@media print {
+  @page {
+    margin: 0;
+  }
+
+  @page stage1Portrait {
+    size: A4 portrait;
+    margin: 0;
+  }
+
+  @page stage1Landscape {
+    size: A4 landscape;
+    margin: 0;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  body > section[aria-label^="Notifications"],
+  next-route-announcer {
+    display: none !important;
+  }
+
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  html,
+  body,
+  body .min-h-screen {
+    height: auto !important;
+    min-height: 0 !important;
+  }
+
+  main {
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  .print-area {
+    display: block !important;
+    overflow: visible !important;
+    border: 0 !important;
+    background: #ffffff !important;
+    padding: 0 !important;
+  }
+
+  .print-page-shell,
+  .nota-preview-shell {
+    width: auto !important;
+    min-height: auto !important;
+    margin: 0 !important;
+    page-break-after: always;
+  }
+
+  .print-area .print-page-shell:last-child,
+  .print-area .nota-preview-shell:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+
+  .print-page,
+  .nota-sheet {
+    box-shadow: none !important;
+    transform: none !important;
+  }
+
+  .print-page-portrait {
+    page: stage1Portrait;
+    width: 210mm !important;
+    height: 297mm !important;
+    min-height: 297mm !important;
+  }
+
+  .print-page-landscape {
+    page: stage1Landscape;
+    width: 297mm !important;
+    height: 210mm !important;
+    min-height: 210mm !important;
+  }
+
+  .stage1-kwitansi-slip,
+  .kwitansi-slot-position,
+  .stage1-slot-position,
+  .multi-slot-position,
+  .multi-note,
+  .pln-slip,
+  .hpm-document,
+  .ctk-note,
+  .stage1-note-slot,
+  .nota-item,
+  .kwitansi-item,
+  .print-page {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .stage1-debug-box,
+  .stage1-debug-active::before {
+    display: none !important;
+  }
 }
