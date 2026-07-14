@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import XlsxPopulate from "xlsx-populate";
 import { CBS_DOCUMENT_LAYOUT, NOTA_LEFT_MARGIN_INCHES, usesNotaLeftMargin } from "@/constants/document-layout";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
-import { terbilangRupiah } from "@/utils/format";
+import { parseDateInputToIso, terbilangRupiah, todayInIndonesiaIsoDate } from "@/utils/format";
 import { ExcelTemplateRequest, RenderedExcelPdf } from "./types";
 import { resolveExcelTemplate } from "./template-registry";
 import { exportWorkbookBufferToPdf } from "./office-pdf-exporter";
@@ -79,8 +79,9 @@ function formatSafeFileName(value: string) {
 }
 
 function excelDate(value: string) {
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? new Date() : date;
+  const iso = parseDateInputToIso(value) || todayInIndonesiaIsoDate();
+  const [year, month, day] = iso.split("-").map(Number);
+  return new Date(Date.UTC(year, month - 1, day));
 }
 
 function usedBounds(sheet: Sheet) {

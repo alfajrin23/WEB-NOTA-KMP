@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { MotionPage } from "@/components/ui/motion-page";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
+import { todayInIndonesiaIsoDate } from "@/utils/format";
 
 export function SettingsView() {
   const { projects, masterItems, templateAssignments, importStoreData, resetAll } = useKdkmpStore();
@@ -16,7 +17,7 @@ export function SettingsView() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `backup-kdkmp-${new Date().toISOString().slice(0, 10)}.json`;
+    link.download = `backup-kdkmp-${todayInIndonesiaIsoDate()}.json`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   }

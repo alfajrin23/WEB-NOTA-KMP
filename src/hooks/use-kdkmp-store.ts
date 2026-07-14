@@ -11,9 +11,9 @@ import {
   shiftDateLikeStringByDays,
   shiftGeneratedNotaByDays,
   shiftResumeItemsByDays,
-  shiftResumeItemsFromDefault,
   shiftTextDatesByDays,
 } from "@/lib/project-date-shift";
+import { buildResumeItemsForNewProject, latestEditedProject } from "@/lib/resume-history";
 import { findPriceSyncItems } from "@/lib/resume-price-sync";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
 import {
@@ -145,13 +145,13 @@ function normalizeProjects(projects: Project[]) {
 function createLocalProject(
   input: Pick<Project, "projectName" | "villageName" | "districtName" | "regencyName" | "regionName" | "responsibleName" | "projectDate">,
   sourceItems: ResumeItem[],
-  options: { shiftDatesFromDefault?: boolean } = {},
+  options: { historyItems?: ResumeItem[] | null; shiftDatesFromDefault?: boolean } = {},
 ) {
   const id = `project-${crypto.randomUUID()}`;
   const now = new Date().toISOString();
   const items = options.shiftDatesFromDefault === false
     ? sourceItems
-    : shiftResumeItemsFromDefault(sourceItems, input.projectDate);
+    : buildResumeItemsForNewProject(sourceItems, input.projectDate, options.historyItems);
 
   return {
     ...input,
@@ -377,18 +377,23 @@ export function useKdkmpStore() {
   }, [projects, supabaseReady, templateAssignments]);
 
   const createProject = useCallback(async (input: Pick<Project, "projectName" | "villageName" | "districtName" | "regencyName" | "regionName" | "responsibleName" | "projectDate">) => {
+    const historyProject = latestEditedProject(projects);
+
     if (supabaseReady) {
-      const project = await createSupabaseProject(input);
+      const project = await createSupabaseProject(input, {
+        templateItems: masterItems,
+        historyItems: historyProject?.items,
+      });
       setProjects((current) => [project, ...current]);
       toast.success("Project desa tersimpan ke Supabase");
       return project;
     }
 
-    const project = createLocalProject(input, masterItems);
+    const project = createLocalProject(input, masterItems, { historyItems: historyProject?.items });
     setProjects((current) => [project, ...current]);
     toast.warning("Supabase belum dikonfigurasi. Project hanya tersimpan sebagai cache lokal sementara.");
     return project;
-  }, [masterItems, supabaseReady]);
+  }, [masterItems, projects, supabaseReady]);
 
   const duplicateProject = useCallback((projectId: string) => {
     const source = projects.find((project) => project.id === projectId);
@@ -623,7 +628,7 @@ export function useKdkmpStore() {
       ...project,
       status: "draft",
       updatedAt: now,
-      items: shiftResumeItemsFromDefault(masterTemplateItems, project.projectDate).map((item) => ({
+      items: buildResumeItemsForNewProject(masterTemplateItems, project.projectDate).map((item) => ({
         ...item,
         id: `${project.id}-${item.id}`,
       })),

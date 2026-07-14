@@ -1,5 +1,5 @@
 import { GeneratedNota, Project, ResumeItem, StageCode } from "@/types/domain";
-import { terbilangRupiah } from "@/utils/format";
+import { formatDateIndonesia, parseDateInputToIso, terbilangRupiah } from "@/utils/format";
 import { getResumeItemAmount } from "./resume-calculations";
 
 function normalized(value: string | undefined | null) {
@@ -8,24 +8,10 @@ function normalized(value: string | undefined | null) {
 
 function parseDate(value: string | undefined | null) {
   if (!value) return null;
-  const makeDate = (year: number, month: number, day: number) => {
-    const date = new Date(year, month - 1, day);
-    return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day
-      ? date
-      : null;
-  };
-
-  const slash = /^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/.exec(value.trim());
-  if (slash) {
-    const [, day, month, year] = slash;
-    const yearNumber = year.length === 2 ? 2000 + Number(year) : Number(year);
-    return makeDate(yearNumber, Number(month), Number(day));
-  }
-
-  const dash = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(value.trim());
-  if (dash) {
-    const [, year, month, day] = dash;
-    return makeDate(Number(year), Number(month), Number(day));
+  const iso = parseDateInputToIso(value);
+  if (iso) {
+    const [year, month, day] = iso.split("-").map(Number);
+    return new Date(Date.UTC(year, month - 1, day));
   }
 
   const parsed = new Date(value);
@@ -33,24 +19,20 @@ function parseDate(value: string | undefined | null) {
 }
 
 function toDateString(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(date.getUTCDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
 
 function addDays(date: Date, days: number) {
-  const copy = new Date(date);
-  copy.setDate(copy.getDate() + days);
-  return copy;
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
 }
 
 export function formatKwitansiDate(value: string | undefined | null) {
   const date = parseDate(value);
   if (!date) return value ?? "";
-  const day = String(date.getDate()).padStart(2, "0");
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  return `${day}/${month}/${date.getFullYear()}`;
+  return formatDateIndonesia(toDateString(date));
 }
 
 export function getKwitansiAmount(doc: GeneratedNota) {

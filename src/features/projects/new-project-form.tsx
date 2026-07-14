@@ -8,6 +8,7 @@ import { ArrowRight, Building2, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { DateInput } from "@/components/ui/date-input";
 import { Input } from "@/components/ui/input";
 import { MotionPage } from "@/components/ui/motion-page";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
@@ -30,6 +31,7 @@ export function NewProjectForm() {
       projectDate: DEFAULT_PROJECT_START_DATE,
     },
   });
+  const projectDateValue = form.watch("projectDate");
 
   async function submit(values: ProjectFormValues) {
     setSaving(true);
@@ -72,12 +74,24 @@ export function NewProjectForm() {
                   <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
                     {label}{name === "responsibleName" || name === "projectDate" ? " *" : ""}
                   </span>
-                  <Input
-                    type={name === "projectDate" ? "date" : "text"}
-                    required={name === "responsibleName" || name === "projectDate"}
-                    placeholder={name === "responsibleName" ? "Contoh: Sigit Soegiarto" : undefined}
-                    {...form.register(name as keyof ProjectFormValues)}
-                  />
+                  {name === "projectDate" ? (
+                    <>
+                      <input type="hidden" value={projectDateValue} readOnly {...form.register("projectDate")} />
+                      <DateInput
+                        value={projectDateValue}
+                        required
+                        onValueChange={(value) => form.setValue("projectDate", value, { shouldDirty: true, shouldValidate: true })}
+                        onInvalidDate={() => toast.error("Format tanggal harus dd/mm/yyyy.")}
+                      />
+                    </>
+                  ) : (
+                    <Input
+                      type="text"
+                      required={name === "responsibleName"}
+                      placeholder={name === "responsibleName" ? "Contoh: Sigit Soegiarto" : undefined}
+                      {...form.register(name as keyof ProjectFormValues)}
+                    />
+                  )}
                   {form.formState.errors[name as keyof ProjectFormValues]?.message ? (
                     <span className="text-xs text-red-600">{form.formState.errors[name as keyof ProjectFormValues]?.message}</span>
                   ) : null}

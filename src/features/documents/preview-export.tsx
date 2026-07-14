@@ -12,7 +12,7 @@ import { KwitansiBatchTemplate } from "@/components/templates/kwitansi/KwitansiB
 import { isSpecialPLNKwitansi, PLNKwitansiBatchTemplate } from "@/components/templates/multi-stage/PLNTemplate";
 import { buildProjectSummary, hashNotaData } from "@/lib/resume-calculations";
 import { cn } from "@/lib/utils";
-import { formatNumber, formatRupiah } from "@/utils/format";
+import { formatDateIndonesia, formatNumber, formatRupiah } from "@/utils/format";
 import { GeneratedNota, Project, TemplateAssignment } from "@/types/domain";
 
 type PreviewKind = "resume" | "notes";
@@ -141,7 +141,7 @@ export const ResumePrintPreview = memo(function ResumePrintPreview({ project }: 
           <span>Kabupaten: {project.regencyName}</span>
           <span>Wilayah/Kodim: {project.regionName}</span>
           <span>Project: {project.projectName}</span>
-          <span>Tanggal laporan: {project.reportDate ?? project.projectDate}</span>
+          <span>Tanggal laporan: {formatDateIndonesia(project.reportDate ?? project.projectDate)}</span>
         </div>
       </div>
 
@@ -177,7 +177,7 @@ export const ResumePrintPreview = memo(function ResumePrintPreview({ project }: 
               <tbody>
                 {stage.items.map((item) => (
                   <tr key={item.id}>
-                    <td className="border border-slate-300 p-1">{item.expenseDate}</td>
+                    <td className="border border-slate-300 p-1">{formatDateIndonesia(item.expenseDate)}</td>
                     <td className="border border-slate-300 p-1">{item.category}</td>
                     <td className="border border-slate-300 p-1">{item.itemName}</td>
                     <td className="border border-slate-300 p-1 text-right">{formatNumber(item.volume)}</td>

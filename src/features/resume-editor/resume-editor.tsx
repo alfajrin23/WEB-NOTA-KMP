@@ -8,6 +8,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Download, Plus, Redo2, Refres
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateInput } from "@/components/ui/date-input";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -19,7 +20,7 @@ import { buildProjectSummary, buildResumeValidationReport, getComputedAmount, ge
 import { shiftResumeItemsFromDefault } from "@/lib/project-date-shift";
 import { findPriceSyncSiblingItems } from "@/lib/resume-price-sync";
 import { compareResumeItems, mergeResumeItems, ParsedResume, ResumeImportDiff } from "@/lib/resume-import/parser";
-import { formatNumber, formatRupiah } from "@/utils/format";
+import { formatNumber, formatRupiah, formatTimeIndonesia } from "@/utils/format";
 import { ResumeItem, StageCode } from "@/types/domain";
 import { cn } from "@/lib/utils";
 
@@ -496,7 +497,7 @@ export function ResumeEditor() {
           <Card>
             <CardHeader><CardTitle className="text-sm text-slate-500">Validasi & Autosave</CardTitle></CardHeader>
             <CardContent className="flex flex-wrap gap-2">
-              <Badge className="gap-2 bg-emerald-50 text-emerald-700"><Save className="h-3 w-3" />Tersimpan {savedAt.toLocaleTimeString("id-ID")}</Badge>
+              <Badge className="gap-2 bg-emerald-50 text-emerald-700"><Save className="h-3 w-3" />Tersimpan {formatTimeIndonesia(savedAt)}</Badge>
               {stageIssues.length > 0 && <Badge className="gap-2 bg-amber-50 text-amber-700"><AlertTriangle className="h-3 w-3" />{stageIssues.length} warning tahap ini</Badge>}
             </CardContent>
           </Card>
@@ -1059,6 +1060,28 @@ function EditableInput({
       onCommit(draft);
     }
   }, [draft, onCommit, required, requiredMessage, value]);
+
+  if (type === "date") {
+    return (
+      <DateInput
+        value={value}
+        required={required}
+        placeholder={placeholder ?? "dd/mm/yyyy"}
+        onInvalidDate={() => toast.error("Format tanggal harus dd/mm/yyyy.")}
+        onValueChange={(nextValue) => {
+          if (required && !nextValue.trim()) {
+            toast.error(requiredMessage);
+            return;
+          }
+          if (nextValue !== lastCommitted.current) {
+            lastCommitted.current = nextValue;
+            onCommit(nextValue);
+          }
+        }}
+        className={cn("h-9 rounded-lg border-transparent bg-transparent shadow-none hover:border-slate-200 focus:bg-white dark:focus:bg-slate-950", className)}
+      />
+    );
+  }
 
   return (
     <Input

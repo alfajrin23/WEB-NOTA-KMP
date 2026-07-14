@@ -7,13 +7,14 @@ import { ArrowLeft, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateInput } from "@/components/ui/date-input";
 import { Input } from "@/components/ui/input";
 import { MotionPage } from "@/components/ui/motion-page";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { STAGES } from "@/constants/stages";
 import { TEMPLATE_DEFINITIONS, resolveTemplateAssignment } from "@/constants/template-mapping";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
-import { formatRupiah } from "@/utils/format";
+import { formatRupiah, todayInIndonesiaIsoDate } from "@/utils/format";
 import { StageCode } from "@/types/domain";
 
 export function CustomNoteView() {
@@ -25,7 +26,7 @@ export function CustomNoteView() {
   const [stageCode, setStageCode] = useState<StageCode>("TAHAP_I");
   const [vendorId, setVendorId] = useState("vendor-murah-maju");
   const [templateId, setTemplateId] = useState("template-murah-maju");
-  const [tanggal, setTanggal] = useState(new Date().toISOString().slice(0, 10));
+  const [tanggal, setTanggal] = useState(todayInIndonesiaIsoDate());
   const [uraian, setUraian] = useState("");
   const [qty, setQty] = useState(1);
   const [satuan, setSatuan] = useState("Ls");
@@ -148,7 +149,7 @@ export function CustomNoteView() {
 
               <label className="space-y-2">
                 <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Tanggal</span>
-                <Input type="date" value={tanggal} onChange={(event) => setTanggal(event.target.value)} required />
+                <DateInput value={tanggal} onValueChange={setTanggal} required onInvalidDate={() => toast.error("Format tanggal harus dd/mm/yyyy.")} />
               </label>
 
               <label className="space-y-2 md:col-span-2">

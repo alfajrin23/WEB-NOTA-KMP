@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateInput } from "@/components/ui/date-input";
 import { Input } from "@/components/ui/input";
 import { MotionPage } from "@/components/ui/motion-page";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -561,7 +562,17 @@ function EditField({
           className="min-h-20 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-950 shadow-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/15 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50"
         />
       ) : (
-        <Input {...inputProps} value={value} onChange={(event) => onChange(event.target.value)} className="h-9 font-normal" />
+        inputProps.type === "date" ? (
+          <DateInput
+            {...inputProps}
+            value={value}
+            onValueChange={onChange}
+            onInvalidDate={() => toast.error("Format tanggal harus dd/mm/yyyy.")}
+            className="h-9 font-normal"
+          />
+        ) : (
+          <Input {...inputProps} value={value} onChange={(event) => onChange(event.target.value)} className="h-9 font-normal" />
+        )
       )}
     </label>
   );

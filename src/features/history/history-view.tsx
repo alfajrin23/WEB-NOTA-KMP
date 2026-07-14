@@ -6,12 +6,13 @@ import { CalendarDays, FilePlus2, FileText, ReceiptText, Search } from "lucide-r
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DateInput } from "@/components/ui/date-input";
 import { Input } from "@/components/ui/input";
 import { MotionPage } from "@/components/ui/motion-page";
 import { groupDocumentsForPresentation } from "@/lib/pln-document-groups";
 import { buildProjectSummary } from "@/lib/resume-calculations";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
-import { formatRupiah } from "@/utils/format";
+import { formatDateIndonesia, formatDateTimeIndonesia, formatRupiah } from "@/utils/format";
 
 export function HistoryView() {
   const { projects, vendors, generatedNotas, customNotes, history, loading } = useKdkmpStore();
@@ -65,11 +66,11 @@ export function HistoryView() {
               </div>
               <div className="relative">
                 <CalendarDays className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                <Input className="pl-9" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
+                <DateInput className="pl-9" value={dateFrom} onValueChange={setDateFrom} aria-label="Tanggal mulai" />
               </div>
               <div className="relative">
                 <CalendarDays className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                <Input className="pl-9" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
+                <DateInput className="pl-9" value={dateTo} onValueChange={setDateTo} aria-label="Tanggal akhir" />
               </div>
             </div>
           </CardContent>
@@ -98,7 +99,7 @@ export function HistoryView() {
                   <div className="grid gap-2 text-sm md:grid-cols-3">
                     <div>
                       <p className="text-xs font-semibold text-slate-500">Tanggal laporan</p>
-                      <p>{project.reportDate ?? project.projectDate}</p>
+                      <p>{formatDateIndonesia(project.reportDate ?? project.projectDate)}</p>
                     </div>
                     <div>
                       <p className="text-xs font-semibold text-slate-500">Total resume</p>
@@ -106,7 +107,7 @@ export function HistoryView() {
                     </div>
                     <div>
                       <p className="text-xs font-semibold text-slate-500">Aktivitas terakhir</p>
-                      <p>{lastHistory ? `${lastHistory.description} (${new Date(lastHistory.createdAt).toLocaleString("id-ID")})` : "Belum ada history proses."}</p>
+                      <p>{lastHistory ? `${lastHistory.description} (${formatDateTimeIndonesia(lastHistory.createdAt)})` : "Belum ada history proses."}</p>
                     </div>
                   </div>
                   <div className="flex flex-wrap justify-start gap-2 lg:justify-end">

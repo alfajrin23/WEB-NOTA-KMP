@@ -1,6 +1,6 @@
 import { getResumeItemAmount } from "@/lib/resume-calculations";
 import { GeneratedNota, Project, ResumeItem } from "@/types/domain";
-import { terbilangRupiah } from "@/utils/format";
+import { addDaysIsoDate, formatDateIndonesia, formatDateLongIndonesia, terbilangRupiah } from "@/utils/format";
 
 export type MultiStageTemplateProps = {
   doc: GeneratedNota;
@@ -31,30 +31,15 @@ export function formatRupiahWithDot(value: number) {
 }
 
 export function formatDateSlash(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return value || "";
-  return new Intl.DateTimeFormat("id-ID", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date);
+  return formatDateIndonesia(value);
 }
 
 export function formatDateLong(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return value || "";
-  return new Intl.DateTimeFormat("id-ID", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  }).format(date);
+  return formatDateLongIndonesia(value);
 }
 
 export function addDays(value: string, days: number) {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return value;
-  date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
+  return addDaysIsoDate(value, days);
 }
 
 export function itemAmount(item: ResumeItem) {

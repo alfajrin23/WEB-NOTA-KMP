@@ -1,6 +1,6 @@
 import { GeneratedNota, Project, ResumeItem } from "@/types/domain";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
-import { terbilangRupiah } from "@/utils/format";
+import { formatDateIndonesia, terbilangRupiah } from "@/utils/format";
 
 export type Stage1TemplateProps = {
   doc: GeneratedNota;
@@ -25,13 +25,7 @@ export function formatPlainNumber(value: number) {
 }
 
 export function formatDateSlash(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.valueOf())) return value || "";
-  return new Intl.DateTimeFormat("id-ID", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date);
+  return formatDateIndonesia(value);
 }
 
 export function itemAmount(item: ResumeItem) {

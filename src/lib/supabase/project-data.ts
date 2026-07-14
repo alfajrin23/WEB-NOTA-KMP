@@ -6,6 +6,7 @@ import { getStageLabel } from "@/constants/stages";
 import { initialProjects, masterTemplateItems, vendors } from "@/constants/seed-data";
 import { generateKwitansiDocuments, generateNotaDocuments } from "@/lib/nota-generator";
 import { shiftResumeItemsFromDefault } from "@/lib/project-date-shift";
+import { buildResumeItemsForNewProject } from "@/lib/resume-history";
 import { buildProjectSummary, getResumeItemAmount } from "@/lib/resume-calculations";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
@@ -194,6 +195,17 @@ function asOptionalNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : undefined;
 }
 
+function latestTimestamp(values: Array<string | null | undefined>): string {
+  const fallback = new Date().toISOString();
+  return values.reduce((latest, value) => {
+    const current = Date.parse(value ?? "");
+    const previous = Date.parse(latest ?? "");
+    if (!Number.isFinite(current)) return latest;
+    if (!Number.isFinite(previous) || current > previous) return value ?? latest;
+    return latest;
+  }, values[0] ?? fallback) ?? fallback;
+}
+
 function customString(custom: JsonRecord, key: string, fallback: string | undefined) {
   return Object.prototype.hasOwnProperty.call(custom, key) ? asString(custom[key]) : fallback;
 }
@@ -271,10 +283,11 @@ function rowToResumeItem(row: ResumeItemRow): ResumeItem {
 
 function rowToProject(row: ProjectRow, itemRows: ResumeItemRow[]): Project {
   const meta = asRecord(row.metadata_json);
-  const items = itemRows
-    .filter((item) => item.project_id === row.id)
+  const projectItemRows = itemRows.filter((item) => item.project_id === row.id);
+  const items = projectItemRows
     .map(rowToResumeItem)
     .sort((a, b) => a.sortOrder - b.sortOrder);
+  const updatedAt = latestTimestamp([row.updated_at, ...projectItemRows.map((item) => item.updated_at)]);
 
   return {
     id: row.id,
@@ -297,7 +310,7 @@ function rowToProject(row: ProjectRow, itemRows: ResumeItemRow[]): Project {
     metadataJson: meta,
     status: row.status,
     createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    updatedAt,
     items,
   };
 }
@@ -677,6 +690,7 @@ export async function fetchProjectBundle(): Promise<ProjectBundle> {
 
 export async function createSupabaseProject(
   input: Pick<Project, "projectName" | "villageName" | "districtName" | "regencyName" | "regionName" | "responsibleName" | "projectDate">,
+  options: { templateItems?: ResumeItem[]; historyItems?: ResumeItem[] | null } = {},
 ) {
   const client = ensureClient(supabase());
   const invoiceRecipientName = `KDKMP Desa ${input.villageName}`;
@@ -710,7 +724,11 @@ export async function createSupabaseProject(
   if (projectError) throw projectError;
 
   const projectId = (projectRow as ProjectRow).id;
-  const rows = shiftResumeItemsFromDefault(masterTemplateItems, input.projectDate).map((item) => resumeItemToRow(projectId, item));
+  const rows = buildResumeItemsForNewProject(
+    options.templateItems ?? masterTemplateItems,
+    input.projectDate,
+    options.historyItems,
+  ).map((item) => resumeItemToRow(projectId, item));
   const { data: itemRows, error: itemError } = await client.from("resume_items").insert(rows).select("*");
 
   if (itemError) {

@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PDFDocument, PageSizes, StandardFonts, rgb } from "pdf-lib";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
-import { terbilangRupiah } from "@/utils/format";
+import { formatDateIndonesia, terbilangRupiah } from "@/utils/format";
 import { ExcelTemplateRequest, RenderedExcelPdf } from "./types";
 
 const A4 = PageSizes.A4;
@@ -16,13 +16,7 @@ function safeFileName(value: string) {
 }
 
 function formatDateRange(dateValue: string) {
-  const date = new Date(dateValue);
-  if (Number.isNaN(date.valueOf())) return dateValue;
-  return new Intl.DateTimeFormat("id-ID", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(date);
+  return formatDateIndonesia(dateValue);
 }
 
 function chunk<T>(items: T[], size: number) {
