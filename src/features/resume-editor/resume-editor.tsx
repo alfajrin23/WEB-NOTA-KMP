@@ -8,6 +8,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Download, Plus, Redo2, Refres
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { DateInput } from "@/components/ui/date-input";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -20,7 +21,7 @@ import { buildProjectSummary, buildResumeValidationReport, getComputedAmount, ge
 import { shiftResumeItemsFromDefault } from "@/lib/project-date-shift";
 import { findPriceSyncSiblingItems } from "@/lib/resume-price-sync";
 import { compareResumeItems, mergeResumeItems, ParsedResume, ResumeImportDiff } from "@/lib/resume-import/parser";
-import { formatNumber, formatRupiah, formatTimeIndonesia } from "@/utils/format";
+import { formatNumber, formatRupiah, formatThousands, formatTimeIndonesia, numericInputValue } from "@/utils/format";
 import { ResumeItem, StageCode } from "@/types/domain";
 import { cn } from "@/lib/utils";
 
@@ -284,7 +285,14 @@ export function ResumeEditor() {
     {
       header: "Tanggal",
       accessorKey: "expenseDate",
-      cell: ({ row }) => <EditableInput type="date" value={row.original.expenseDate} onCommit={(value) => patch(row.original, { expenseDate: value })} />,
+      cell: ({ row }) => (
+        <EditableInput
+          type="date"
+          value={row.original.expenseDate}
+          className="w-32 min-w-32 whitespace-nowrap text-center tabular-nums"
+          onCommit={(value) => patch(row.original, { expenseDate: value })}
+        />
+      ),
     },
     {
       header: "Tahap",
@@ -322,7 +330,7 @@ export function ResumeEditor() {
       accessorKey: "unitPrice",
       cell: ({ row }) => (
         <EditableInput
-          type="number"
+          type="currency"
           value={row.original.unitPrice.toString()}
           className="w-32 text-right"
           onCommit={(value) => handleUnitPriceCommit(row.original, value)}
@@ -346,9 +354,9 @@ export function ResumeEditor() {
       accessorKey: "amountOverride",
       cell: ({ row }) => (
         <EditableInput
-          type="number"
+          type="currency"
           value={row.original.amountOverride?.toString() ?? ""}
-          placeholder={getComputedAmount(row.original).toString()}
+          placeholder={formatThousands(getComputedAmount(row.original))}
           className="w-36 text-right"
           onCommit={(value) => patch(row.original, { amountOverride: value.trim() ? Number(value) : null })}
         />
@@ -621,7 +629,7 @@ function parseRupiahInput(value: string) {
   if (!trimmed) return { status: "empty" as const, value: null };
   if (trimmed.includes("-")) return { status: "invalid" as const, value: null };
 
-  const digits = trimmed.replace(/\D/g, "");
+  const digits = numericInputValue(trimmed);
   if (!digits) return { status: "invalid" as const, value: null };
 
   const amount = Number(digits);
@@ -630,7 +638,7 @@ function parseRupiahInput(value: string) {
 }
 
 function formatTargetInput(value: number | null | undefined) {
-  return typeof value === "number" && Number.isFinite(value) ? formatRupiah(value) : "";
+  return typeof value === "number" && Number.isFinite(value) ? formatThousands(value) : "";
 }
 
 function ResumeTargetPanel({
@@ -696,8 +704,8 @@ function ResumeTargetPanel({
           <Input
             value={draft}
             inputMode="numeric"
-            placeholder="Rp 0"
-            onChange={(event) => setDraft(event.target.value)}
+            placeholder="0"
+            onChange={(event) => setDraft(formatThousands(event.target.value))}
             onBlur={commit}
             onKeyDown={(event) => {
               if (event.key === "Enter") event.currentTarget.blur();
@@ -1077,6 +1085,22 @@ function EditableInput({
             lastCommitted.current = nextValue;
             onCommit(nextValue);
           }
+        }}
+        className={cn("h-9 rounded-lg border-transparent bg-transparent shadow-none hover:border-slate-200 focus:bg-white dark:focus:bg-slate-950", className)}
+      />
+    );
+  }
+
+  if (type === "currency") {
+    return (
+      <CurrencyInput
+        value={draft}
+        placeholder={placeholder}
+        required={required}
+        onValueChange={(value) => setDraft(value)}
+        onBlur={flush}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
         }}
         className={cn("h-9 rounded-lg border-transparent bg-transparent shadow-none hover:border-slate-200 focus:bg-white dark:focus:bg-slate-950", className)}
       />

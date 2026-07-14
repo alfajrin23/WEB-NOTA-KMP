@@ -165,7 +165,7 @@ export const ResumePrintPreview = memo(function ResumePrintPreview({ project }: 
             <table className="w-full border-collapse text-[10px]">
               <thead>
                 <tr className="bg-slate-100">
-                  <th className="border border-slate-300 p-1 text-left">Tanggal</th>
+                  <th className="min-w-20 whitespace-nowrap border border-slate-300 p-1 text-left">Tanggal</th>
                   <th className="border border-slate-300 p-1 text-left">Kategori</th>
                   <th className="border border-slate-300 p-1 text-left">Uraian</th>
                   <th className="border border-slate-300 p-1 text-right">Qty</th>
@@ -177,7 +177,7 @@ export const ResumePrintPreview = memo(function ResumePrintPreview({ project }: 
               <tbody>
                 {stage.items.map((item) => (
                   <tr key={item.id}>
-                    <td className="border border-slate-300 p-1">{formatDateIndonesia(item.expenseDate)}</td>
+                    <td className="whitespace-nowrap border border-slate-300 p-1 tabular-nums">{formatDateIndonesia(item.expenseDate)}</td>
                     <td className="border border-slate-300 p-1">{item.category}</td>
                     <td className="border border-slate-300 p-1">{item.itemName}</td>
                     <td className="border border-slate-300 p-1 text-right">{formatNumber(item.volume)}</td>

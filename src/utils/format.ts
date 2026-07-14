@@ -12,6 +12,18 @@ export function formatNumber(value: number) {
   }).format(value);
 }
 
+export function formatThousands(value: number | string | null | undefined) {
+  const text = String(value ?? "").replace(/\D/g, "");
+  if (!text) return "";
+  return new Intl.NumberFormat("id-ID", {
+    maximumFractionDigits: 0,
+  }).format(Number(text));
+}
+
+export function numericInputValue(value: string | number | null | undefined) {
+  return String(value ?? "").replace(/\D/g, "");
+}
+
 export const INDONESIA_LOCALE = "id-ID";
 export const INDONESIA_TIME_ZONE = "Asia/Jakarta";
 

@@ -7,6 +7,7 @@ import { ArrowLeft, Loader2, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { DateInput } from "@/components/ui/date-input";
 import { Input } from "@/components/ui/input";
 import { MotionPage } from "@/components/ui/motion-page";
@@ -14,7 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { STAGES } from "@/constants/stages";
 import { TEMPLATE_DEFINITIONS, resolveTemplateAssignment } from "@/constants/template-mapping";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
-import { formatRupiah, todayInIndonesiaIsoDate } from "@/utils/format";
+import { formatRupiah, formatThousands, numericInputValue, todayInIndonesiaIsoDate } from "@/utils/format";
 import { StageCode } from "@/types/domain";
 
 export function CustomNoteView() {
@@ -39,7 +40,7 @@ export function CustomNoteView() {
     return TEMPLATE_DEFINITIONS.filter((template) => template.stageCodes.includes(stageCode));
   }, [stageCode]);
 
-  const total = jumlahOverride.trim() ? Number(jumlahOverride) || 0 : qty * hargaSatuan;
+  const total = jumlahOverride.trim() ? Number(numericInputValue(jumlahOverride)) || 0 : qty * hargaSatuan;
 
   function applyDefaultTemplate(nextStage: StageCode, nextVendorId: string) {
     const assignment = resolveTemplateAssignment(nextStage, nextVendorId);
@@ -65,7 +66,7 @@ export function CustomNoteView() {
         qty,
         satuan,
         hargaSatuan,
-        jumlahOverride: jumlahOverride.trim() ? Number(jumlahOverride) : null,
+        jumlahOverride: jumlahOverride.trim() ? Number(numericInputValue(jumlahOverride)) : null,
         alasan,
       });
       router.push(`/projects/${project.id}/cek-nota`);
@@ -169,12 +170,12 @@ export function CustomNoteView() {
 
               <label className="space-y-2">
                 <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Harga Satuan</span>
-                <Input type="number" value={hargaSatuan} onChange={(event) => setHargaSatuan(Number(event.target.value))} required />
+                <CurrencyInput value={hargaSatuan} onValueChange={(value) => setHargaSatuan(Number(value || 0))} required />
               </label>
 
               <label className="space-y-2">
                 <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Override Total</span>
-                <Input type="number" value={jumlahOverride} placeholder={(qty * hargaSatuan).toString()} onChange={(event) => setJumlahOverride(event.target.value)} />
+                <CurrencyInput value={jumlahOverride} placeholder={formatThousands(qty * hargaSatuan)} onValueChange={setJumlahOverride} />
               </label>
 
               <label className="space-y-2 md:col-span-2">

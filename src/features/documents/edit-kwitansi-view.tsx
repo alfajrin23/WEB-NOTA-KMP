@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { DateInput } from "@/components/ui/date-input";
 import { Input } from "@/components/ui/input";
 import { MotionPage } from "@/components/ui/motion-page";
@@ -24,7 +25,7 @@ import {
 } from "@/lib/kwitansi-fields";
 import { getKwitansiGenerationDiagnostics, KWITANSI_TARGET_COUNTS } from "@/lib/nota-generator";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
-import { formatRupiah } from "@/utils/format";
+import { formatRupiah, numericInputValue } from "@/utils/format";
 import { GeneratedNota, Project, StageCode } from "@/types/domain";
 
 type CoreStageCode = Exclude<StageCode, "RESUME_ALL">;
@@ -284,7 +285,7 @@ export function EditKwitansiView() {
 
   const saveDraft = useCallback(async () => {
     if (!editingDoc || !draft || saving) return;
-    const amount = Number(draft.amount);
+    const amount = Number(numericInputValue(draft.amount));
     if (!draft.amount.trim() || !Number.isFinite(amount) || amount < 0) {
       toast.error("Nominal kwitansi harus berupa angka yang valid.");
       return;
@@ -491,7 +492,7 @@ export function EditKwitansiView() {
                   <EditField label="Tanggal kwitansi" type="date" value={draft.date} onChange={updateDraftDate} required />
                   <EditField label="Telah terima dari" value={draft.payer} onChange={(value) => setDraft((current) => current ? { ...current, payer: value } : current)} required />
                   <EditField label="Nama penerima" value={draft.receiver} onChange={(value) => setDraft((current) => current ? { ...current, receiver: value } : current)} required />
-                  <EditField label="Nominal" type="number" min="0" step="1" value={draft.amount} onChange={(value) => setDraft((current) => current ? { ...current, amount: value } : current)} required />
+                  <EditField label="Nominal" type="currency" min="0" step="1" value={draft.amount} onChange={(value) => setDraft((current) => current ? { ...current, amount: value } : current)} required />
                   <EditField label="Nama desa / lokasi pekerjaan" value={draft.location} onChange={(value) => setDraft((current) => current ? { ...current, location: value } : current)} />
                   <EditField label="Jenis pekerjaan / jabatan" value={draft.role} onChange={updateDraftRole} />
                   <label className="space-y-1 text-xs font-semibold text-slate-600 dark:text-slate-300">
@@ -568,6 +569,13 @@ function EditField({
             value={value}
             onValueChange={onChange}
             onInvalidDate={() => toast.error("Format tanggal harus dd/mm/yyyy.")}
+            className="h-9 font-normal"
+          />
+        ) : inputProps.type === "currency" ? (
+          <CurrencyInput
+            {...inputProps}
+            value={value}
+            onValueChange={onChange}
             className="h-9 font-normal"
           />
         ) : (

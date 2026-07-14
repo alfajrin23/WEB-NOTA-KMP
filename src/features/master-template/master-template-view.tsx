@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { FileSpreadsheet, Search, Settings2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { CurrencyInput } from "@/components/ui/currency-input";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
@@ -186,7 +187,7 @@ export function MasterTemplateView() {
                       <td className="px-3 py-2"><Input value={item.itemName} onChange={(event) => updateMasterItem(item.id, { itemName: event.target.value })} /></td>
                       <td className="px-3 py-2"><Input className="w-24 text-right" type="number" value={item.volume} onChange={(event) => updateMasterItem(item.id, { volume: Number(event.target.value) })} /></td>
                       <td className="px-3 py-2"><Input className="w-24" value={item.unit} onChange={(event) => updateMasterItem(item.id, { unit: event.target.value })} /></td>
-                      <td className="px-3 py-2"><Input className="w-32 text-right" type="number" value={item.unitPrice} onChange={(event) => updateMasterItem(item.id, { unitPrice: Number(event.target.value) })} /></td>
+                      <td className="px-3 py-2"><CurrencyInput className="w-32" value={item.unitPrice} onValueChange={(value) => updateMasterItem(item.id, { unitPrice: Number(value || 0) })} /></td>
                       <td className="px-3 py-2">
                         <select className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm dark:border-slate-800 dark:bg-slate-950" value={item.vendorId} onChange={(event) => updateMasterItem(item.id, { vendorId: event.target.value })}>
                           {vendors.map((vendor) => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}

@@ -570,7 +570,7 @@ function applyTemplatePrintLayout(sheet: Sheet, templateId: string, allocations:
   const printableSheet = sheet as SheetWithPrintLayout;
   const nextUnusedTable = allocations[activeNotes]?.table;
   const endRow = nextUnusedTable
-    ? Math.max(1, nextUnusedTable.startRow - 13)
+    ? Math.max(1, nextUnusedTable.startRow - 4)
     : usedBounds(sheet).endRow;
   printableSheet.definedName("_xlnm.Print_Area", printableSheet.range(`A1:H${endRow}`));
 
@@ -581,10 +581,10 @@ function applyTemplatePrintLayout(sheet: Sheet, templateId: string, allocations:
     noteIndex < activeNotes;
     noteIndex += CBS_DOCUMENT_LAYOUT.notesPerPage
   ) {
-    const nextPageStart = Math.max(1, allocations[noteIndex].table.startRow - 11);
+    const nextPageStart = Math.max(1, allocations[noteIndex].table.startRow - 4);
     // OOXML menyimpan horizontal break sebagai baris terakhir halaman.
-    // Sisakan satu row kosong agar gambar/logo blok berikutnya tidak bleed.
-    printableSheet.row(Math.max(1, nextPageStart - 2)).addPageBreak();
+    // Sisakan satu row kosong agar footer halaman sebelumnya tetap utuh.
+    printableSheet.row(Math.max(1, nextPageStart - 1)).addPageBreak();
   }
 
   // XlsxPopulate mempertahankan pageSetup bawaan, tetapi belum menyediakan
@@ -604,7 +604,7 @@ function applyTemplatePrintLayout(sheet: Sheet, templateId: string, allocations:
   pageSetup.attributes.paperSize = 9;
   pageSetup.attributes.orientation = "portrait";
   pageSetup.attributes.scale = Number.isFinite(currentScale) && currentScale > 0
-    ? Math.max(10, Math.round(currentScale * CBS_DOCUMENT_LAYOUT.exportScaleFactor))
+    ? Math.max(10, Math.min(CBS_DOCUMENT_LAYOUT.exportScaleFallback, Math.round(currentScale * CBS_DOCUMENT_LAYOUT.exportScaleFactor)))
     : CBS_DOCUMENT_LAYOUT.exportScaleFallback;
   delete pageSetup.attributes.fitToWidth;
   delete pageSetup.attributes.fitToHeight;

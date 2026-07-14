@@ -11,3 +11,44 @@ Creating turbopack project { dir: 'D:\\WEB NOTA KMP', testMode: true }
 
  GET / 200 in 508ms (next.js: 169ms, application-code: 339ms)
  GET / 200 in 207ms (next.js: 45ms, application-code: 161ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/cek-nota 200 in 603ms (next.js: 517ms, application-code: 86ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/cek-nota 200 in 74ms (next.js: 11ms, application-code: 62ms)
+ GET / 200 in 31ms (next.js: 5ms, application-code: 26ms)
+ GET /history 200 in 54ms (next.js: 27ms, application-code: 27ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/export 200 in 440ms (next.js: 406ms, application-code: 33ms)
+ GET /history 200 in 40ms (next.js: 7ms, application-code: 33ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 528ms (next.js: 487ms, application-code: 41ms)
+✓ Compiled in 95ms
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 96ms (next.js: 55ms, application-code: 41ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 29ms (next.js: 3ms, application-code: 25ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 24ms (next.js: 5ms, application-code: 19ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 27ms (next.js: 3ms, application-code: 24ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 24ms (next.js: 3ms, application-code: 21ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 23ms (next.js: 3ms, application-code: 19ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 47ms (next.js: 3ms, application-code: 44ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 50ms (next.js: 3ms, application-code: 47ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 57ms (next.js: 4ms, application-code: 53ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 57ms (next.js: 3ms, application-code: 54ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 27ms (next.js: 5ms, application-code: 22ms)
+✓ Compiled in 65ms
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 106ms (next.js: 38ms, application-code: 68ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 63ms (next.js: 4ms, application-code: 58ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 22ms (next.js: 4ms, application-code: 19ms)
+✓ Compiled in 90ms
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 78ms (next.js: 47ms, application-code: 31ms)
+✓ Compiled in 127ms
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 70ms (next.js: 44ms, application-code: 26ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 23ms (next.js: 4ms, application-code: 20ms)
+✓ Compiled in 118ms
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 63ms (next.js: 39ms, application-code: 24ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 65ms (next.js: 42ms, application-code: 23ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 23ms (next.js: 4ms, application-code: 19ms)
+✓ Compiled in 97ms
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 73ms (next.js: 45ms, application-code: 28ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 32ms (next.js: 4ms, application-code: 28ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 23ms (next.js: 4ms, application-code: 19ms)
+✓ Compiled in 51ms
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 93ms (next.js: 39ms, application-code: 54ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 62ms (next.js: 4ms, application-code: 58ms)
+ GET /projects/a07188f8-a638-4424-a32b-bb302c1243ba/resume 200 in 36ms (next.js: 4ms, application-code: 32ms)
+ GET / 200 in 387ms (next.js: 54ms, application-code: 333ms)

@@ -140,7 +140,7 @@ function CBSSlot({
 
       <footer className="cbs-signatures" data-overlap-role="signature">
         <div>
-          <span>Prepered By</span>
+          <span>Prepared By</span>
           <i />
         </div>
         <div>
