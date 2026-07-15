@@ -30,6 +30,7 @@ import {
   generateAndPersistKwitansi,
   generateAndPersistNotes,
   isSupabaseConfigured,
+  KwitansiEditInput,
   mergeBundleWithGenerated,
   ProjectBundle,
   readCachedProjectBundle,
@@ -793,7 +794,7 @@ export function useKdkmpStore() {
         // Hasil insert sudah valid dan langsung ditampilkan. Sinkronisasi penuh
         // berikutnya akan mengambil kembali metadata edit bila fetch ini gagal.
       }
-      toast.success(`${docs.length} kwitansi tahapan tersimpan ke Supabase`);
+      toast.success(`${docs.length} kwitansi tersimpan ke Supabase`);
       return docs;
     }
 
@@ -824,19 +825,18 @@ export function useKdkmpStore() {
     setGeneratedNotas(nextDocs);
 
     const locksAmountToResume = isSpecialPLNKwitansi(nextDoc);
-    const input = {
-      namaPenerima: nextDoc.kwitansiReceiverName ?? "",
-      warnaTemplate: nextDoc.warnaTemplate ?? "default",
-      noKwitansi: nextDoc.kwitansiNumber ?? "",
-      namaPemberi: nextDoc.kwitansiPayerName ?? "",
-      keterangan: nextDoc.kwitansiPaymentDescription ?? "",
-      jabatan: nextDoc.kwitansiRoleName ?? "",
-      catatan: nextDoc.kwitansiNote ?? "",
-      nominal: locksAmountToResume ? null : nextDoc.kwitansiAmount ?? null,
-      uangSejumlah: locksAmountToResume ? "" : nextDoc.kwitansiAmountWords ?? "",
-      tanggalKwitansi: nextDoc.kwitansiDate ?? "",
-      kota: nextDoc.kwitansiCity ?? "",
-    };
+    const input: KwitansiEditInput = {};
+    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiReceiverName")) input.namaPenerima = nextDoc.kwitansiReceiverName ?? "";
+    if (Object.prototype.hasOwnProperty.call(patch, "warnaTemplate")) input.warnaTemplate = nextDoc.warnaTemplate ?? "default";
+    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiNumber")) input.noKwitansi = nextDoc.kwitansiNumber ?? "";
+    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiPayerName")) input.namaPemberi = nextDoc.kwitansiPayerName ?? "";
+    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiPaymentDescription")) input.keterangan = nextDoc.kwitansiPaymentDescription ?? "";
+    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiRoleName")) input.jabatan = nextDoc.kwitansiRoleName ?? "";
+    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiNote")) input.catatan = nextDoc.kwitansiNote ?? "";
+    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiAmount")) input.nominal = locksAmountToResume ? null : nextDoc.kwitansiAmount ?? null;
+    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiAmountWords")) input.uangSejumlah = locksAmountToResume ? "" : nextDoc.kwitansiAmountWords ?? "";
+    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiDate")) input.tanggalKwitansi = nextDoc.kwitansiDate ?? "";
+    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiCity")) input.kota = nextDoc.kwitansiCity ?? "";
     const previousSave = kwitansiSaveQueuesRef.current.get(noteId) ?? Promise.resolve(null);
     const save = previousSave
       .catch(() => null)

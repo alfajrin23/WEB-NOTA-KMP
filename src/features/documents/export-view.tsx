@@ -21,6 +21,10 @@ function docsForStage(docs: GeneratedNota[], stageCode: StageCode) {
   return docs.filter((doc) => doc.stageCode === stageCode);
 }
 
+function stageLabel(stageCode: StageCode) {
+  return stageCode === "RESUME_ALL" ? "DI LUAR PEKERJAAN INTI" : getStageLabel(stageCode);
+}
+
 function docSortRank(doc: GeneratedNota) {
   const stageIndex = STAGES.findIndex((stage) => stage.code === doc.stageCode);
   if (doc.vendorId === "vendor-pln" && doc.stageCode === "TAHAP_IV") return 390 + (doc.printOrder ?? 0) / 100;
@@ -121,7 +125,7 @@ export function ExportView() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-sm"><ReceiptText className="h-4 w-4 text-indigo-600" />Semua Kwitansi</CardTitle>
-              <CardDescription>{kwitansiDocs.length} kwitansi tahapan.</CardDescription>
+              <CardDescription>{kwitansiDocs.length} kwitansi.</CardDescription>
             </CardHeader>
             <CardContent>
               <Button
@@ -182,12 +186,12 @@ export function ExportView() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Download/Cetak Kwitansi per Tahap</CardTitle>
+            <CardTitle>Download/Cetak Kwitansi per Kelompok</CardTitle>
             <CardDescription>Kwitansi dipaketkan 4 slip per halaman A4 dan terpisah dari nota.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {STAGES.filter((stage) => stage.code !== "RESUME_ALL").map((stage) => {
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+              {STAGES.map((stage) => {
                 const stageDocs = docsForStage(kwitansiDocs, stage.code);
                 return (
                   <Button
@@ -196,14 +200,14 @@ export function ExportView() {
                     disabled={stageDocs.length === 0}
                     onClick={() => setPayload({
                       kind: "notes",
-                      title: `Preview Kwitansi ${stage.label} - Desa ${project.villageName}`,
+                      title: `Preview Kwitansi ${stageLabel(stage.code)} - Desa ${project.villageName}`,
                       project,
                       docs: stageDocs,
                       fileName: `kwitansi-${stage.shortLabel}-${project.villageName}`,
                     })}
                   >
                     <Download className="h-4 w-4" />
-                    {stage.shortLabel}
+                    {stage.code === "RESUME_ALL" ? "Di Luar Pekerjaan Inti" : stage.shortLabel}
                     <Badge className="ml-auto">{stageDocs.length}</Badge>
                   </Button>
                 );
@@ -231,7 +235,7 @@ export function ExportView() {
                 <thead className="bg-slate-50 text-xs uppercase text-slate-500 dark:bg-slate-900">
                   <tr>
                     <th className="px-4 py-3">Dokumen</th>
-                    <th className="px-4 py-3">Tahap</th>
+                    <th className="px-4 py-3">Kelompok</th>
                     <th className="px-4 py-3">Item</th>
                     <th className="px-4 py-3 text-right">Total</th>
                     <th className="px-4 py-3 text-right">Aksi</th>
@@ -247,7 +251,7 @@ export function ExportView() {
                         <p className="font-semibold">{doc.templateName} - {doc.vendorName}</p>
                         <p className="text-xs text-slate-500">{doc.source === "custom" ? "Nota tambahan" : "Generated otomatis"}</p>
                       </td>
-                      <td className="px-4 py-3">{getStageLabel(doc.stageCode)}</td>
+                      <td className="px-4 py-3">{stageLabel(doc.stageCode)}</td>
                       <td className="px-4 py-3">{itemLabel}</td>
                       <td className="px-4 py-3 text-right font-semibold">{formatRupiah(entry.totalAmount)}</td>
                       <td className="px-4 py-3 text-right">
@@ -298,7 +302,7 @@ export function ExportView() {
                         <p className="font-semibold">{doc.templateName}</p>
                         <p className="text-xs text-slate-500">{doc.kwitansiReceiverName || "Nama penerima belum diedit"}</p>
                       </td>
-                      <td className="px-4 py-3">{getStageLabel(doc.stageCode)}</td>
+                      <td className="px-4 py-3">{stageLabel(doc.stageCode)}</td>
                       <td className="px-4 py-3">{doc.items.length}</td>
                       <td className="px-4 py-3 text-right font-semibold">{formatRupiah(doc.totalAmount)}</td>
                       <td className="px-4 py-3 text-right">
@@ -323,7 +327,7 @@ export function ExportView() {
                   ))}
                   {filteredKwitansiDocs.length === 0 ? (
                     <tr>
-                      <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={5}>Belum ada kwitansi tahapan.</td>
+                      <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={5}>Belum ada kwitansi.</td>
                     </tr>
                   ) : null}
                 </tbody>

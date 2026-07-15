@@ -46,7 +46,7 @@ export const TEMPLATE_DEFINITIONS: TemplateDefinition[] = [
   },
   {
     id: "kwitansi-luar-inti",
-    label: "KWITANSI DILUAR PEKERJAAN INTI",
+    label: "KWITANSI DI LUAR PEKERJAAN INTI",
     documentType: "kwitansi",
     stageCodes: ["RESUME_ALL"],
     vendorIds: ["vendor-kwitansi"],
@@ -181,7 +181,7 @@ export const DEFAULT_TEMPLATE_ASSIGNMENTS: TemplateAssignment[] = [
   assignment("TAHAP_II", "vendor-kwitansi", "kwitansi-tahap-2", undefined, ["KWITANSI TAHAP 2"]),
   assignment("TAHAP_III", "vendor-kwitansi", "kwitansi-tahap-3", undefined, ["KWITANSI TAHAP 3"]),
   assignment("TAHAP_IV", "vendor-kwitansi", "kwitansi-tahap-4", undefined, ["KWITANSI TAHAP 4"]),
-  assignment("RESUME_ALL", "vendor-kwitansi", "kwitansi-luar-inti", undefined, ["KWITANSI DILUAR PEKERJAAN INTI", "KWITANSI DI LUAR PEKERJAAN INTI"]),
+  assignment("RESUME_ALL", "vendor-kwitansi", "kwitansi-luar-inti", undefined, ["KWITANSI DI LUAR PEKERJAAN INTI", "KWITANSI DILUAR PEKERJAAN INTI"]),
 
   assignment("TAHAP_I", "vendor-internal", "template-nota-internal-non-vendor", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx", "Nota Kosong Internal / Non Vendor"]),
   assignment("TAHAP_II", "vendor-internal", "template-nota-internal-non-vendor", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx", "Nota Kosong Internal / Non Vendor"]),

@@ -21,15 +21,16 @@ import {
   getKwitansiAmountWords,
   getKwitansiDateRange,
   getKwitansiPayerName,
+  getKwitansiProjectLines,
   getKwitansiRole,
 } from "@/lib/kwitansi-fields";
+import { kwitansiSyncKeyForDoc, kwitansiSyncKeyFromText, kwitansiSyncLabel } from "@/lib/kwitansi-rules";
 import { getKwitansiGenerationDiagnostics, KWITANSI_TARGET_COUNTS } from "@/lib/nota-generator";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
 import { formatRupiah, numericInputValue } from "@/utils/format";
 import { GeneratedNota, Project, StageCode } from "@/types/domain";
 
-type CoreStageCode = Exclude<StageCode, "RESUME_ALL">;
-type StageFilter = CoreStageCode | "all";
+type StageFilter = StageCode | "all";
 
 type EditableKwitansiDoc = GeneratedNota;
 
@@ -49,8 +50,6 @@ type EditDraft = {
   paymentDescriptionIsManual: boolean;
 };
 
-const CORE_STAGES = STAGES.filter((stage): stage is (typeof STAGES)[number] & { code: CoreStageCode } => stage.code !== "RESUME_ALL");
-
 function receiptTitle(doc: EditableKwitansiDoc) {
   const customDescription = doc.kwitansiPaymentDescription?.trim().split(/\r?\n/)[0];
   if (customDescription) return customDescription;
@@ -65,6 +64,7 @@ function buildDraft(doc: EditableKwitansiDoc, project: Project): EditDraft {
   const savedPaymentDescription = doc.kwitansiPaymentDescription?.trim();
   const dateRange = getKwitansiDateRange(doc, project);
   const rangeStart = /^\d{4}-\d{2}-\d{2}$/.test(dateRange.start) ? dateRange.start : "";
+  const projectLines = getKwitansiProjectLines(doc, project);
   return {
     number: doc.kwitansiNumber ?? "",
     payer: doc.kwitansiPayerName?.trim() || getKwitansiPayerName(doc, project),
@@ -74,7 +74,7 @@ function buildDraft(doc: EditableKwitansiDoc, project: Project): EditDraft {
     date: rangeStart || doc.tanggal || doc.notaDate || project.projectDate,
     receiver: doc.kwitansiReceiverName ?? "",
     note: doc.kwitansiNote ?? "",
-    location: doc.kwitansiCity?.trim() || `KDKMP Ds. ${project.villageName}`,
+    location: doc.kwitansiCity?.trim() || projectLines[0] || `KDKMP Ds. ${project.villageName}`,
     role: doc.kwitansiRoleName?.trim() || getKwitansiRole(doc),
     templateColor: doc.warnaTemplate || "default",
     dateIsManual: Boolean(doc.kwitansiDate?.trim()),
@@ -86,6 +86,10 @@ function buildDraft(doc: EditableKwitansiDoc, project: Project): EditDraft {
 
 function normalizeEditableText(value: string) {
   return value.replace(/\r\n/g, "\n").split("\n").map((line) => line.trim()).filter(Boolean).join("\n");
+}
+
+function kwitansiStageLabel(stageCode: StageCode) {
+  return stageCode === "RESUME_ALL" ? "DI LUAR PEKERJAAN INTI" : getStageLabel(stageCode);
 }
 
 export function EditKwitansiView() {
@@ -150,9 +154,8 @@ export function EditKwitansiView() {
   }, [docs, project, query, stageFilter]);
 
   const countsByStage = useMemo(() => {
-    const counts = new Map<CoreStageCode, number>();
+    const counts = new Map<StageCode, number>();
     for (const doc of regularDocs) {
-      if (doc.stageCode === "RESUME_ALL") continue;
       counts.set(doc.stageCode, (counts.get(doc.stageCode) ?? 0) + 1);
     }
     return counts;
@@ -160,7 +163,7 @@ export function EditKwitansiView() {
 
   const countWarnings = useMemo(() => {
     if (docs.length === 0) return [];
-    return CORE_STAGES
+    return STAGES
       .map((stage) => ({
         stage,
         actual: countsByStage.get(stage.code) ?? 0,
@@ -301,28 +304,51 @@ export function EditKwitansiView() {
 
     setSaving(true);
     try {
-      await updateKwitansiFields(editingDoc.projectId, editingDoc.id, {
+      const receiverName = draft.receiver.trim();
+      const patch: Partial<Pick<
+        GeneratedNota,
+        "kwitansiReceiverName" | "kwitansiNumber" | "kwitansiPayerName" | "kwitansiPaymentDescription" | "kwitansiRoleName" | "kwitansiNote" |
+        "kwitansiAmount" | "kwitansiAmountWords" | "kwitansiDate" | "kwitansiCity" | "warnaTemplate"
+      >> = {
         kwitansiNumber: draft.number.trim(),
         kwitansiPayerName: draft.payer.trim(),
         kwitansiAmountWords: draft.amountWords.trim(),
         kwitansiPaymentDescription: draft.paymentDescription.trim(),
         kwitansiAmount: amount,
         kwitansiDate: draft.dateIsManual ? draft.date : undefined,
-        kwitansiReceiverName: draft.receiver.trim(),
+        kwitansiReceiverName: receiverName,
         kwitansiNote: draft.note.trim(),
         kwitansiCity: draft.location.trim(),
         kwitansiRoleName: draft.role.trim(),
         warnaTemplate: draft.templateColor,
-      });
+      };
+      const receiverChanged = receiverName !== (editingDoc.kwitansiReceiverName ?? "").trim();
+      const syncKey = editingDoc.stageCode === "TAHAP_I" && receiverChanged
+        ? kwitansiSyncKeyFromText(draft.role) ?? kwitansiSyncKeyForDoc(editingDoc, getKwitansiRole(editingDoc))
+        : null;
+      const syncTargets = syncKey
+        ? docs.filter((doc) => doc.id !== editingDoc.id && kwitansiSyncKeyForDoc(doc, getKwitansiRole(doc)) === syncKey)
+        : [];
+      const shouldSync = syncTargets.length > 0 && window.confirm(
+        `Nama penerima untuk jenis pekerjaan ${kwitansiSyncLabel(syncKey!)} ditemukan di tahap lain.\n\n` +
+        "OK = Ya, samakan semua tahap\nCancel = Tidak, ubah kwitansi ini saja",
+      );
+
+      await updateKwitansiFields(editingDoc.projectId, editingDoc.id, patch);
+      if (shouldSync) {
+        for (const target of syncTargets) {
+          await updateKwitansiFields(target.projectId, target.id, { kwitansiReceiverName: receiverName });
+        }
+      }
       setEditingId(null);
       setDraft(null);
-      toast.success("Perubahan kwitansi tersimpan ke Supabase.");
+      toast.success(shouldSync ? `Nama penerima disamakan ke ${syncTargets.length + 1} kwitansi.` : "Perubahan kwitansi tersimpan ke Supabase.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Gagal menyimpan perubahan kwitansi.");
     } finally {
       setSaving(false);
     }
-  }, [draft, editingDoc, saving, updateKwitansiFields]);
+  }, [docs, draft, editingDoc, saving, updateKwitansiFields]);
 
   if (loading && !project) {
     return <Card><CardContent className="p-8">Memuat kwitansi...</CardContent></Card>;
@@ -337,7 +363,7 @@ export function EditKwitansiView() {
       <div className="space-y-5">
         <div className="no-print flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
-            <h2 className="text-2xl font-bold tracking-normal">Kwitansi Tahapan</h2>
+            <h2 className="text-2xl font-bold tracking-normal">Kwitansi</h2>
             <p className="text-sm text-slate-500">
               Generate dari resume yang sudah fix, periksa preview, lalu simpan perubahan ke Supabase.
             </p>
@@ -353,8 +379,8 @@ export function EditKwitansiView() {
           </div>
         </div>
 
-        <div className="no-print grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          {CORE_STAGES.map((stage) => {
+        <div className="no-print grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+          {STAGES.map((stage) => {
             const actual = countsByStage.get(stage.code) ?? 0;
             const expected = KWITANSI_TARGET_COUNTS[stage.code] ?? 0;
             const complete = expected > 0 && actual === expected;
@@ -407,8 +433,8 @@ export function EditKwitansiView() {
           <Select value={stageFilter} onValueChange={(value) => setStageFilter(value as StageFilter)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">Semua Tahap</SelectItem>
-              {CORE_STAGES.map((stage) => <SelectItem key={stage.code} value={stage.code}>{stage.label}</SelectItem>)}
+              <SelectItem value="all">Semua Kwitansi</SelectItem>
+              {STAGES.map((stage) => <SelectItem key={stage.code} value={stage.code}>{kwitansiStageLabel(stage.code)}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -417,7 +443,7 @@ export function EditKwitansiView() {
           <Card className="no-print">
             <CardHeader>
               <CardTitle className="flex items-center gap-2"><ReceiptText className="h-5 w-5 text-blue-600" />Daftar Kwitansi</CardTitle>
-              <CardDescription>{filteredDocs.length} kwitansi tahapan sesuai filter.</CardDescription>
+              <CardDescription>{filteredDocs.length} kwitansi sesuai filter.</CardDescription>
             </CardHeader>
             <CardContent className="max-h-[76vh] space-y-3 overflow-auto">
               {filteredDocs.map((doc) => {
@@ -430,13 +456,14 @@ export function EditKwitansiView() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{getStageLabel(doc.stageCode)}</p>
+                        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{kwitansiStageLabel(doc.stageCode)}</p>
                         <p className="mt-1 text-sm font-semibold leading-snug">{receiptTitle(doc)}</p>
                       </div>
                     </div>
                     <dl className="mt-3 grid grid-cols-[92px_1fr] gap-x-2 gap-y-1 text-xs">
                       <dt className="text-slate-500">Desa</dt><dd className="font-medium">{project.villageName}</dd>
                       <dt className="text-slate-500">Nominal</dt><dd className="font-semibold">{formatRupiah(getKwitansiAmount(doc))}</dd>
+                      <dt className="text-slate-500">Pemberi</dt><dd className="font-medium">{project ? getKwitansiPayerName(doc, project) || "-" : "-"}</dd>
                       <dt className="text-slate-500">Penerima</dt><dd className={doc.kwitansiReceiverName?.trim() ? "font-medium" : "font-medium text-red-600"}>{doc.kwitansiReceiverName?.trim() || "Belum diisi"}</dd>
                     </dl>
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
@@ -472,7 +499,7 @@ export function EditKwitansiView() {
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <CardTitle>Edit Kwitansi</CardTitle>
-                      <CardDescription>{getStageLabel(editingDoc.stageCode)} — {receiptTitle(editingDoc)}</CardDescription>
+                      <CardDescription>{kwitansiStageLabel(editingDoc.stageCode)} — {receiptTitle(editingDoc)}</CardDescription>
                     </div>
                     <Button type="button" variant="ghost" size="icon" onClick={cancelEditing} disabled={saving} aria-label="Batal edit">
                       <X className="h-4 w-4" />

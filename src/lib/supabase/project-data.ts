@@ -211,6 +211,10 @@ function customString(custom: JsonRecord, key: string, fallback: string | undefi
   return Object.prototype.hasOwnProperty.call(custom, key) ? asString(custom[key]) : fallback;
 }
 
+function hasOwnInput(input: KwitansiEditInput, key: keyof KwitansiEditInput) {
+  return Object.prototype.hasOwnProperty.call(input, key);
+}
+
 function withoutSpecialPlnAmountEdit(doc: GeneratedNota, custom: JsonRecord) {
   if (!isSpecialPLNKwitansi(doc)) return custom;
   const rest = { ...custom };
@@ -462,6 +466,11 @@ async function saveResumeStructure(project: Project) {
 function generatedNoteAutoKey(doc: Pick<GeneratedNota, "stageCode" | "vendorId" | "templateId" | "documentType"> & Partial<Pick<GeneratedNota, "id">>) {
   const docId = doc.id ?? "";
   return `${doc.documentType}:${doc.stageCode}:${doc.vendorId}:${doc.templateId}:${docId}`;
+}
+
+function sourceItemIdsKey(ids: string[] | null | undefined) {
+  const values = (ids ?? []).filter(Boolean).sort();
+  return values.length > 0 ? values.join("|") : "";
 }
 
 function legacyGeneratedNoteAutoKey(doc: Pick<GeneratedNota, "stageCode" | "vendorId" | "templateId">) {
@@ -926,6 +935,14 @@ async function generateAndPersistAutoDocuments(
   }
 
   const oldRowByAutoKey = new Map(oldGeneratedRows.map((row) => [row.auto_key, row]));
+  const oldRowBySourceItemIds = new Map(
+    oldGeneratedRows
+      .map((row) => {
+        const key = sourceItemIdsKey(row.source_resume_item_ids);
+        return key ? ([key, row] as const) : null;
+      })
+      .filter((entry): entry is readonly [string, GeneratedNoteRow] => Boolean(entry)),
+  );
   const oldEditByAutoKey = new Map(
     oldEditRows
       .map((edit) => {
@@ -981,20 +998,25 @@ async function generateAndPersistAutoDocuments(
     const migratedPlnRow = documentKind === "nota" && doc.isSpecialKwitansi
       ? legacyPlnRowByPrintOrder.get(doc.printOrder ?? 0)
       : undefined;
+    const migratedSourceRow = documentKind === "kwitansi" && doc.stageCode === "RESUME_ALL" && doc.itemIds.length === 1
+      ? oldRowBySourceItemIds.get(sourceItemIdsKey(doc.itemIds))
+      : undefined;
     const oldRow = oldRowByAutoKey.get(autoKey)
       ?? (documentKind === "nota" ? oldRowByAutoKey.get(legacyAutoKey) : undefined)
-      ?? migratedPlnRow;
+      ?? migratedPlnRow
+      ?? migratedSourceRow;
     const oldEdit = oldEditByAutoKey.get(autoKey)
       ?? (documentKind === "nota" ? oldEditByAutoKey.get(legacyAutoKey) : undefined)
-      ?? (migratedPlnRow ? oldEditByNoteId.get(migratedPlnRow.id) : undefined);
+      ?? (migratedPlnRow ? oldEditByNoteId.get(migratedPlnRow.id) : undefined)
+      ?? (migratedSourceRow ? oldEditByNoteId.get(migratedSourceRow.id) : undefined);
     if (oldEdit) carriedEditByNewAutoKey.set(autoKey, oldEdit);
     const data: GeneratedNota = {
       ...doc,
       id: oldRow?.id ?? doc.id,
       status: "generated",
       source: "auto",
-      kwitansiReceiverName: oldEdit?.nama_penerima,
-      warnaTemplate: oldEdit?.warna_template,
+      kwitansiReceiverName: oldEdit ? oldEdit.nama_penerima : doc.kwitansiReceiverName,
+      warnaTemplate: oldEdit ? oldEdit.warna_template : doc.warnaTemplate,
     };
 
     return {
@@ -1101,26 +1123,36 @@ export async function generateAndPersistKwitansi(project: Project, templateAssig
 
 export async function upsertKwitansiEdit(projectId: string, noteId: string, input: KwitansiEditInput) {
   const client = ensureClient(supabase());
-  const customData = {
+  const { data: existingData, error: existingError } = await client
+    .from("kwitansi_edits")
+    .select("*")
+    .eq("note_id", noteId)
+    .maybeSingle();
+  if (existingError) throw existingError;
+
+  const existing = existingData as KwitansiEditRow | null;
+  const customData: JsonRecord = {
+    ...asRecord(existing?.custom_data_json),
     prepared_for_template_variants: true,
-    no_kwitansi: input.noKwitansi ?? "",
-    nama_pemberi: input.namaPemberi ?? "",
-    keterangan: input.keterangan ?? "",
-    jabatan: input.jabatan ?? "",
-    catatan: input.catatan ?? "",
-    nominal: input.nominal ?? null,
-    uang_sejumlah: input.uangSejumlah ?? "",
-    tanggal_kwitansi: input.tanggalKwitansi ?? "",
-    kota: input.kota ?? "",
   };
+  if (hasOwnInput(input, "noKwitansi")) customData.no_kwitansi = input.noKwitansi ?? "";
+  if (hasOwnInput(input, "namaPemberi")) customData.nama_pemberi = input.namaPemberi ?? "";
+  if (hasOwnInput(input, "keterangan")) customData.keterangan = input.keterangan ?? "";
+  if (hasOwnInput(input, "jabatan")) customData.jabatan = input.jabatan ?? "";
+  if (hasOwnInput(input, "catatan")) customData.catatan = input.catatan ?? "";
+  if (hasOwnInput(input, "nominal")) customData.nominal = input.nominal ?? null;
+  if (hasOwnInput(input, "uangSejumlah")) customData.uang_sejumlah = input.uangSejumlah ?? "";
+  if (hasOwnInput(input, "tanggalKwitansi")) customData.tanggal_kwitansi = input.tanggalKwitansi ?? "";
+  if (hasOwnInput(input, "kota")) customData.kota = input.kota ?? "";
+
   const { data, error } = await client
     .from("kwitansi_edits")
     .upsert(
       {
         project_id: projectId,
         note_id: noteId,
-        nama_penerima: input.namaPenerima ?? "",
-        warna_template: input.warnaTemplate ?? "default",
+        nama_penerima: hasOwnInput(input, "namaPenerima") ? input.namaPenerima ?? "" : existing?.nama_penerima ?? "",
+        warna_template: hasOwnInput(input, "warnaTemplate") ? input.warnaTemplate ?? "default" : existing?.warna_template ?? "default",
         custom_data_json: customData,
       },
       { onConflict: "note_id" },

@@ -243,9 +243,9 @@ export function getDefaultKwitansiPaymentLines(doc: GeneratedNota, project: Proj
 
   if (isOutsideCoreWork(doc)) {
     const workName = cleanRole(doc.items[0]?.itemName || role);
+    const dateSuffix = startText ? ` pada tanggal ${startText}` : "";
     return [
-      `Pembayaran ${workName} ${startText ? `Tanggal ${startText}` : ""}`.trim(),
-      `Pembangunan KDKMP Ds. ${project.villageName}`,
+      `Pembayaran ${workName} Pembangunan KDKMP Ds. ${project.villageName}${dateSuffix}`,
     ];
   }
 
