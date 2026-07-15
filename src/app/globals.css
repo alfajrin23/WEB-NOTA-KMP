@@ -2235,18 +2235,19 @@ textarea {
   object-position: center;
 }
 
-.ctk-signature i {
+.ctk-signature .ctk-sign-line {
   position: absolute;
   left: 50%;
-  bottom: 0;
+  bottom: 0.8mm;
   display: block;
-  width: 34mm;
+  width: 36mm;
+  height: 0;
+  border-bottom: 0.25mm dotted #000000;
   transform: translateX(-50%);
   font-style: normal;
-  text-align: center;
 }
 
-.ctk-signature div:last-child i {
+.ctk-signature div:last-child .ctk-sign-line {
   right: auto;
   left: 50%;
 }

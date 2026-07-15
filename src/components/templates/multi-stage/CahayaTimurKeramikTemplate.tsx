@@ -79,12 +79,12 @@ function CahayaTimurNote({
       <footer className="ctk-signature" data-overlap-role="signature">
         <div>
           <span>TANDA TERIMA</span>
-          <i>.....................</i>
+          <i className="ctk-sign-line" aria-hidden="true" />
         </div>
         <div>
           <span>HORMAT KAMI</span>
           <img src="/template-assets/multi-stage/cahaya-timur-stamp.svg" alt="" data-overlap-role="stamp" />
-          <i>.....................</i>
+          <i className="ctk-sign-line" aria-hidden="true" />
         </div>
       </footer>
 
