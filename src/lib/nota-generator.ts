@@ -16,7 +16,7 @@ export const KWITANSI_TARGET_COUNTS: Partial<Record<StageCode, number>> = {
   TAHAP_I: 14,
   TAHAP_II: 15,
   TAHAP_III: 21,
-  TAHAP_IV: 9,
+  TAHAP_IV: 14,
   RESUME_ALL: 8,
 };
 
@@ -195,6 +195,11 @@ function cloneReceiptItem(item: ResumeItem, amount: number, suffix: string): Res
   };
 }
 
+function isMandorOrHeadWorkerItem(item: ResumeItem) {
+  const name = normalizedText(item.itemName);
+  return name === "mandor" || name === "kepala tukang";
+}
+
 type KwitansiReceiptInput = {
   key: string;
   stageCode: StageCode;
@@ -267,13 +272,31 @@ function buildKwitansiReceiptsForStage(project: Project, vendors: Vendor[], stag
     });
   }
 
+  const stageFourMandorGroup = stageCode === "TAHAP_IV"
+    ? stageItems
+      .filter((item) => isKwitansiVendorItem(item) && isMandorOrHeadWorkerItem(item))
+      .sort((left, right) => left.sortOrder - right.sortOrder)
+    : [];
+  if (stageFourMandorGroup.length > 0) {
+    receipts.push({
+      key: "mandor-kepala-tukang",
+      stageCode,
+      vendor: kwitansiVendor,
+      items: stageFourMandorGroup,
+      sourceItemIds: stageFourMandorGroup.map((item) => item.id),
+      categoryNames: ["Tenaga Kerja Pembangunan KDKMP"],
+    });
+  }
+
+  const groupedStageFourMandorIds = new Set(stageFourMandorGroup.map((item) => item.id));
   const regularItems = stageItems
     .filter((item) => isKwitansiItem(item, vendors.find((vendor) => vendor.id === item.vendorId)))
     .filter((item) => !isPpmItem(item, vendors.find((vendor) => vendor.id === item.vendorId)))
-    .filter((item) => !(stageCode !== "TAHAP_IV" && isKwitansiVendorItem(item) && isLemburItem(item)));
+    .filter((item) => !(stageCode !== "TAHAP_IV" && isKwitansiVendorItem(item) && isLemburItem(item)))
+    .filter((item) => !groupedStageFourMandorIds.has(item.id));
 
   for (const item of regularItems) {
-    if (stageCode !== "TAHAP_IV" && shouldSplitFourWorkers(item)) {
+    if (shouldSplitFourWorkers(item)) {
       const total = getResumeItemAmount(item);
       const base = Math.floor(total / 4);
       for (let part = 1; part <= 4; part += 1) {
@@ -308,10 +331,10 @@ const OUTSIDE_CORE_KWITANSI_ORDER = [
   "sosialisasi",
   "rapat koordinasi",
   "pengukuran lahan",
-  "pematangan lahan",
-  "sumur bor",
   "pembersihan lahan",
+  "pematangan lahan",
   "cut n fill",
+  "sumur bor",
 ] as const;
 
 function outsideCoreKwitansiOrder(item: ResumeItem) {
@@ -333,7 +356,7 @@ function buildOutsideCoreKwitansiReceipts(project: Project, vendors: Vendor[]): 
   const kwitansiVendor = fallbackKwitansiVendor(vendors);
   return project.items
     .filter(isOutsideCoreKwitansiItem)
-    .sort((left, right) => outsideCoreKwitansiOrder(left) - outsideCoreKwitansiOrder(right) || left.sortOrder - right.sortOrder)
+    .sort((left, right) => left.sortOrder - right.sortOrder || outsideCoreKwitansiOrder(left) - outsideCoreKwitansiOrder(right))
     .slice(0, KWITANSI_TARGET_COUNTS.RESUME_ALL ?? 8)
     .map((item) => ({
       key: `luar-inti-${item.id}`,
@@ -574,6 +597,9 @@ export function generateKwitansiDocuments(
         const orderB = b.items[0] ? outsideCoreKwitansiOrder(b.items[0]) : 99;
         if (orderA !== orderB) return orderA - orderB;
       }
+      const sourceOrderA = a.items[0]?.sortOrder ?? 0;
+      const sourceOrderB = b.items[0]?.sortOrder ?? 0;
+      if (sourceOrderA !== sourceOrderB) return sourceOrderA - sourceOrderB;
       return a.id.localeCompare(b.id);
     });
 }
