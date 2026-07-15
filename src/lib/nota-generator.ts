@@ -195,11 +195,6 @@ function cloneReceiptItem(item: ResumeItem, amount: number, suffix: string): Res
   };
 }
 
-function isMandorOrHeadWorkerItem(item: ResumeItem) {
-  const name = normalizedText(item.itemName);
-  return name === "mandor" || name === "kepala tukang";
-}
-
 type KwitansiReceiptInput = {
   key: string;
   stageCode: StageCode;
@@ -240,6 +235,11 @@ function makeKwitansiDoc(project: Project, input: KwitansiReceiptInput): Generat
   return receiver ? { ...doc, kwitansiReceiverName: receiver } : doc;
 }
 
+function isExcludedStageFourKwitansiItem(item: ResumeItem) {
+  if (item.stageCode !== "TAHAP_IV") return false;
+  return normalizedText(item.itemName).includes("sumuran grounding");
+}
+
 function buildKwitansiReceiptsForStage(project: Project, vendors: Vendor[], stageCode: StageCode): KwitansiReceiptInput[] {
   const kwitansiVendor = fallbackKwitansiVendor(vendors);
   const ppmVendor = ppmKwitansiVendor(vendors);
@@ -272,28 +272,11 @@ function buildKwitansiReceiptsForStage(project: Project, vendors: Vendor[], stag
     });
   }
 
-  const stageFourMandorGroup = stageCode === "TAHAP_IV"
-    ? stageItems
-      .filter((item) => isKwitansiVendorItem(item) && isMandorOrHeadWorkerItem(item))
-      .sort((left, right) => left.sortOrder - right.sortOrder)
-    : [];
-  if (stageFourMandorGroup.length > 0) {
-    receipts.push({
-      key: "mandor-kepala-tukang",
-      stageCode,
-      vendor: kwitansiVendor,
-      items: stageFourMandorGroup,
-      sourceItemIds: stageFourMandorGroup.map((item) => item.id),
-      categoryNames: ["Tenaga Kerja Pembangunan KDKMP"],
-    });
-  }
-
-  const groupedStageFourMandorIds = new Set(stageFourMandorGroup.map((item) => item.id));
   const regularItems = stageItems
     .filter((item) => isKwitansiItem(item, vendors.find((vendor) => vendor.id === item.vendorId)))
     .filter((item) => !isPpmItem(item, vendors.find((vendor) => vendor.id === item.vendorId)))
     .filter((item) => !(stageCode !== "TAHAP_IV" && isKwitansiVendorItem(item) && isLemburItem(item)))
-    .filter((item) => !groupedStageFourMandorIds.has(item.id));
+    .filter((item) => !isExcludedStageFourKwitansiItem(item));
 
   for (const item of regularItems) {
     if (shouldSplitFourWorkers(item)) {
@@ -327,12 +310,12 @@ function buildKwitansiReceiptsForStage(project: Project, vendors: Vendor[], stag
 }
 
 const OUTSIDE_CORE_KWITANSI_ORDER = [
-  "pencarian dan survei",
+  "pencarian",
   "sosialisasi",
   "rapat koordinasi",
   "pengukuran lahan",
-  "pembersihan lahan",
   "pematangan lahan",
+  "pembersihan lahan",
   "cut n fill",
   "sumur bor",
 ] as const;
@@ -356,7 +339,7 @@ function buildOutsideCoreKwitansiReceipts(project: Project, vendors: Vendor[]): 
   const kwitansiVendor = fallbackKwitansiVendor(vendors);
   return project.items
     .filter(isOutsideCoreKwitansiItem)
-    .sort((left, right) => left.sortOrder - right.sortOrder || outsideCoreKwitansiOrder(left) - outsideCoreKwitansiOrder(right))
+    .sort((left, right) => outsideCoreKwitansiOrder(left) - outsideCoreKwitansiOrder(right) || left.sortOrder - right.sortOrder)
     .slice(0, KWITANSI_TARGET_COUNTS.RESUME_ALL ?? 8)
     .map((item) => ({
       key: `luar-inti-${item.id}`,
@@ -366,6 +349,24 @@ function buildOutsideCoreKwitansiReceipts(project: Project, vendors: Vendor[]): 
       sourceItemIds: [item.id],
       categoryNames: [item.category],
     }));
+}
+
+function stageFourKwitansiOrder(doc: GeneratedNota) {
+  const text = normalizedText([
+    doc.vendorId,
+    doc.vendorName,
+    ...doc.items.map((item) => item.itemName),
+  ].join(" "));
+
+  if (text.includes("mandor")) return 1;
+  if (text.includes("kepala tukang")) return 2;
+  if (text.includes("pekerja trampil") || text.includes("pekerja terampil")) return 3;
+  if (text.includes("pekerja buruh")) return 4;
+  if ((text.includes("sopir") || text.includes("supir")) && !text.includes("pembantu") && !text.includes("kenek")) return 5;
+  if (text.includes("pembantu") || text.includes("kenek")) return 6;
+  if (doc.vendorId === PPM_VENDOR_ID || text.includes("pratama project mandiri") || text.includes("ppm")) return 7;
+  if (text.includes("listrik")) return 8;
+  return 99;
 }
 
 function makeSpecialPlnNotaDoc({
@@ -595,6 +596,11 @@ export function generateKwitansiDocuments(
       if (a.stageCode === "RESUME_ALL" && b.stageCode === "RESUME_ALL") {
         const orderA = a.items[0] ? outsideCoreKwitansiOrder(a.items[0]) : 99;
         const orderB = b.items[0] ? outsideCoreKwitansiOrder(b.items[0]) : 99;
+        if (orderA !== orderB) return orderA - orderB;
+      }
+      if (a.stageCode === "TAHAP_IV" && b.stageCode === "TAHAP_IV") {
+        const orderA = stageFourKwitansiOrder(a);
+        const orderB = stageFourKwitansiOrder(b);
         if (orderA !== orderB) return orderA - orderB;
       }
       const sourceOrderA = a.items[0]?.sortOrder ?? 0;

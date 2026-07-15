@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { Download, Eye, Loader2, Pencil, ReceiptText, RefreshCw, Save, Search, X } from "lucide-react";
+import { Download, Eye, Loader2, Pencil, ReceiptText, RefreshCw, Save, Search, UserCheck, X } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +33,8 @@ import { GeneratedNota, Project, StageCode } from "@/types/domain";
 type StageFilter = StageCode | "all";
 
 type EditableKwitansiDoc = GeneratedNota;
+
+const CORE_KWITANSI_SYNC_STAGES = new Set<StageCode>(["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV"]);
 
 type EditDraft = {
   number: string;
@@ -102,6 +104,7 @@ export function EditKwitansiView() {
     vendors,
     templateAssignments,
     generateProjectKwitansi,
+    backfillKwitansiReceivers,
     updateKwitansiFields,
     loading,
   } = useKdkmpStore();
@@ -112,6 +115,7 @@ export function EditKwitansiView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [backfilling, setBackfilling] = useState(false);
   const [saving, setSaving] = useState(false);
 
   const docs = useMemo(() => {
@@ -222,6 +226,20 @@ export function EditKwitansiView() {
     }
   }, [generateProjectKwitansi, projectId]);
 
+  const runBackfillReceivers = useCallback(async () => {
+    setBackfilling(true);
+    try {
+      await backfillKwitansiReceivers(projectId);
+      setSelectedId(null);
+      setEditingId(null);
+      setDraft(null);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Gagal memperbarui nama penerima otomatis.");
+    } finally {
+      setBackfilling(false);
+    }
+  }, [backfillKwitansiReceivers, projectId]);
+
   const showPreview = useCallback((doc: EditableKwitansiDoc) => {
     setSelectedId(doc.id);
     setEditingId(null);
@@ -327,7 +345,11 @@ export function EditKwitansiView() {
         ? kwitansiSyncKeyFromText(draft.role) ?? kwitansiSyncKeyForDoc(editingDoc, getKwitansiRole(editingDoc))
         : null;
       const syncTargets = syncKey
-        ? docs.filter((doc) => doc.id !== editingDoc.id && kwitansiSyncKeyForDoc(doc, getKwitansiRole(doc)) === syncKey)
+        ? docs.filter((doc) => (
+          doc.id !== editingDoc.id &&
+          CORE_KWITANSI_SYNC_STAGES.has(doc.stageCode) &&
+          kwitansiSyncKeyForDoc(doc, getKwitansiRole(doc)) === syncKey
+        ))
         : [];
       const shouldSync = syncTargets.length > 0 && window.confirm(
         `Nama penerima untuk jenis pekerjaan ${kwitansiSyncLabel(syncKey!)} ditemukan di tahap lain.\n\n` +
@@ -369,9 +391,13 @@ export function EditKwitansiView() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={runGenerateKwitansi} disabled={generating || saving}>
+            <Button variant="outline" onClick={runGenerateKwitansi} disabled={generating || backfilling || saving}>
               {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
               {docs.length > 0 ? "Regenerate Kwitansi" : "Generate Kwitansi"}
+            </Button>
+            <Button variant="outline" onClick={runBackfillReceivers} disabled={generating || backfilling || saving || docs.length === 0}>
+              {backfilling ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserCheck className="h-4 w-4" />}
+              Perbarui Nama Penerima Otomatis
             </Button>
             <Button asChild variant="emerald">
               <Link href={`/projects/${project.id}/export`}><Download className="h-4 w-4" />Lanjut Export / Cetak</Link>

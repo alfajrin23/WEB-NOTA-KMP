@@ -2217,9 +2217,6 @@ textarea {
 .ctk-signature div {
   position: relative;
   height: 29mm;
-}
-
-.ctk-signature div:last-child {
   text-align: center;
 }
 

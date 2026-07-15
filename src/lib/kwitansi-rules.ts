@@ -11,13 +11,30 @@ function normalized(value: string | undefined | null) {
 }
 
 function joinedDocText(doc: GeneratedNota) {
+  const record = doc as unknown as Record<string, unknown>;
+  const dynamicFields = [
+    "job_type",
+    "position",
+    "role",
+    "description",
+    "payment_description",
+    "jenis_pekerjaan",
+    "jabatan",
+    "uraian",
+    "keterangan",
+    "vendor",
+  ].map((key) => record[key]).filter((value): value is string => typeof value === "string");
   return [
     doc.kwitansiRoleName,
     doc.kwitansiPaymentDescription,
+    doc.stageName,
     doc.vendorName,
+    doc.vendor?.name,
+    ...(doc.vendor?.aliases ?? []),
     doc.templateName,
+    ...dynamicFields,
     ...doc.categoryNames,
-    ...doc.items.flatMap((item) => [item.itemName, item.vendorName, item.category, item.categoryName]),
+    ...doc.items.flatMap((item) => [item.itemName, item.vendorName, item.category, item.categoryName, item.notes]),
   ].filter(Boolean).join(" ");
 }
 

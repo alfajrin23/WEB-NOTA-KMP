@@ -14,3 +14,4 @@ Creating turbopack project { dir: 'D:\\WEB NOTA KMP', testMode: true }
  GET /history 200 in 131ms (next.js: 30ms, application-code: 101ms)
  GET / 200 in 276ms (next.js: 72ms, application-code: 203ms)
 ✓ Compiled in 101ms
+ GET / 200 in 387ms (next.js: 86ms, application-code: 301ms)

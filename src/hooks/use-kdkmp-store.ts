@@ -6,6 +6,7 @@ import { initialProjects, masterTemplateItems, vendors } from "@/constants/seed-
 import { ALL_TEMPLATE_ASSIGNMENTS } from "@/constants/template-mapping";
 import { getStageLabel } from "@/constants/stages";
 import { generateKwitansiDocuments, generateNotaDocuments } from "@/lib/nota-generator";
+import { getAutofillKwitansiReceiver } from "@/lib/kwitansi-rules";
 import { isSpecialPLNKwitansi } from "@/lib/pln-document-groups";
 import {
   daysBetweenIsoDates,
@@ -18,6 +19,7 @@ import { buildResumeItemsForNewProject, latestEditedProject } from "@/lib/resume
 import { findPriceSyncItems } from "@/lib/resume-price-sync";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
 import {
+  backfillProjectKwitansiReceivers,
   cacheProjectBundle,
   createCustomNote,
   createResumeItem,
@@ -770,6 +772,7 @@ export function useKdkmpStore() {
 
     if (supabaseReady) {
       const docs = await generateAndPersistKwitansi(project, templateAssignments);
+      const backfillResult = await backfillProjectKwitansiReceivers(projectId);
       const bundle: ProjectBundle = {
         projects,
         generatedNotas,
@@ -794,7 +797,11 @@ export function useKdkmpStore() {
         // Hasil insert sudah valid dan langsung ditampilkan. Sinkronisasi penuh
         // berikutnya akan mengambil kembali metadata edit bila fetch ini gagal.
       }
-      toast.success(`${docs.length} kwitansi tersimpan ke Supabase`);
+      toast.success(
+        backfillResult.updated > 0
+          ? `${docs.length} kwitansi tersimpan; ${backfillResult.updated} nama penerima otomatis diperbarui.`
+          : `${docs.length} kwitansi tersimpan ke Supabase`,
+      );
       return docs;
     }
 
@@ -807,6 +814,44 @@ export function useKdkmpStore() {
     toast.warning("Supabase belum dikonfigurasi. Kwitansi hanya ada di cache lokal.");
     return docs;
   }, [customNotes, generatedNotas, history, kwitansiEdits, projects, supabaseReady, templateAssignments]);
+
+  const backfillKwitansiReceivers = useCallback(async (projectId: string) => {
+    if (supabaseReady) {
+      const result = await backfillProjectKwitansiReceivers(projectId);
+      const refreshedBundle = applyBundle(await fetchProjectBundle());
+      setProjects(refreshedBundle.projects);
+      setGeneratedNotas(refreshedBundle.generatedNotas);
+      generatedNotasRef.current = refreshedBundle.generatedNotas;
+      setKwitansiEdits(refreshedBundle.kwitansiEdits);
+      setCustomNotes(refreshedBundle.customNotes);
+      setHistory(refreshedBundle.history);
+      toast.success(
+        result.updated > 0
+          ? `${result.updated} nama penerima kwitansi otomatis diperbarui.`
+          : "Tidak ada nama penerima kosong yang perlu diperbarui.",
+      );
+      return result;
+    }
+
+    let updated = 0;
+    setGeneratedNotas((current) => {
+      const nextDocs = current.map((doc) => {
+        if (doc.projectId !== projectId || doc.documentType !== "kwitansi" || doc.kwitansiReceiverName?.trim()) return doc;
+        const receiver = getAutofillKwitansiReceiver(doc);
+        if (!receiver) return doc;
+        updated += 1;
+        return { ...doc, kwitansiReceiverName: receiver };
+      });
+      generatedNotasRef.current = nextDocs;
+      return nextDocs;
+    });
+    toast.warning(
+      updated > 0
+        ? `${updated} nama penerima kwitansi diperbarui di cache lokal.`
+        : "Tidak ada nama penerima kosong yang perlu diperbarui di cache lokal.",
+    );
+    return { checked: generatedNotasRef.current.filter((doc) => doc.projectId === projectId && doc.documentType === "kwitansi").length, updated };
+  }, [supabaseReady]);
 
   const updateKwitansiFields = useCallback(async (projectId: string, noteId: string, patch: Partial<Pick<
     GeneratedNota,
@@ -913,6 +958,7 @@ export function useKdkmpStore() {
     resetAll,
     generateProjectNotas,
     generateProjectKwitansi,
+    backfillKwitansiReceivers,
     updateKwitansiFields,
     updateKwitansiReceiver,
     createProjectCustomNote,

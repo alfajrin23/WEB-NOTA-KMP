@@ -5,6 +5,7 @@ import { ALL_TEMPLATE_ASSIGNMENTS, findTemplateDefinition, resolveTemplateAssign
 import { getStageLabel } from "@/constants/stages";
 import { initialProjects, masterTemplateItems, vendors } from "@/constants/seed-data";
 import { generateKwitansiDocuments, generateNotaDocuments } from "@/lib/nota-generator";
+import { getAutofillKwitansiReceiver } from "@/lib/kwitansi-rules";
 import { isSpecialPLNKwitansi } from "@/lib/pln-document-groups";
 import { shiftResumeItemsFromDefault } from "@/lib/project-date-shift";
 import { buildResumeItemsForNewProject } from "@/lib/resume-history";
@@ -157,6 +158,7 @@ export type CustomNoteInput = {
 
 export type KwitansiEditInput = {
   namaPenerima?: string;
+  receiverSource?: "manual" | "sync" | "auto";
   warnaTemplate?: string;
   noKwitansi?: string;
   namaPemberi?: string;
@@ -213,6 +215,22 @@ function customString(custom: JsonRecord, key: string, fallback: string | undefi
 
 function hasOwnInput(input: KwitansiEditInput, key: keyof KwitansiEditInput) {
   return Object.prototype.hasOwnProperty.call(input, key);
+}
+
+function kwitansiReceiverSource(custom: JsonRecord) {
+  const source = custom.receiver_source;
+  return source === "manual" || source === "sync" || source === "auto" ? source : null;
+}
+
+function isPreservedReceiverEdit(edit: KwitansiEditRow | undefined | null) {
+  if (!edit?.nama_penerima?.trim()) return false;
+  return kwitansiReceiverSource(asRecord(edit.custom_data_json)) !== "auto";
+}
+
+function withAutomaticKwitansiReceiver(doc: GeneratedNota) {
+  if (doc.documentType !== "kwitansi" || doc.kwitansiReceiverName?.trim()) return doc;
+  const receiver = getAutofillKwitansiReceiver(doc);
+  return receiver ? { ...doc, kwitansiReceiverName: receiver } : doc;
 }
 
 function withoutSpecialPlnAmountEdit(doc: GeneratedNota, custom: JsonRecord) {
@@ -497,11 +515,10 @@ function rowToKwitansiEdit(row: KwitansiEditRow): KwitansiEdit {
 }
 
 function applyKwitansiEdit(doc: GeneratedNota, edit: KwitansiEdit | undefined): GeneratedNota {
-  if (!edit) return doc;
+  if (!edit) return withAutomaticKwitansiReceiver(doc);
   const custom = withoutSpecialPlnAmountEdit(doc, asRecord(edit.customDataJson));
-  return {
+  const withCustomFields: GeneratedNota = {
     ...doc,
-    kwitansiReceiverName: edit.namaPenerima,
     kwitansiNumber: customString(custom, "no_kwitansi", doc.kwitansiNumber),
     kwitansiPayerName: customString(custom, "nama_pemberi", doc.kwitansiPayerName),
     kwitansiPaymentDescription: customString(custom, "keterangan", doc.kwitansiPaymentDescription),
@@ -512,6 +529,13 @@ function applyKwitansiEdit(doc: GeneratedNota, edit: KwitansiEdit | undefined): 
     kwitansiDate: customString(custom, "tanggal_kwitansi", doc.kwitansiDate),
     kwitansiCity: customString(custom, "kota", doc.kwitansiCity),
     warnaTemplate: edit.warnaTemplate,
+  };
+  return {
+    ...withCustomFields,
+    kwitansiReceiverName: edit.namaPenerima?.trim()
+      || withCustomFields.kwitansiReceiverName?.trim()
+      || getAutofillKwitansiReceiver(withCustomFields)
+      || "",
   };
 }
 
@@ -1010,12 +1034,13 @@ async function generateAndPersistAutoDocuments(
       ?? (migratedPlnRow ? oldEditByNoteId.get(migratedPlnRow.id) : undefined)
       ?? (migratedSourceRow ? oldEditByNoteId.get(migratedSourceRow.id) : undefined);
     if (oldEdit) carriedEditByNewAutoKey.set(autoKey, oldEdit);
+    const preserveOldReceiver = isPreservedReceiverEdit(oldEdit);
     const data: GeneratedNota = {
       ...doc,
       id: oldRow?.id ?? doc.id,
       status: "generated",
       source: "auto",
-      kwitansiReceiverName: oldEdit ? oldEdit.nama_penerima : doc.kwitansiReceiverName,
+      kwitansiReceiverName: preserveOldReceiver ? oldEdit?.nama_penerima : doc.kwitansiReceiverName,
       warnaTemplate: oldEdit ? oldEdit.warna_template : doc.warnaTemplate,
     };
 
@@ -1073,12 +1098,18 @@ async function generateAndPersistAutoDocuments(
       const oldEdit = row.auto_key ? oldEditByAutoKey.get(row.auto_key) ?? carriedEditByNewAutoKey.get(row.auto_key) : undefined;
       if (!oldEdit) return null;
       const doc = row.auto_key ? docsByAutoKey.get(row.auto_key) : undefined;
+      const preserveOldReceiver = isPreservedReceiverEdit(oldEdit);
+      const receiverName = preserveOldReceiver ? oldEdit.nama_penerima : doc?.kwitansiReceiverName ?? oldEdit.nama_penerima ?? "";
+      const customData = doc ? withoutSpecialPlnAmountEdit(doc, asRecord(oldEdit.custom_data_json)) : oldEdit.custom_data_json ?? {};
+      const nextCustomData = receiverName && !preserveOldReceiver
+        ? { ...customData, receiver_source: "auto" }
+        : customData;
       return {
         project_id: project.id,
         note_id: row.id,
-        nama_penerima: oldEdit.nama_penerima,
+        nama_penerima: receiverName,
         warna_template: oldEdit.warna_template,
-        custom_data_json: doc ? withoutSpecialPlnAmountEdit(doc, asRecord(oldEdit.custom_data_json)) : oldEdit.custom_data_json ?? {},
+        custom_data_json: nextCustomData,
       };
     })
     .filter((row): row is NonNullable<typeof row> => Boolean(row));
@@ -1121,6 +1152,96 @@ export async function generateAndPersistKwitansi(project: Project, templateAssig
   return generateAndPersistAutoDocuments(project, templateAssignments, "kwitansi");
 }
 
+export async function backfillProjectKwitansiReceivers(projectId: string) {
+  const client = ensureClient(supabase());
+  const { data: noteData, error: notesError } = await client
+    .from("generated_notes")
+    .select("*")
+    .eq("project_id", projectId)
+    .eq("document_type", "kwitansi");
+  if (notesError) throw notesError;
+
+  const rows = (noteData ?? []) as GeneratedNoteRow[];
+  const noteIds = rows.map((row) => row.id);
+  let editRows: KwitansiEditRow[] = [];
+  if (noteIds.length > 0) {
+    const { data: editData, error: editError } = await client.from("kwitansi_edits").select("*").in("note_id", noteIds);
+    if (editError) throw editError;
+    editRows = (editData ?? []) as KwitansiEditRow[];
+  }
+
+  const editsByNoteId = new Map(editRows.map((row) => [row.note_id, row]));
+  let updated = 0;
+
+  for (const row of rows) {
+    const parsed = parseGeneratedNota(row.data_json);
+    if (!parsed) continue;
+
+    const baseDoc: GeneratedNota = {
+      ...parsed,
+      id: row.id,
+      projectId: row.project_id,
+      stageCode: asStageCode(row.tahap),
+      stageId: asStageCode(row.tahap),
+      vendorId: row.vendor_id ?? parsed.vendorId,
+      vendorName: row.vendor,
+      templateId: row.template_id,
+      documentType: row.document_type,
+      totalAmount: toNumber(row.total),
+      subtotal: toNumber(row.total),
+      status: row.status,
+      source: "auto",
+    };
+    const edit = editsByNoteId.get(row.id);
+    if (isPreservedReceiverEdit(edit)) continue;
+
+    const docForMapping = edit ? applyKwitansiEdit(baseDoc, rowToKwitansiEdit(edit)) : baseDoc;
+    const receiver = getAutofillKwitansiReceiver(docForMapping);
+    if (!receiver) continue;
+
+    const currentDataJson = asRecord(row.data_json);
+    const dataNeedsUpdate = baseDoc.kwitansiReceiverName?.trim() !== receiver;
+    let editNeedsUpdate = false;
+
+    if (dataNeedsUpdate) {
+      const { error } = await client
+        .from("generated_notes")
+        .update({ data_json: { ...currentDataJson, kwitansiReceiverName: receiver } })
+        .eq("id", row.id);
+      if (error) throw error;
+    }
+
+    if (edit) {
+      const previousCustomData = asRecord(edit.custom_data_json);
+      const customData = { ...previousCustomData, receiver_source: "auto" };
+      editNeedsUpdate = edit.nama_penerima?.trim() !== receiver || kwitansiReceiverSource(previousCustomData) !== "auto";
+      if (editNeedsUpdate) {
+        const { error } = await client
+          .from("kwitansi_edits")
+          .upsert(
+            {
+              project_id: projectId,
+              note_id: row.id,
+              nama_penerima: receiver,
+              warna_template: edit.warna_template ?? baseDoc.warnaTemplate ?? "default",
+              custom_data_json: customData,
+            },
+            { onConflict: "note_id" },
+          );
+        if (error) throw error;
+      }
+    }
+
+    if (dataNeedsUpdate || editNeedsUpdate) updated += 1;
+  }
+
+  if (updated > 0) {
+    await logHistory(client, projectId, "kwitansi_receivers_backfilled", `${updated} nama penerima kwitansi otomatis diperbarui.`);
+  }
+
+  return { checked: rows.length, updated };
+}
+
 export async function upsertKwitansiEdit(projectId: string, noteId: string, input: KwitansiEditInput) {
   const client = ensureClient(supabase());
   const { data: existingData, error: existingError } = await client
@@ -1144,6 +1265,7 @@ export async function upsertKwitansiEdit(projectId: string, noteId: string, inpu
   if (hasOwnInput(input, "uangSejumlah")) customData.uang_sejumlah = input.uangSejumlah ?? "";
   if (hasOwnInput(input, "tanggalKwitansi")) customData.tanggal_kwitansi = input.tanggalKwitansi ?? "";
   if (hasOwnInput(input, "kota")) customData.kota = input.kota ?? "";
+  if (hasOwnInput(input, "namaPenerima")) customData.receiver_source = input.receiverSource ?? "manual";
 
   const { data, error } = await client
     .from("kwitansi_edits")
