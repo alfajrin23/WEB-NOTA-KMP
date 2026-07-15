@@ -187,6 +187,15 @@ function shouldSplitFourWorkers(item: ResumeItem) {
   );
 }
 
+function isWorkerTerampilItem(item: ResumeItem) {
+  const name = normalizedText(item.itemName);
+  return name.includes("pekerja trampil") || name.includes("pekerja terampil");
+}
+
+function isWorkerBuruhItem(item: ResumeItem) {
+  return normalizedText(item.itemName).includes("pekerja buruh");
+}
+
 function cloneReceiptItem(item: ResumeItem, amount: number, suffix: string): ResumeItem {
   return {
     ...item,
@@ -203,6 +212,43 @@ type KwitansiReceiptInput = {
   sourceItemIds: string[];
   categoryNames: string[];
 };
+
+const OUTSIDE_CORE_KWITANSI_ORDER = [
+  "pencarian",
+  "sosialisasi",
+  "rapat koordinasi",
+  "pengukuran lahan",
+  "pematangan lahan",
+  "pembersihan lahan",
+  "cut n fill",
+  "sumur bor",
+] as const;
+
+function outsideCoreKwitansiOrder(item: ResumeItem) {
+  const name = normalizedText(item.itemName);
+  const index = OUTSIDE_CORE_KWITANSI_ORDER.findIndex((keyword) => name.includes(keyword));
+  return index === -1 ? 99 : index;
+}
+
+function isOutsideCoreContext(item: ResumeItem) {
+  const text = normalizedText([item.stageCode, item.stageName, item.category, item.categoryName].filter(Boolean).join(" "));
+  return (
+    item.stageCode === "RESUME_ALL" ||
+    text.includes("luar konstruksi inti") ||
+    text.includes("luar pekerjaan inti") ||
+    text.includes("di luar konstruksi inti") ||
+    text.includes("di luar pekerjaan inti")
+  );
+}
+
+function isOutsideCoreKwitansiItem(item: ResumeItem) {
+  return (
+    isKwitansiVendorItem(item) &&
+    item.isIncludedInResumeTotal !== false &&
+    outsideCoreKwitansiOrder(item) < 99 &&
+    (item.stageCode === "RESUME_ALL" || isOutsideCoreContext(item))
+  );
+}
 
 function makeKwitansiDoc(project: Project, input: KwitansiReceiptInput): GeneratedNota {
   const sortedItems = [...input.items].sort((a, b) => a.sortOrder - b.sortOrder);
@@ -237,10 +283,103 @@ function makeKwitansiDoc(project: Project, input: KwitansiReceiptInput): Generat
 
 function isExcludedStageFourKwitansiItem(item: ResumeItem) {
   if (item.stageCode !== "TAHAP_IV") return false;
-  return normalizedText(item.itemName).includes("sumuran grounding");
+  const name = normalizedText(item.itemName);
+  return name.includes("sumuran grounding") || isOutsideCoreKwitansiItem(item);
+}
+
+function isStageFourMandorItem(item: ResumeItem) {
+  return normalizedText(item.itemName) === "mandor";
+}
+
+function isStageFourHeadWorkerItem(item: ResumeItem) {
+  return normalizedText(item.itemName) === "kepala tukang";
+}
+
+function isStageFourDriverItem(item: ResumeItem) {
+  const name = normalizedText(item.itemName);
+  return (name === "sopir" || name === "supir") && !name.includes("pembantu") && !name.includes("kenek");
+}
+
+function isStageFourAssistantDriverItem(item: ResumeItem) {
+  const name = normalizedText(item.itemName);
+  return name.includes("kenek") || /pembantu\s+(sopir|supir)/.test(name);
+}
+
+function isStageFourElectricWorkerItem(item: ResumeItem) {
+  const name = normalizedText(item.itemName);
+  return name.includes("listrik") && !name.includes("daya pln") && !name.includes("penambahan daya");
+}
+
+function isStageFourWhitelistedKwitansiItem(item: ResumeItem, vendor: Vendor | undefined) {
+  if (item.stageCode !== "TAHAP_IV" || item.isIncludedInResumeTotal === false || isExcludedStageFourKwitansiItem(item)) return false;
+  if (isPpmItem(item, vendor)) return true;
+  if (!isKwitansiVendorItem(item)) return false;
+  return (
+    isStageFourMandorItem(item) ||
+    isStageFourHeadWorkerItem(item) ||
+    isWorkerTerampilItem(item) ||
+    isWorkerBuruhItem(item) ||
+    isStageFourDriverItem(item) ||
+    isStageFourAssistantDriverItem(item) ||
+    isStageFourElectricWorkerItem(item)
+  );
+}
+
+function buildStageFourKwitansiReceipts(project: Project, vendors: Vendor[]): KwitansiReceiptInput[] {
+  const kwitansiVendor = fallbackKwitansiVendor(vendors);
+  const ppmVendor = ppmKwitansiVendor(vendors);
+  const stageItems = project.items.filter((item) => item.stageCode === "TAHAP_IV" && item.isIncludedInResumeTotal !== false);
+  const receipts: KwitansiReceiptInput[] = [];
+
+  const directItems = stageItems
+    .filter((item) => isStageFourWhitelistedKwitansiItem(item, vendors.find((vendor) => vendor.id === item.vendorId)))
+    .sort((left, right) => left.sortOrder - right.sortOrder);
+
+  const ppmItems = directItems.filter((item) => isPpmItem(item, vendors.find((vendor) => vendor.id === item.vendorId)));
+  if (ppmItems.length > 0) {
+    receipts.push({
+      key: "ppm-sewa",
+      stageCode: "TAHAP_IV",
+      vendor: ppmVendor,
+      items: ppmItems,
+      sourceItemIds: ppmItems.map((item) => item.id),
+      categoryNames: ["Sewa Kebutuhan Peralatan dan Kendaraan"],
+    });
+  }
+
+  for (const item of directItems.filter((item) => !isPpmItem(item, vendors.find((vendor) => vendor.id === item.vendorId)))) {
+    if (shouldSplitFourWorkers(item)) {
+      const total = getResumeItemAmount(item);
+      const base = Math.floor(total / 4);
+      for (let part = 1; part <= 4; part += 1) {
+        const amount = part === 4 ? total - base * 3 : base;
+        receipts.push({
+          key: `${item.id}-worker-${part}`,
+          stageCode: "TAHAP_IV",
+          vendor: kwitansiVendor,
+          items: [cloneReceiptItem(item, amount, `worker_${part}`)],
+          sourceItemIds: [item.id],
+          categoryNames: [item.category],
+        });
+      }
+    } else {
+      receipts.push({
+        key: item.id,
+        stageCode: "TAHAP_IV",
+        vendor: kwitansiVendor,
+        items: [item],
+        sourceItemIds: [item.id],
+        categoryNames: [item.category],
+      });
+    }
+  }
+
+  return receipts;
 }
 
 function buildKwitansiReceiptsForStage(project: Project, vendors: Vendor[], stageCode: StageCode): KwitansiReceiptInput[] {
+  if (stageCode === "TAHAP_IV") return buildStageFourKwitansiReceipts(project, vendors);
+
   const kwitansiVendor = fallbackKwitansiVendor(vendors);
   const ppmVendor = ppmKwitansiVendor(vendors);
   const stageItems = project.items.filter((item) => item.stageCode === stageCode && item.isIncludedInResumeTotal !== false);
@@ -258,9 +397,7 @@ function buildKwitansiReceiptsForStage(project: Project, vendors: Vendor[], stag
     });
   }
 
-  const lemburItems = stageCode !== "TAHAP_IV"
-    ? stageItems.filter((item) => isKwitansiVendorItem(item) && isLemburItem(item))
-    : [];
+  const lemburItems = stageItems.filter((item) => isKwitansiVendorItem(item) && isLemburItem(item));
   if (lemburItems.length > 0) {
     receipts.push({
       key: "tenaga-lembur",
@@ -275,7 +412,7 @@ function buildKwitansiReceiptsForStage(project: Project, vendors: Vendor[], stag
   const regularItems = stageItems
     .filter((item) => isKwitansiItem(item, vendors.find((vendor) => vendor.id === item.vendorId)))
     .filter((item) => !isPpmItem(item, vendors.find((vendor) => vendor.id === item.vendorId)))
-    .filter((item) => !(stageCode !== "TAHAP_IV" && isKwitansiVendorItem(item) && isLemburItem(item)))
+    .filter((item) => !(isKwitansiVendorItem(item) && isLemburItem(item)))
     .filter((item) => !isExcludedStageFourKwitansiItem(item));
 
   for (const item of regularItems) {
@@ -307,32 +444,6 @@ function buildKwitansiReceiptsForStage(project: Project, vendors: Vendor[], stag
   }
 
   return receipts;
-}
-
-const OUTSIDE_CORE_KWITANSI_ORDER = [
-  "pencarian",
-  "sosialisasi",
-  "rapat koordinasi",
-  "pengukuran lahan",
-  "pematangan lahan",
-  "pembersihan lahan",
-  "cut n fill",
-  "sumur bor",
-] as const;
-
-function outsideCoreKwitansiOrder(item: ResumeItem) {
-  const name = normalizedText(item.itemName);
-  const index = OUTSIDE_CORE_KWITANSI_ORDER.findIndex((keyword) => name.includes(keyword));
-  return index === -1 ? 99 : index;
-}
-
-function isOutsideCoreKwitansiItem(item: ResumeItem) {
-  return (
-    item.stageCode === "RESUME_ALL" &&
-    isKwitansiVendorItem(item) &&
-    item.isIncludedInResumeTotal !== false &&
-    outsideCoreKwitansiOrder(item) < 99
-  );
 }
 
 function buildOutsideCoreKwitansiReceipts(project: Project, vendors: Vendor[]): KwitansiReceiptInput[] {
@@ -610,6 +721,17 @@ export function generateKwitansiDocuments(
     });
 }
 
+export function getKwitansiExpectedCount(
+  project: Project,
+  vendors: Vendor[],
+  stageCode: StageCode,
+  templateAssignments: TemplateAssignment[] = [],
+) {
+  return generateKwitansiDocuments(project, vendors, templateAssignments)
+    .filter((doc) => doc.stageCode === stageCode && !doc.isSpecialKwitansi)
+    .length;
+}
+
 export function getKwitansiGenerationDiagnostics(
   project: Project,
   vendors: Vendor[],
@@ -620,7 +742,8 @@ export function getKwitansiGenerationDiagnostics(
   const issues: KwitansiGenerationIssue[] = [];
   const stageCodes: StageCode[] = ["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "RESUME_ALL"];
   const stages = stageCodes.map((stageCode) => {
-    const expected = KWITANSI_TARGET_COUNTS[stageCode] ?? 0;
+    const generatedCount = regularDocs.filter((doc) => doc.stageCode === stageCode).length;
+    const expected = generatedCount || KWITANSI_TARGET_COUNTS[stageCode] || 0;
     const actual = regularDocs.filter((doc) => doc.stageCode === stageCode).length;
     const missingCount = Math.max(0, expected - actual);
     const excessCount = Math.max(0, actual - expected);

@@ -928,8 +928,7 @@ async function generateAndPersistAutoDocuments(
     .from("generated_notes")
     .select("*")
     .eq("project_id", project.id)
-    .eq("document_type", documentKind)
-    .not("auto_key", "is", null);
+    .eq("document_type", documentKind);
   if (oldError) throw oldError;
 
   // Rule lama menyimpan PLN sebagai kwitansi tahapan. Saat nota diregenerate,
@@ -943,8 +942,7 @@ async function generateAndPersistAutoDocuments(
       .eq("project_id", project.id)
       .eq("document_type", "kwitansi")
       .eq("vendor_id", "vendor-pln")
-      .eq("template_id", "template-pln")
-      .not("auto_key", "is", null);
+      .eq("template_id", "template-pln");
     if (legacyError) throw legacyError;
     legacyPlnRows = (legacyRows ?? []) as GeneratedNoteRow[];
   }
@@ -958,15 +956,17 @@ async function generateAndPersistAutoDocuments(
     oldEditRows = (editData ?? []) as KwitansiEditRow[];
   }
 
-  const oldRowByAutoKey = new Map(oldGeneratedRows.map((row) => [row.auto_key, row]));
-  const oldRowBySourceItemIds = new Map(
+  const oldRowByAutoKey = new Map(
     oldGeneratedRows
-      .map((row) => {
-        const key = sourceItemIdsKey(row.source_resume_item_ids);
-        return key ? ([key, row] as const) : null;
-      })
-      .filter((entry): entry is readonly [string, GeneratedNoteRow] => Boolean(entry)),
+      .filter((row) => Boolean(row.auto_key))
+      .map((row) => [row.auto_key as string, row] as const),
   );
+  const oldRowsBySourceItemIds = new Map<string, GeneratedNoteRow[]>();
+  for (const row of oldGeneratedRows) {
+    const key = sourceItemIdsKey(row.source_resume_item_ids);
+    if (!key) continue;
+    oldRowsBySourceItemIds.set(key, [...(oldRowsBySourceItemIds.get(key) ?? []), row]);
+  }
   const oldEditByAutoKey = new Map(
     oldEditRows
       .map((edit) => {
@@ -990,8 +990,7 @@ async function generateAndPersistAutoDocuments(
       .from("generated_notes")
       .delete()
       .eq("project_id", project.id)
-      .eq("document_type", documentKind)
-      .not("auto_key", "is", null);
+      .eq("document_type", documentKind);
     if (deleteError) throw deleteError;
   }
 
@@ -1002,8 +1001,7 @@ async function generateAndPersistAutoDocuments(
       .eq("project_id", project.id)
       .eq("document_type", "kwitansi")
       .eq("vendor_id", "vendor-pln")
-      .eq("template_id", "template-pln")
-      .not("auto_key", "is", null);
+      .eq("template_id", "template-pln");
     if (legacyDeleteError) throw legacyDeleteError;
   }
 
@@ -1022,8 +1020,11 @@ async function generateAndPersistAutoDocuments(
     const migratedPlnRow = documentKind === "nota" && doc.isSpecialKwitansi
       ? legacyPlnRowByPrintOrder.get(doc.printOrder ?? 0)
       : undefined;
-    const migratedSourceRow = documentKind === "kwitansi" && doc.stageCode === "RESUME_ALL" && doc.itemIds.length === 1
-      ? oldRowBySourceItemIds.get(sourceItemIdsKey(doc.itemIds))
+    const sourceRows = documentKind === "kwitansi" && !doc.id.includes("-worker-")
+      ? oldRowsBySourceItemIds.get(sourceItemIdsKey(doc.itemIds)) ?? []
+      : [];
+    const migratedSourceRow = sourceRows.length === 1
+      ? sourceRows[0]
       : undefined;
     const oldRow = oldRowByAutoKey.get(autoKey)
       ?? (documentKind === "nota" ? oldRowByAutoKey.get(legacyAutoKey) : undefined)

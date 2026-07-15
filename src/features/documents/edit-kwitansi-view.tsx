@@ -94,6 +94,59 @@ function kwitansiStageLabel(stageCode: StageCode) {
   return stageCode === "RESUME_ALL" ? "DI LUAR PEKERJAAN INTI" : getStageLabel(stageCode);
 }
 
+function normalizedText(value: string | undefined | null) {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function docWorkText(doc: GeneratedNota) {
+  return normalizedText([
+    doc.vendorId,
+    doc.vendorName,
+    doc.templateName,
+    doc.kwitansiRoleName,
+    doc.kwitansiPaymentDescription,
+    ...doc.items.map((item) => item.itemName),
+  ].filter(Boolean).join(" "));
+}
+
+function docWorkTitle(doc: GeneratedNota) {
+  return doc.items.map((item) => item.itemName).filter(Boolean).join(" + ") || doc.templateName;
+}
+
+const OUTSIDE_CORE_LABELS = [
+  "pencarian",
+  "sosialisasi",
+  "rapat koordinasi",
+  "pengukuran lahan",
+  "pematangan lahan",
+  "pembersihan lahan",
+  "cut n fill",
+  "sumur bor",
+] as const;
+
+function outsideCoreLabel(text: string) {
+  return OUTSIDE_CORE_LABELS.find((label) => text.includes(label)) ?? null;
+}
+
+function isStageFourAllowedDoc(doc: GeneratedNota) {
+  const text = docWorkText(doc);
+  if (outsideCoreLabel(text)) return false;
+  if (text.includes("sumuran grounding")) return false;
+  return (
+    text.includes("mandor") ||
+    text.includes("kepala tukang") ||
+    text.includes("pekerja trampil") ||
+    text.includes("pekerja terampil") ||
+    text.includes("pekerja buruh") ||
+    ((text.includes("sopir") || text.includes("supir")) && !text.includes("pembantu") && !text.includes("kenek")) ||
+    text.includes("pembantu") ||
+    text.includes("kenek") ||
+    text.includes("pratama project mandiri") ||
+    text.includes("ppm") ||
+    text.includes("listrik")
+  );
+}
+
 export function EditKwitansiView() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
@@ -165,23 +218,67 @@ export function EditKwitansiView() {
     return counts;
   }, [regularDocs]);
 
+  const generationDiagnostics = useMemo(
+    () => project ? getKwitansiGenerationDiagnostics(project, vendors, templateAssignments) : null,
+    [project, templateAssignments, vendors],
+  );
+  const expectedByStage = useMemo(() => {
+    const values = new Map<StageCode, number>();
+    for (const stage of generationDiagnostics?.stages ?? []) {
+      values.set(stage.stageCode, stage.expected);
+    }
+    return values;
+  }, [generationDiagnostics]);
+
   const countWarnings = useMemo(() => {
     if (docs.length === 0) return [];
     return STAGES
       .map((stage) => ({
         stage,
         actual: countsByStage.get(stage.code) ?? 0,
-        expected: KWITANSI_TARGET_COUNTS[stage.code] ?? 0,
+        expected: generationDiagnostics?.stages.find((entry) => entry.stageCode === stage.code)?.expected ?? KWITANSI_TARGET_COUNTS[stage.code] ?? 0,
       }))
       .filter((entry) => entry.expected > 0 && entry.actual !== entry.expected);
-  }, [countsByStage, docs.length]);
+  }, [countsByStage, docs.length, generationDiagnostics]);
 
-  const generationDiagnostics = useMemo(
-    () => project ? getKwitansiGenerationDiagnostics(project, vendors, templateAssignments) : null,
-    [project, templateAssignments, vendors],
-  );
   const generationIssues = useMemo(() => {
     const issues = generationDiagnostics?.issues.map((issue) => issue.message) ?? [];
+    if (regularDocs.length > 0) {
+      const stageFourDocs = regularDocs.filter((doc) => doc.stageCode === "TAHAP_IV");
+      const outsideDocs = regularDocs.filter((doc) => doc.stageCode === "RESUME_ALL");
+      const outsideFound = new Set(outsideDocs.map((doc) => outsideCoreLabel(docWorkText(doc))).filter((label): label is NonNullable<typeof label> => Boolean(label)));
+      const missingOutside = OUTSIDE_CORE_LABELS.filter((label) => !outsideFound.has(label));
+      for (const label of missingOutside) {
+        issues.push(`Kwitansi Di Luar Pekerjaan Inti belum tampil untuk item: ${label}.`);
+      }
+      for (const doc of stageFourDocs) {
+        const text = docWorkText(doc);
+        const outsideLabel = outsideCoreLabel(text);
+        if (outsideLabel) {
+          issues.push(`Item luar inti "${docWorkTitle(doc)}" masih masuk Tahap 4; harus pindah ke Di Luar Pekerjaan Inti.`);
+        } else if (!isStageFourAllowedDoc(doc)) {
+          issues.push(`Kwitansi Tahap 4 di luar whitelist: ${docWorkTitle(doc)}.`);
+        }
+      }
+      const seen = new Map<string, GeneratedNota[]>();
+      for (const doc of regularDocs) {
+        const text = docWorkText(doc);
+        if (text.includes("pekerja trampil") || text.includes("pekerja terampil") || text.includes("pekerja buruh")) continue;
+        const key = [
+          doc.stageCode,
+          doc.vendorId,
+          normalizedText(docWorkTitle(doc)),
+          getKwitansiAmount(doc),
+          doc.tanggal || doc.notaDate,
+        ].join("|");
+        seen.set(key, [...(seen.get(key) ?? []), doc]);
+      }
+      for (const duplicateDocs of seen.values()) {
+        if (duplicateDocs.length > 1) {
+          issues.push(`Duplikat kwitansi terdeteksi: ${docWorkTitle(duplicateDocs[0])} (${duplicateDocs.length} kali).`);
+        }
+      }
+    }
     for (const warning of countWarnings) {
       const stageHasItemIssue = generationDiagnostics?.issues.some((issue) => issue.stageCode === warning.stage.code);
       if (stageHasItemIssue) continue;
@@ -193,7 +290,7 @@ export function EditKwitansiView() {
       );
     }
     return issues;
-  }, [countWarnings, generationDiagnostics]);
+  }, [countWarnings, generationDiagnostics, regularDocs]);
 
   const missingReceiverDocs = useMemo(() => docs.filter((doc) => !doc.kwitansiReceiverName?.trim()), [docs]);
   const selected = selectedId ? filteredDocs.find((doc) => doc.id === selectedId) ?? null : null;
@@ -408,7 +505,7 @@ export function EditKwitansiView() {
         <div className="no-print grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
           {STAGES.map((stage) => {
             const actual = countsByStage.get(stage.code) ?? 0;
-            const expected = KWITANSI_TARGET_COUNTS[stage.code] ?? 0;
+            const expected = expectedByStage.get(stage.code) ?? KWITANSI_TARGET_COUNTS[stage.code] ?? 0;
             const complete = expected > 0 && actual === expected;
             return (
               <div key={stage.code} className={`rounded-xl border p-3 text-sm ${complete ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200" : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100"}`}>
