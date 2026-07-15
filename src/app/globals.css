@@ -1260,7 +1260,9 @@ textarea {
   position: absolute;
   top: 0;
   right: 0;
-  width: 47.6mm;
+  display: grid;
+  grid-template-columns: 13.5mm 2.4mm 1fr;
+  width: 42.5mm;
   margin-bottom: 0;
   white-space: nowrap;
 }
@@ -1269,7 +1271,7 @@ textarea {
   position: absolute;
   top: 5.4mm;
   right: 0;
-  width: 40.5mm;
+  width: 42.5mm;
   font-size: 8.2pt;
   line-height: 1.16;
   text-align: left;
@@ -1300,11 +1302,22 @@ textarea {
   line-height: 1;
 }
 
+.mandau-table th:first-child {
+  padding-right: 0.2mm;
+  padding-left: 0.2mm;
+  font-size: 7pt;
+  line-height: 0.95;
+}
+
 .mandau-table td {
   height: 6.78mm;
   line-height: 1.05;
   font-size: 8pt;
   white-space: nowrap;
+}
+
+.mandau-table td:first-child {
+  text-align: center;
 }
 
 .mandau-col-qty {
@@ -2224,14 +2237,18 @@ textarea {
 
 .ctk-signature i {
   position: absolute;
-  left: 0;
+  left: 50%;
   bottom: 0;
+  display: block;
+  width: 34mm;
+  transform: translateX(-50%);
   font-style: normal;
+  text-align: center;
 }
 
 .ctk-signature div:last-child i {
-  right: 0;
-  left: auto;
+  right: auto;
+  left: 50%;
 }
 
 .multi-pln-page {

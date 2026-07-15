@@ -19,7 +19,11 @@ function TBMandauSlot({ group, project }: { group: NotaGroup | null; project: St
   return (
     <section className="stage1-note-slot mandau-slot">
       <header className="mandau-header">
-        <div className="mandau-date">Cianjur&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: <span>{group ? formatDateSlash(group.date) : ""}</span></div>
+        <div className="mandau-date">
+          <span>Cianjur</span>
+          <span>:</span>
+          <span>{group ? formatDateSlash(group.date) : ""}</span>
+        </div>
         <div className="mandauRecipientBlock">
           <div className="font-bold">Kepada Yth. :</div>
           <div>KDKMP Desa {project.villageName}</div>
@@ -46,7 +50,7 @@ function TBMandauSlot({ group, project }: { group: NotaGroup | null; project: St
         <tbody>
           {rows.map((item, index) => (
             <tr key={item?.id ?? `blank-${index}`}>
-              <td className="right">{item ? `${formatPlainNumber(item.volume)} ${item.unit}` : ""}</td>
+              <td className="center">{item ? `${formatPlainNumber(item.volume)} ${item.unit}` : ""}</td>
               <td>{item?.itemName ?? ""}</td>
               <td className="right">{item ? formatPlainNumber(item.unitPrice) : ""}</td>
               <td className="right">{item ? formatPlainNumber(itemAmount(item)) : ""}</td>
