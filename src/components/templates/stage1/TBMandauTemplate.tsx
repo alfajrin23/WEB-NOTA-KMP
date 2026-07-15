@@ -20,9 +20,11 @@ function TBMandauSlot({ group, project }: { group: NotaGroup | null; project: St
     <section className="stage1-note-slot mandau-slot">
       <header className="mandau-header">
         <div className="mandau-date">Cianjur&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: <span>{group ? formatDateSlash(group.date) : ""}</span></div>
-        <div className="font-bold">Kepada Yth. :</div>
-        <div>KDKMP Desa {project.villageName}</div>
-        <div>Kecamatan {project.districtName}</div>
+        <div className="mandauRecipientBlock">
+          <div className="font-bold">Kepada Yth. :</div>
+          <div>KDKMP Desa {project.villageName}</div>
+          <div>Kecamatan {project.districtName}</div>
+        </div>
       </header>
       <div className="nota-number">NOTA NO.</div>
 

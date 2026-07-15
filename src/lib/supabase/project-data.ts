@@ -5,6 +5,7 @@ import { ALL_TEMPLATE_ASSIGNMENTS, findTemplateDefinition, resolveTemplateAssign
 import { getStageLabel } from "@/constants/stages";
 import { initialProjects, masterTemplateItems, vendors } from "@/constants/seed-data";
 import { generateKwitansiDocuments, generateNotaDocuments } from "@/lib/nota-generator";
+import { isSpecialPLNKwitansi } from "@/lib/pln-document-groups";
 import { shiftResumeItemsFromDefault } from "@/lib/project-date-shift";
 import { buildResumeItemsForNewProject } from "@/lib/resume-history";
 import { buildProjectSummary, getResumeItemAmount } from "@/lib/resume-calculations";
@@ -208,6 +209,14 @@ function latestTimestamp(values: Array<string | null | undefined>): string {
 
 function customString(custom: JsonRecord, key: string, fallback: string | undefined) {
   return Object.prototype.hasOwnProperty.call(custom, key) ? asString(custom[key]) : fallback;
+}
+
+function withoutSpecialPlnAmountEdit(doc: GeneratedNota, custom: JsonRecord) {
+  if (!isSpecialPLNKwitansi(doc)) return custom;
+  const rest = { ...custom };
+  delete rest.nominal;
+  delete rest.uang_sejumlah;
+  return rest;
 }
 
 function asStageCode(value: string | undefined | null): StageCode {
@@ -480,7 +489,7 @@ function rowToKwitansiEdit(row: KwitansiEditRow): KwitansiEdit {
 
 function applyKwitansiEdit(doc: GeneratedNota, edit: KwitansiEdit | undefined): GeneratedNota {
   if (!edit) return doc;
-  const custom = asRecord(edit.customDataJson);
+  const custom = withoutSpecialPlnAmountEdit(doc, asRecord(edit.customDataJson));
   return {
     ...doc,
     kwitansiReceiverName: edit.namaPenerima,
@@ -1041,12 +1050,13 @@ async function generateAndPersistAutoDocuments(
     .map((row) => {
       const oldEdit = row.auto_key ? oldEditByAutoKey.get(row.auto_key) ?? carriedEditByNewAutoKey.get(row.auto_key) : undefined;
       if (!oldEdit) return null;
+      const doc = row.auto_key ? docsByAutoKey.get(row.auto_key) : undefined;
       return {
         project_id: project.id,
         note_id: row.id,
         nama_penerima: oldEdit.nama_penerima,
         warna_template: oldEdit.warna_template,
-        custom_data_json: oldEdit.custom_data_json ?? {},
+        custom_data_json: doc ? withoutSpecialPlnAmountEdit(doc, asRecord(oldEdit.custom_data_json)) : oldEdit.custom_data_json ?? {},
       };
     })
     .filter((row): row is NonNullable<typeof row> => Boolean(row));

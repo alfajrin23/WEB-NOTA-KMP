@@ -1003,17 +1003,35 @@ textarea {
 }
 
 .murah-recipient {
-  padding-top: 5.2mm;
+  position: relative;
+  padding-top: 0;
   font-size: 6.3pt;
   line-height: 1.38;
 }
 
-.murah-recipient .font-bold {
-  margin-top: 2.7mm;
+.murah-date {
+  position: absolute;
+  top: 5.2mm;
+  right: 0.5mm;
+  width: 39mm;
+  white-space: nowrap;
 }
 
-.murah-recipient .recipient-name {
-  margin-top: 0.8mm;
+.murahMajuRecipientBlock {
+  position: absolute;
+  top: 13.2mm;
+  right: 0.5mm;
+  width: 38mm;
+  line-height: 1.24;
+  text-align: left;
+}
+
+.murahMajuRecipientBlock .font-bold {
+  margin-top: 0;
+}
+
+.murahMajuRecipientBlock .recipient-name {
+  margin-top: 0.7mm;
 }
 
 .murah-maju-slot .nota-number {
@@ -1229,9 +1247,9 @@ textarea {
 
 .mandau-header {
   position: absolute;
-  left: 47.5mm;
+  left: 0;
   top: 0;
-  width: 47.6mm;
+  width: 95.1mm;
   height: 20mm;
   margin: 0;
   font-size: 8.4pt;
@@ -1239,7 +1257,22 @@ textarea {
 }
 
 .mandau-date {
-  margin-bottom: 2mm;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 47.6mm;
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+
+.mandauRecipientBlock {
+  position: absolute;
+  top: 5.4mm;
+  right: 0;
+  width: 40.5mm;
+  font-size: 8.2pt;
+  line-height: 1.16;
+  text-align: left;
 }
 
 .mandau-slot .nota-number {

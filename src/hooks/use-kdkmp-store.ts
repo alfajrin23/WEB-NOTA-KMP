@@ -6,6 +6,7 @@ import { initialProjects, masterTemplateItems, vendors } from "@/constants/seed-
 import { ALL_TEMPLATE_ASSIGNMENTS } from "@/constants/template-mapping";
 import { getStageLabel } from "@/constants/stages";
 import { generateKwitansiDocuments, generateNotaDocuments } from "@/lib/nota-generator";
+import { isSpecialPLNKwitansi } from "@/lib/pln-document-groups";
 import {
   daysBetweenIsoDates,
   shiftDateLikeStringByDays,
@@ -188,6 +189,7 @@ function buildShiftedKwitansiEditInput(doc: GeneratedNota, days: number) {
   const currentDate = doc.kwitansiDate ?? "";
   const shiftedDescription = shiftTextDatesByDays(currentDescription, days);
   const shiftedDate = shiftDateLikeStringByDays(currentDate, days);
+  const locksAmountToResume = isSpecialPLNKwitansi(doc);
 
   if (shiftedDescription === currentDescription && shiftedDate === currentDate) return null;
 
@@ -199,8 +201,8 @@ function buildShiftedKwitansiEditInput(doc: GeneratedNota, days: number) {
     keterangan: shiftedDescription,
     jabatan: doc.kwitansiRoleName ?? "",
     catatan: doc.kwitansiNote ?? "",
-    nominal: doc.kwitansiAmount ?? null,
-    uangSejumlah: doc.kwitansiAmountWords ?? "",
+    nominal: locksAmountToResume ? null : doc.kwitansiAmount ?? null,
+    uangSejumlah: locksAmountToResume ? "" : doc.kwitansiAmountWords ?? "",
     tanggalKwitansi: shiftedDate,
     kota: doc.kwitansiCity ?? "",
   };
@@ -821,6 +823,7 @@ export function useKdkmpStore() {
     generatedNotasRef.current = nextDocs;
     setGeneratedNotas(nextDocs);
 
+    const locksAmountToResume = isSpecialPLNKwitansi(nextDoc);
     const input = {
       namaPenerima: nextDoc.kwitansiReceiverName ?? "",
       warnaTemplate: nextDoc.warnaTemplate ?? "default",
@@ -829,8 +832,8 @@ export function useKdkmpStore() {
       keterangan: nextDoc.kwitansiPaymentDescription ?? "",
       jabatan: nextDoc.kwitansiRoleName ?? "",
       catatan: nextDoc.kwitansiNote ?? "",
-      nominal: nextDoc.kwitansiAmount ?? null,
-      uangSejumlah: nextDoc.kwitansiAmountWords ?? "",
+      nominal: locksAmountToResume ? null : nextDoc.kwitansiAmount ?? null,
+      uangSejumlah: locksAmountToResume ? "" : nextDoc.kwitansiAmountWords ?? "",
       tanggalKwitansi: nextDoc.kwitansiDate ?? "",
       kota: nextDoc.kwitansiCity ?? "",
     };

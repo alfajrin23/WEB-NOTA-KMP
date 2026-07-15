@@ -35,10 +35,12 @@ function MurahMajuSlot({ group, project }: { group: NotaGroup | null; project: S
           </div>
         </div>
         <div className="murah-recipient">
-          <div>Cibadak, <span>{group ? formatDateSlash(group.date) : ""}</span></div>
-          <div className="font-bold">Kepada Yth. :</div>
-          <div className="recipient-name">KDKMP Desa {project.villageName}</div>
-          <div className="recipient-name">Kecamatan {project.districtName}</div>
+          <div className="murah-date">Cibadak, <span>{group ? formatDateSlash(group.date) : ""}</span></div>
+          <div className="murahMajuRecipientBlock">
+            <div className="font-bold">Kepada Yth. :</div>
+            <div className="recipient-name">KDKMP Desa {project.villageName}</div>
+            <div className="recipient-name">Kecamatan {project.districtName}</div>
+          </div>
         </div>
       </header>
 

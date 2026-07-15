@@ -317,21 +317,20 @@ function makeSpecialPlnNotaDoc({
   sourceItem,
   printOrder,
   paymentDescription,
-  amount,
 }: {
   project: Project;
   vendor: Vendor;
   sourceItem: ResumeItem;
   printOrder: 1 | 2;
   paymentDescription: string;
-  amount: number;
 }): GeneratedNota {
+  const amount = getResumeItemAmount(sourceItem);
+  const amountWords = terbilangRupiah(amount);
   const kwitansiItem: ResumeItem = {
     ...sourceItem,
     stageCode: "TAHAP_IV",
     stageName: "Tahap IV - Kwitansi Pembayaran PLN",
     itemName: paymentDescription,
-    amountOverride: amount,
   };
   const base = makeKwitansiDoc(project, {
     key: `${PLN_PRINT_GROUP_KEY}-${printOrder}`,
@@ -356,11 +355,11 @@ function makeSpecialPlnNotaDoc({
     notaDate: kwitansiDate,
     subtotal: amount,
     totalAmount: amount,
-    terbilang: terbilangRupiah(amount),
+    terbilang: amountWords,
     kwitansiPayerName: `KDKMP DESA ${project.villageName.toUpperCase()}`,
     kwitansiPaymentDescription: paymentDescription,
     kwitansiAmount: amount,
-    kwitansiAmountWords: terbilangRupiah(amount),
+    kwitansiAmountWords: amountWords,
     kwitansiDate,
     kwitansiCity: project.regencyName || project.districtName || "Cianjur",
     printGroupKey: PLN_PRINT_GROUP_KEY,
@@ -387,7 +386,6 @@ function buildSpecialPlnNotaDocs(project: Project, vendors: Vendor[]) {
       sourceItem: initialInstallation,
       printOrder: 1,
       paymentDescription: "Pemasangan Listrik Daya 5500 VA Dan Pemasangan Panel Listrik 3 Phase",
-      amount: 7_200_000,
     }));
   }
 
@@ -398,7 +396,6 @@ function buildSpecialPlnNotaDocs(project: Project, vendors: Vendor[]) {
       sourceItem: powerUpgrade,
       printOrder: 2,
       paymentDescription: "Tambah Daya 5500 VA ke 16.500 VA Dan Pemasangan Panel Listrik 3 Phase",
-      amount: 15_500_000,
     }));
   }
 

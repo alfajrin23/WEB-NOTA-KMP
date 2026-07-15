@@ -22,6 +22,11 @@ const plnSlots = [
   { x: "22mm", y: "150mm", width: "166mm", height: "130mm" },
 ];
 
+function findResumeSourceItem(doc: GeneratedNota, project: Project) {
+  const ids = [...doc.itemIds, ...doc.items.map((item) => item.id)].filter(Boolean);
+  return ids.map((id) => project.items.find((item) => item.id === id)).find(Boolean);
+}
+
 function PLNSlip({
   doc,
   project,
@@ -32,8 +37,9 @@ function PLNSlip({
   if (!doc) return null;
 
   const itemsAmount = doc.items.reduce((sum, item) => sum + itemAmount(item), 0);
-  const amount = doc.kwitansiAmount ?? doc.totalAmount ?? itemsAmount;
-  const amountWords = doc.kwitansiAmountWords?.trim() || amountWordsItalic(amount);
+  const sourceItem = findResumeSourceItem(doc, project);
+  const amount = sourceItem ? itemAmount(sourceItem) : (itemsAmount || doc.kwitansiAmount || doc.totalAmount);
+  const amountWords = amountWordsItalic(amount);
   const paymentDescription = doc.kwitansiPaymentDescription?.trim()
     || doc.items.map((item) => item.itemName.trim()).filter(Boolean).join(" Dan ")
     || doc.templateName;
