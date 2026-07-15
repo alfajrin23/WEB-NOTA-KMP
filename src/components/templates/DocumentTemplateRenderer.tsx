@@ -33,7 +33,7 @@ export function DocumentTemplateRenderer({
     return <PLNTemplate doc={doc} project={project} zoom={zoom} debug={debug} />;
   }
 
-  if (doc.documentType === "kwitansi" || doc.vendorId === "vendor-kwitansi") {
+  if (doc.documentType === "kwitansi") {
     if (doc.stageCode === "TAHAP_I") return <KwitansiTahap1 doc={doc} project={project} zoom={zoom} debug={debug} />;
     return <KwitansiStageTemplate doc={doc} project={project} zoom={zoom} debug={debug} />;
   }

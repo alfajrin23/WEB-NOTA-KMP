@@ -23,7 +23,7 @@ export function Stage1TemplateRenderer({
   zoom: number;
   debug?: boolean;
 }) {
-  if (doc.documentType === "kwitansi" || doc.vendorId === "vendor-kwitansi") {
+  if (doc.documentType === "kwitansi") {
     return <KwitansiTahap1 doc={doc} project={project} zoom={zoom} debug={debug} />;
   }
 

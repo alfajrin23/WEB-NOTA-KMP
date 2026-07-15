@@ -174,16 +174,16 @@ export function EditKwitansiView() {
   const docs = useMemo(() => {
     return generatedNotas
       .filter((doc) => doc.projectId === projectId)
-      .filter((doc) => doc.documentType === "kwitansi" || doc.vendorId === "vendor-kwitansi")
+      .filter((doc) => doc.documentType === "kwitansi")
       .map((doc) => doc as EditableKwitansiDoc)
       .sort((a, b) => {
         const stageA = STAGES.findIndex((stage) => stage.code === a.stageCode);
         const stageB = STAGES.findIndex((stage) => stage.code === b.stageCode);
-        return stageA - stageB || a.templateName.localeCompare(b.templateName) || a.id.localeCompare(b.id);
+        return stageA - stageB || (a.printOrder ?? 0) - (b.printOrder ?? 0) || a.templateName.localeCompare(b.templateName) || a.id.localeCompare(b.id);
       });
   }, [generatedNotas, projectId]);
 
-  const regularDocs = useMemo(() => docs.filter((doc) => !doc.isSpecialKwitansi), [docs]);
+  const regularDocs = useMemo(() => docs.filter((doc) => !doc.isSpecialKwitansi && doc.source !== "custom"), [docs]);
   const editedNoteIds = useMemo(() => new Set(kwitansiEdits.map((edit) => edit.noteId)), [kwitansiEdits]);
 
   const filteredDocs = useMemo(() => {

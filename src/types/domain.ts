@@ -1,5 +1,7 @@
 export type StageCode = "TAHAP_I" | "TAHAP_II" | "TAHAP_III" | "TAHAP_IV" | "RESUME_ALL";
 
+export type KwitansiGroupCode = "TAHAP_1" | "TAHAP_2" | "TAHAP_3" | "TAHAP_4" | "LUAR_INTI";
+
 export type VendorType = "material" | "equipment" | "labor" | "utility" | "internal";
 
 export type ProjectStatus = "draft" | "review" | "generated" | "archived";
@@ -145,6 +147,7 @@ export type GeneratedNota = {
   printGroupKey?: string;
   printOrder?: number;
   isSpecialKwitansi?: boolean;
+  kwitansiGroupCode?: KwitansiGroupCode;
   warnaTemplate?: string;
   customReason?: string;
 };

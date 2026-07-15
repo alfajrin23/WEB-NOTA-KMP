@@ -102,7 +102,7 @@ function isLemburDoc(doc: GeneratedNota) {
 }
 
 function isOutsideCoreWork(doc: GeneratedNota) {
-  return doc.items.some((item) => item.stageCode === "RESUME_ALL");
+  return doc.stageCode === "RESUME_ALL" || doc.kwitansiGroupCode === "LUAR_INTI" || doc.items.some((item) => item.stageCode === "RESUME_ALL");
 }
 
 function isPpmServiceDoc(doc: GeneratedNota) {

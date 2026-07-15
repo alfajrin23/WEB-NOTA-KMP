@@ -241,11 +241,35 @@ function withoutSpecialPlnAmountEdit(doc: GeneratedNota, custom: JsonRecord) {
   return rest;
 }
 
+function identityOnlyKwitansiEdit(edit: KwitansiEditRow): KwitansiEditRow {
+  const custom = asRecord(edit.custom_data_json);
+  const identityData: JsonRecord = {};
+  for (const key of ["nama_pemberi", "receiver_source", "prepared_for_template_variants"]) {
+    if (Object.prototype.hasOwnProperty.call(custom, key)) identityData[key] = custom[key];
+  }
+  return { ...edit, custom_data_json: identityData };
+}
+
 function asStageCode(value: string | undefined | null): StageCode {
   if (value === "TAHAP_I" || value === "TAHAP_II" || value === "TAHAP_III" || value === "TAHAP_IV" || value === "RESUME_ALL") {
     return value;
   }
+  if (value === "LUAR_INTI" || value === "DI_LUAR_PEKERJAAN_INTI") return "RESUME_ALL";
   return "TAHAP_I";
+}
+
+function generatedNoteStageForStorage(doc: GeneratedNota) {
+  return doc.documentType === "kwitansi" && (doc.stageCode === "RESUME_ALL" || doc.kwitansiGroupCode === "LUAR_INTI")
+    ? "LUAR_INTI"
+    : doc.stageCode;
+}
+
+function kwitansiGroupForStage(stageCode: StageCode): NonNullable<GeneratedNota["kwitansiGroupCode"]> {
+  if (stageCode === "TAHAP_I") return "TAHAP_1";
+  if (stageCode === "TAHAP_II") return "TAHAP_2";
+  if (stageCode === "TAHAP_III") return "TAHAP_3";
+  if (stageCode === "TAHAP_IV") return "TAHAP_4";
+  return "LUAR_INTI";
 }
 
 function vendorById(vendorId: string | undefined | null) {
@@ -501,6 +525,16 @@ function parseGeneratedNota(value: unknown): GeneratedNota | null {
   return record as GeneratedNota;
 }
 
+function isGeneratedKwitansiRow(row: GeneratedNoteRow) {
+  const parsed = parseGeneratedNota(row.data_json);
+  return (
+    row.document_type === "kwitansi" ||
+    row.template_id.startsWith("kwitansi-") ||
+    row.auto_key?.startsWith("kwitansi:") === true ||
+    parsed?.documentType === "kwitansi"
+  );
+}
+
 function rowToKwitansiEdit(row: KwitansiEditRow): KwitansiEdit {
   return {
     id: row.id,
@@ -546,12 +580,13 @@ function rowsToGeneratedNotas(rows: GeneratedNoteRow[], editRows: KwitansiEditRo
     .map((row) => {
       const parsed = parseGeneratedNota(row.data_json);
       if (!parsed) return null;
+      const stageCode = asStageCode(row.tahap);
       const doc: GeneratedNota = {
         ...parsed,
         id: row.id,
         projectId: row.project_id,
-        stageCode: asStageCode(row.tahap),
-        stageId: asStageCode(row.tahap),
+        stageCode,
+        stageId: stageCode,
         vendorId: row.vendor_id ?? parsed.vendorId,
         vendorName: row.vendor,
         templateId: row.template_id,
@@ -560,6 +595,7 @@ function rowsToGeneratedNotas(rows: GeneratedNoteRow[], editRows: KwitansiEditRo
         subtotal: toNumber(row.total),
         status: row.status,
         source: "auto",
+        kwitansiGroupCode: row.document_type === "kwitansi" ? kwitansiGroupForStage(stageCode) : parsed.kwitansiGroupCode,
       };
       return applyKwitansiEdit(doc, editsByNoteId.get(row.id));
     })
@@ -570,12 +606,13 @@ function rowToCustomNote(row: CustomNoteRow): CustomNote | null {
   const parsed = parseGeneratedNota(row.data_json);
   if (!parsed) return null;
   const vendor = vendorById(row.vendor_id) ?? vendors.find((entry) => entry.name === row.vendor) ?? vendors[0];
+  const stageCode = asStageCode(row.tahap);
   const doc: GeneratedNota = {
     ...parsed,
     id: row.id,
     projectId: row.project_id,
-    stageCode: asStageCode(row.tahap),
-    stageId: asStageCode(row.tahap),
+    stageCode,
+    stageId: stageCode,
     vendorId: vendor.id,
     vendorName: vendor.name,
     vendor,
@@ -586,6 +623,7 @@ function rowToCustomNote(row: CustomNoteRow): CustomNote | null {
     source: "custom",
     status: "generated",
     customReason: row.alasan ?? undefined,
+    kwitansiGroupCode: row.document_type === "kwitansi" ? kwitansiGroupForStage(stageCode) : parsed.kwitansiGroupCode,
   };
 
   return {
@@ -924,12 +962,16 @@ async function generateAndPersistAutoDocuments(
     ? generateKwitansiDocuments(project, vendors, templateAssignments)
     : generateNotaDocuments(project, vendors, templateAssignments);
 
-  const { data: oldRows, error: oldError } = await client
+  const { data: projectGeneratedData, error: oldError } = await client
     .from("generated_notes")
     .select("*")
-    .eq("project_id", project.id)
-    .eq("document_type", documentKind);
+    .eq("project_id", project.id);
   if (oldError) throw oldError;
+
+  const projectGeneratedRows = (projectGeneratedData ?? []) as GeneratedNoteRow[];
+  const oldRows = documentKind === "kwitansi"
+    ? projectGeneratedRows.filter(isGeneratedKwitansiRow)
+    : projectGeneratedRows.filter((row) => row.document_type === "nota" && !isGeneratedKwitansiRow(row));
 
   // Rule lama menyimpan PLN sebagai kwitansi tahapan. Saat nota diregenerate,
   // ambil baris lama itu juga agar edit manual dapat dibawa ke dokumen nota PLN
@@ -947,7 +989,7 @@ async function generateAndPersistAutoDocuments(
     legacyPlnRows = (legacyRows ?? []) as GeneratedNoteRow[];
   }
 
-  const oldGeneratedRows = [...((oldRows ?? []) as GeneratedNoteRow[]), ...legacyPlnRows];
+  const oldGeneratedRows = [...oldRows, ...legacyPlnRows];
   const oldIds = oldGeneratedRows.map((row) => row.id);
   let oldEditRows: KwitansiEditRow[] = [];
   if (oldIds.length > 0) {
@@ -985,24 +1027,30 @@ async function generateAndPersistAutoDocuments(
       .filter((entry): entry is readonly [number, GeneratedNoteRow] => Boolean(entry)),
   );
 
+  if (documentKind === "kwitansi") {
+    const debugDoc = (doc: GeneratedNota) => ({
+      id: doc.id,
+      group: doc.kwitansiGroupCode,
+      stage: doc.stageCode,
+      item: doc.items.map((item) => item.itemName).join(" + "),
+      amount: doc.totalAmount,
+      sourceItemIds: doc.itemIds,
+    });
+    console.info("[kwitansi:regenerate] classification", {
+      resumeItemCount: project.items.length,
+      staleReceiptCount: oldGeneratedRows.length,
+      tahap4Items: generatedDocs.filter((doc) => doc.stageCode === "TAHAP_IV").map(debugDoc),
+      luarIntiItems: generatedDocs.filter((doc) => doc.stageCode === "RESUME_ALL").map(debugDoc),
+      receiptsToInsert: generatedDocs.map(debugDoc),
+    });
+  }
+
   if (oldGeneratedRows.length > 0) {
     const { error: deleteError } = await client
       .from("generated_notes")
       .delete()
-      .eq("project_id", project.id)
-      .eq("document_type", documentKind);
+      .in("id", oldIds);
     if (deleteError) throw deleteError;
-  }
-
-  if (documentKind === "nota" && legacyPlnRows.length > 0) {
-    const { error: legacyDeleteError } = await client
-      .from("generated_notes")
-      .delete()
-      .eq("project_id", project.id)
-      .eq("document_type", "kwitansi")
-      .eq("vendor_id", "vendor-pln")
-      .eq("template_id", "template-pln");
-    if (legacyDeleteError) throw legacyDeleteError;
   }
 
   if (documentKind === "nota") {
@@ -1020,7 +1068,7 @@ async function generateAndPersistAutoDocuments(
     const migratedPlnRow = documentKind === "nota" && doc.isSpecialKwitansi
       ? legacyPlnRowByPrintOrder.get(doc.printOrder ?? 0)
       : undefined;
-    const sourceRows = documentKind === "kwitansi" && !doc.id.includes("-worker-")
+    const sourceRows = documentKind === "kwitansi"
       ? oldRowsBySourceItemIds.get(sourceItemIdsKey(doc.itemIds)) ?? []
       : [];
     const migratedSourceRow = sourceRows.length === 1
@@ -1030,10 +1078,13 @@ async function generateAndPersistAutoDocuments(
       ?? (documentKind === "nota" ? oldRowByAutoKey.get(legacyAutoKey) : undefined)
       ?? migratedPlnRow
       ?? migratedSourceRow;
-    const oldEdit = oldEditByAutoKey.get(autoKey)
+    const matchedOldEdit = oldEditByAutoKey.get(autoKey)
       ?? (documentKind === "nota" ? oldEditByAutoKey.get(legacyAutoKey) : undefined)
       ?? (migratedPlnRow ? oldEditByNoteId.get(migratedPlnRow.id) : undefined)
       ?? (migratedSourceRow ? oldEditByNoteId.get(migratedSourceRow.id) : undefined);
+    const oldEdit = matchedOldEdit && doc.id.includes("-worker-") && migratedSourceRow
+      ? identityOnlyKwitansiEdit(matchedOldEdit)
+      : matchedOldEdit;
     if (oldEdit) carriedEditByNewAutoKey.set(autoKey, oldEdit);
     const preserveOldReceiver = isPreservedReceiverEdit(oldEdit);
     const data: GeneratedNota = {
@@ -1047,7 +1098,7 @@ async function generateAndPersistAutoDocuments(
 
     return {
       project_id: project.id,
-      tahap: doc.stageCode,
+      tahap: generatedNoteStageForStorage(doc),
       vendor: doc.vendorName,
       vendor_id: doc.vendorId,
       template_id: doc.templateId,
@@ -1080,6 +1131,23 @@ async function generateAndPersistAutoDocuments(
   if (insertError) throw insertError;
 
   const inserted = (insertedRows ?? []) as GeneratedNoteRow[];
+  if (documentKind === "kwitansi") {
+    const { data: persistedData, error: verificationError } = await client
+      .from("generated_notes")
+      .select("id,tahap")
+      .eq("project_id", project.id)
+      .eq("document_type", "kwitansi");
+    const persistedRows = (persistedData ?? []) as Array<Pick<GeneratedNoteRow, "id" | "tahap">>;
+    if (verificationError) console.warn("[kwitansi:regenerate] verification query failed", verificationError);
+    console.info("[kwitansi:regenerate] persisted", {
+      insertedCount: inserted.length,
+      tahap4Count: inserted.filter((row) => asStageCode(row.tahap) === "TAHAP_IV").length,
+      luarIntiCount: inserted.filter((row) => asStageCode(row.tahap) === "RESUME_ALL").length,
+      databaseReceiptCount: verificationError ? null : persistedRows.length,
+      databaseLuarIntiCount: verificationError ? null : persistedRows.filter((row) => asStageCode(row.tahap) === "RESUME_ALL").length,
+      persistedGroups: inserted.map((row) => ({ id: row.id, group: row.tahap, autoKey: row.auto_key })),
+    });
+  }
   const docsByAutoKey = new Map(generatedDocs.map((doc) => [generatedNoteAutoKey(doc), doc]));
 
   if (documentKind === "nota") {
@@ -1178,12 +1246,13 @@ export async function backfillProjectKwitansiReceivers(projectId: string) {
     const parsed = parseGeneratedNota(row.data_json);
     if (!parsed) continue;
 
+    const stageCode = asStageCode(row.tahap);
     const baseDoc: GeneratedNota = {
       ...parsed,
       id: row.id,
       projectId: row.project_id,
-      stageCode: asStageCode(row.tahap),
-      stageId: asStageCode(row.tahap),
+      stageCode,
+      stageId: stageCode,
       vendorId: row.vendor_id ?? parsed.vendorId,
       vendorName: row.vendor,
       templateId: row.template_id,
@@ -1192,6 +1261,7 @@ export async function backfillProjectKwitansiReceivers(projectId: string) {
       subtotal: toNumber(row.total),
       status: row.status,
       source: "auto",
+      kwitansiGroupCode: kwitansiGroupForStage(stageCode),
     };
     const edit = editsByNoteId.get(row.id);
     if (isPreservedReceiverEdit(edit)) continue;

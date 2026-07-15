@@ -28,7 +28,7 @@ function stageLabel(stageCode: StageCode) {
 function docSortRank(doc: GeneratedNota) {
   const stageIndex = STAGES.findIndex((stage) => stage.code === doc.stageCode);
   if (doc.vendorId === "vendor-pln" && doc.stageCode === "TAHAP_IV") return 390 + (doc.printOrder ?? 0) / 100;
-  return (stageIndex === -1 ? 99 : stageIndex) * 100;
+  return (stageIndex === -1 ? 99 : stageIndex) * 100 + (doc.printOrder ?? 0) / 100;
 }
 
 export function ExportView() {
