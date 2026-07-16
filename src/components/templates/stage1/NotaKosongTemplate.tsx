@@ -66,11 +66,11 @@ function NotaKosongSlot({ group, project }: { group: NotaGroup | null; project: 
       <footer className="stage1-note-footer kosong-footer" data-overlap-role="signature">
         <div>
           <div>Tanda terima,</div>
-          <div className="signature-line">(..................................)</div>
+          <div className="signature-line kosong-signature-line">(..................................)</div>
         </div>
         <div>
           <div>Hormat Kami,</div>
-          <div className="signature-line">(..................................)</div>
+          <div className="signature-line kosong-signature-line">(..................................)</div>
         </div>
       </footer>
     </section>

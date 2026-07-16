@@ -1230,14 +1230,22 @@ textarea {
 
 .kosong-footer {
   left: 0;
-  top: 116.8mm;
+  top: 114mm;
   width: 98.8mm;
   padding: 0 1.5mm;
   font-size: 6.8pt;
 }
 
 .kosong-footer .signature-line {
-  margin-top: 14.5mm;
+  margin-top: 10.5mm;
+}
+
+.kosong-footer .kosong-signature-line {
+  width: 32mm;
+  min-height: 5mm;
+  border-bottom: 0.22mm solid #000000;
+  color: transparent;
+  line-height: 1;
 }
 
 .mandau-slot {
