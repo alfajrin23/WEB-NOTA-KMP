@@ -1,6 +1,14 @@
-import { GeneratedNota } from "@/types/domain";
+import type { GeneratedNota, KwitansiWorkerSlot } from "@/types/domain";
 
-export type KwitansiSyncKey = "mandor" | "pekerja-terampil" | "pekerja-buruh";
+type KwitansiSyncGroup = "mandor" | "kepala_tukang" | "terampil" | "buruh";
+
+export type KwitansiSyncKey =
+  | "mandor"
+  | "kepala_tukang"
+  | `terampil_${KwitansiWorkerSlot}`
+  | `buruh_${KwitansiWorkerSlot}`;
+
+const WORKER_SLOTS: KwitansiWorkerSlot[] = [1, 2, 3, 4];
 
 function normalized(value: string | undefined | null) {
   return (value ?? "")
@@ -10,9 +18,16 @@ function normalized(value: string | undefined | null) {
     .toLowerCase();
 }
 
+function dynamicStringFields(value: unknown, keys: string[]) {
+  const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  return keys
+    .map((key) => record[key])
+    .filter((entry): entry is string => typeof entry === "string");
+}
+
 function joinedDocText(doc: GeneratedNota) {
-  const record = doc as unknown as Record<string, unknown>;
-  const dynamicFields = [
+  const dynamicFields = dynamicStringFields(doc, [
+    "jobType",
     "job_type",
     "position",
     "role",
@@ -20,10 +35,33 @@ function joinedDocText(doc: GeneratedNota) {
     "payment_description",
     "jenis_pekerjaan",
     "jabatan",
+    "item_name",
+    "nama_item",
     "uraian",
     "keterangan",
     "vendor",
-  ].map((key) => record[key]).filter((value): value is string => typeof value === "string");
+  ]);
+  const itemFields = doc.items.flatMap((item) => [
+    item.itemName,
+    item.vendorName,
+    item.category,
+    item.categoryName,
+    item.notes,
+    ...dynamicStringFields(item, [
+      "jobType",
+      "job_type",
+      "position",
+      "role",
+      "description",
+      "payment_description",
+      "jabatan",
+      "item_name",
+      "nama_item",
+      "uraian",
+      "vendor",
+    ]),
+  ]);
+
   return [
     doc.kwitansiRoleName,
     doc.kwitansiPaymentDescription,
@@ -34,27 +72,142 @@ function joinedDocText(doc: GeneratedNota) {
     doc.templateName,
     ...dynamicFields,
     ...doc.categoryNames,
-    ...doc.items.flatMap((item) => [item.itemName, item.vendorName, item.category, item.categoryName, item.notes]),
+    ...itemFields,
   ].filter(Boolean).join(" ");
 }
 
-export function kwitansiSyncKeyFromText(value: string | undefined | null): KwitansiSyncKey | null {
+function syncGroupFromText(value: string | undefined | null): KwitansiSyncGroup | null {
   const text = normalized(value);
   if (!text) return null;
-  if (text.includes("pekerja terampil")) return "pekerja-terampil";
-  if (text.includes("pekerja buruh")) return "pekerja-buruh";
+  if (text.includes("kepala tukang")) return "kepala_tukang";
+  if (text.includes("pekerja terampil")) return "terampil";
+  if (text.includes("pekerja buruh") || /\bladen\b/.test(text)) return "buruh";
   if (text.includes("mandor")) return "mandor";
   return null;
 }
 
+function asWorkerSlot(value: unknown): KwitansiWorkerSlot | null {
+  const slot = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
+  return slot === 1 || slot === 2 || slot === 3 || slot === 4 ? slot : null;
+}
+
+function workerSlotFromText(value: string | undefined | null): KwitansiWorkerSlot | null {
+  const text = normalized(value);
+  if (!text) return null;
+
+  const role = "(?:pekerja\\s+)?(?:terampil|buruh|laden)";
+  const patterns = [
+    new RegExp(`\\b${role}\\s+(?:slot|ke)\\s*[-:]?\\s*([1-4])\\b`),
+    new RegExp(`\\b${role}\\s*[-#]\\s*([1-4])\\b`),
+    new RegExp(`\\b${role}\\s+([1-4])\\s*$`),
+  ];
+
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    const slot = asWorkerSlot(match?.[1]);
+    if (slot) return slot;
+  }
+  return null;
+}
+
+function workerSlotFromId(value: string | undefined | null): KwitansiWorkerSlot | null {
+  const match = /(?:__kwitansi_worker_|[-_]worker[-_])([1-4])(?:\D|$)/i.exec(value ?? "");
+  return asWorkerSlot(match?.[1]);
+}
+
+export function getKwitansiWorkerSlot(doc: GeneratedNota, roleText?: string): KwitansiWorkerSlot | null {
+  const docRecord = doc as unknown as Record<string, unknown>;
+  const explicitDocSlot = [
+    doc.kwitansiWorkerSlot,
+    docRecord.workerSlot,
+    docRecord.worker_slot,
+    docRecord.person_slot,
+    docRecord.slot_pekerja,
+  ].map(asWorkerSlot).find((slot): slot is KwitansiWorkerSlot => Boolean(slot));
+  if (explicitDocSlot) return explicitDocSlot;
+
+  const idSlot = workerSlotFromId(doc.id)
+    ?? doc.items.map((item) => workerSlotFromId(item.id)).find((slot): slot is KwitansiWorkerSlot => Boolean(slot));
+  if (idSlot) return idSlot;
+
+  const textSlot = workerSlotFromText(roleText)
+    ?? doc.items.map((item) => workerSlotFromText(item.itemName)).find((slot): slot is KwitansiWorkerSlot => Boolean(slot));
+  return textSlot ?? null;
+}
+
+function syncKey(group: KwitansiSyncGroup, slot: KwitansiWorkerSlot | null): KwitansiSyncKey | null {
+  if (group === "mandor" || group === "kepala_tukang") return group;
+  return slot ? `${group}_${slot}` : null;
+}
+
+export function kwitansiSyncKeyFromText(value: string | undefined | null): KwitansiSyncKey | null {
+  const group = syncGroupFromText(value);
+  return group ? syncKey(group, workerSlotFromText(value)) : null;
+}
+
 export function kwitansiSyncKeyForDoc(doc: GeneratedNota, roleText?: string): KwitansiSyncKey | null {
-  return kwitansiSyncKeyFromText(roleText) ?? kwitansiSyncKeyFromText(joinedDocText(doc));
+  const group = syncGroupFromText(roleText) ?? syncGroupFromText(joinedDocText(doc));
+  return group ? syncKey(group, getKwitansiWorkerSlot(doc, roleText)) : null;
+}
+
+export function buildKwitansiSyncKeyMap(
+  docs: GeneratedNota[],
+  roleForDoc: (doc: GeneratedNota) => string | undefined = (doc) => doc.kwitansiRoleName,
+) {
+  const result = new Map<string, KwitansiSyncKey>();
+  const workerGroups = new Map<string, Array<{
+    doc: GeneratedNota;
+    group: "terampil" | "buruh";
+    slot: KwitansiWorkerSlot | null;
+  }>>();
+
+  for (const doc of docs) {
+    const roleText = roleForDoc(doc);
+    const group = syncGroupFromText(roleText) ?? syncGroupFromText(joinedDocText(doc));
+    if (!group) continue;
+    if (group === "mandor" || group === "kepala_tukang") {
+      result.set(doc.id, group);
+      continue;
+    }
+
+    const groupKey = `${doc.projectId}|${doc.stageCode}|${group}`;
+    const entries = workerGroups.get(groupKey) ?? [];
+    entries.push({ doc, group, slot: getKwitansiWorkerSlot(doc, roleText) });
+    workerGroups.set(groupKey, entries);
+  }
+
+  for (const entries of workerGroups.values()) {
+    entries.sort((left, right) => (
+      (left.doc.printOrder ?? Number.MAX_SAFE_INTEGER) - (right.doc.printOrder ?? Number.MAX_SAFE_INTEGER)
+      || (left.doc.items[0]?.sortOrder ?? Number.MAX_SAFE_INTEGER) - (right.doc.items[0]?.sortOrder ?? Number.MAX_SAFE_INTEGER)
+      || left.doc.id.localeCompare(right.doc.id)
+    ));
+
+    const usedSlots = new Set<KwitansiWorkerSlot>();
+    const unresolved: typeof entries = [];
+    for (const entry of entries) {
+      if (entry.slot && !usedSlots.has(entry.slot)) {
+        result.set(entry.doc.id, `${entry.group}_${entry.slot}`);
+        usedSlots.add(entry.slot);
+      } else {
+        unresolved.push(entry);
+      }
+    }
+
+    const availableSlots = WORKER_SLOTS.filter((slot) => !usedSlots.has(slot));
+    unresolved.slice(0, availableSlots.length).forEach((entry, index) => {
+      result.set(entry.doc.id, `${entry.group}_${availableSlots[index]}`);
+    });
+  }
+
+  return result;
 }
 
 export function kwitansiSyncLabel(key: KwitansiSyncKey) {
-  if (key === "pekerja-terampil") return "Pekerja Terampil";
-  if (key === "pekerja-buruh") return "Pekerja Buruh";
-  return "Mandor";
+  if (key === "mandor") return "Mandor";
+  if (key === "kepala_tukang") return "Kepala Tukang";
+  if (key.startsWith("terampil_")) return `Pekerja Terampil ${key.slice(-1)}`;
+  return `Pekerja Buruh / Laden ${key.slice(-1)}`;
 }
 
 export function getAutofillKwitansiReceiver(doc: GeneratedNota) {

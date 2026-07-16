@@ -6,6 +6,7 @@ import { getStageLabel } from "@/constants/stages";
 import { initialProjects, masterTemplateItems, vendors } from "@/constants/seed-data";
 import { generateKwitansiDocuments, generateNotaDocuments } from "@/lib/nota-generator";
 import { getAutofillKwitansiReceiver } from "@/lib/kwitansi-rules";
+import type { KwitansiSyncKey } from "@/lib/kwitansi-rules";
 import { isSpecialPLNKwitansi } from "@/lib/pln-document-groups";
 import { shiftResumeItemsFromDefault } from "@/lib/project-date-shift";
 import { buildResumeItemsForNewProject } from "@/lib/resume-history";
@@ -15,6 +16,7 @@ import {
   CustomNote,
   GeneratedNota,
   KwitansiEdit,
+  KwitansiWorkerSlot,
   NoteHistoryEntry,
   Project,
   ProjectMeta,
@@ -159,6 +161,7 @@ export type CustomNoteInput = {
 export type KwitansiEditInput = {
   namaPenerima?: string;
   receiverSource?: "manual" | "sync" | "auto";
+  receiverSyncKey?: KwitansiSyncKey;
   warnaTemplate?: string;
   noKwitansi?: string;
   namaPemberi?: string;
@@ -196,6 +199,11 @@ function asOptionalNumber(value: unknown) {
   if (value == null || value === "") return undefined;
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+function asKwitansiWorkerSlot(value: unknown): KwitansiWorkerSlot | undefined {
+  const slot = asOptionalNumber(value);
+  return slot === 1 || slot === 2 || slot === 3 || slot === 4 ? slot : undefined;
 }
 
 function latestTimestamp(values: Array<string | null | undefined>): string {
@@ -245,7 +253,7 @@ function withoutSpecialPlnAmountEdit(doc: GeneratedNota, custom: JsonRecord) {
 function identityOnlyKwitansiEdit(edit: KwitansiEditRow): KwitansiEditRow {
   const custom = asRecord(edit.custom_data_json);
   const identityData: JsonRecord = {};
-  for (const key of ["nama_pemberi", "receiver_source", "prepared_for_template_variants"]) {
+  for (const key of ["nama_pemberi", "receiver_source", "receiver_sync_key", "worker_slot", "prepared_for_template_variants"]) {
     if (Object.prototype.hasOwnProperty.call(custom, key)) identityData[key] = custom[key];
   }
   return { ...edit, custom_data_json: identityData };
@@ -563,6 +571,7 @@ function applyKwitansiEdit(doc: GeneratedNota, edit: KwitansiEdit | undefined): 
     kwitansiAmountWords: customString(custom, "uang_sejumlah", doc.kwitansiAmountWords),
     kwitansiDate: customString(custom, "tanggal_kwitansi", doc.kwitansiDate),
     kwitansiCity: customString(custom, "kota", doc.kwitansiCity),
+    kwitansiWorkerSlot: doc.kwitansiWorkerSlot ?? asKwitansiWorkerSlot(custom.worker_slot),
     warnaTemplate: edit.warnaTemplate,
   };
   if (isSpecialPLNKwitansi(withCustomFields)) return { ...withCustomFields, kwitansiReceiverName: "" };
@@ -1339,6 +1348,12 @@ export async function upsertKwitansiEdit(projectId: string, noteId: string, inpu
   if (hasOwnInput(input, "tanggalKwitansi")) customData.tanggal_kwitansi = input.tanggalKwitansi ?? "";
   if (hasOwnInput(input, "kota")) customData.kota = input.kota ?? "";
   if (hasOwnInput(input, "namaPenerima")) customData.receiver_source = input.receiverSource ?? "manual";
+  if (hasOwnInput(input, "receiverSyncKey")) {
+    customData.receiver_sync_key = input.receiverSyncKey ?? "";
+    const slot = /_(1|2|3|4)$/.exec(input.receiverSyncKey ?? "")?.[1];
+    if (slot) customData.worker_slot = Number(slot);
+    else delete customData.worker_slot;
+  }
 
   const { data, error } = await client
     .from("kwitansi_edits")

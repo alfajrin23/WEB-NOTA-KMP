@@ -1,6 +1,6 @@
 import { findTemplateDefinition, resolveExplicitTemplateAssignment } from "@/constants/template-mapping";
 import { STAGES } from "@/constants/stages";
-import { GeneratedNota, KwitansiGroupCode, Project, ProjectMeta, ResumeItem, StageCode, TemplateAssignment, Vendor } from "@/types/domain";
+import { GeneratedNota, KwitansiGroupCode, KwitansiWorkerSlot, Project, ProjectMeta, ResumeItem, StageCode, TemplateAssignment, Vendor } from "@/types/domain";
 import { terbilangRupiah } from "@/utils/format";
 import { getAutofillKwitansiReceiver } from "./kwitansi-rules";
 import { getResumeItemAmount } from "./resume-calculations";
@@ -190,7 +190,7 @@ function isLemburItem(item: ResumeItem) {
 function shouldSplitFourWorkers(item: ResumeItem) {
   const name = normalizedText(item.itemName);
   return (
-    (name.includes("pekerja trampil") || name.includes("pekerja terampil") || name.includes("pekerja buruh")) &&
+    (name.includes("pekerja trampil") || name.includes("pekerja terampil") || name.includes("pekerja buruh") || /\bladen\b/.test(name)) &&
     /\((4\s*(orang|org))\)/i.test(item.itemName)
   );
 }
@@ -201,7 +201,8 @@ function isWorkerTerampilItem(item: ResumeItem) {
 }
 
 function isWorkerBuruhItem(item: ResumeItem) {
-  return normalizedText(item.itemName).includes("pekerja buruh");
+  const name = normalizedText(item.itemName);
+  return name.includes("pekerja buruh") || /\bladen\b/.test(name);
 }
 
 function cloneReceiptItem(item: ResumeItem, amount: number, suffix: string): ResumeItem {
@@ -219,6 +220,7 @@ type KwitansiReceiptInput = {
   items: ResumeItem[];
   sourceItemIds: string[];
   categoryNames: string[];
+  workerSlot?: KwitansiWorkerSlot;
 };
 
 export const OUTSIDE_CORE_KWITANSI_RULES = [
@@ -311,6 +313,7 @@ function makeKwitansiDoc(project: Project, input: KwitansiReceiptInput): Generat
     itemIds: input.sourceItemIds,
     projectMeta: projectMeta(project),
     kwitansiGroupCode: kwitansiGroupCode(input.stageCode),
+    kwitansiWorkerSlot: input.workerSlot,
   };
   const receiver = getAutofillKwitansiReceiver(doc);
   return receiver ? { ...doc, kwitansiReceiverName: receiver } : doc;
@@ -399,6 +402,7 @@ function buildStageFourKwitansiReceipts(project: Project, vendors: Vendor[]): Kw
         items: [cloneReceiptItem(item, amount, `worker_${part}`)],
         sourceItemIds: [item.id],
         categoryNames: [item.category],
+        workerSlot: part as KwitansiWorkerSlot,
       });
     }
   };
@@ -477,6 +481,7 @@ function buildKwitansiReceiptsForStage(project: Project, vendors: Vendor[], stag
           items: [cloneReceiptItem(item, amount, `worker_${part}`)],
           sourceItemIds: [item.id],
           categoryNames: [item.category],
+          workerSlot: part as KwitansiWorkerSlot,
         });
       }
     } else {
@@ -539,7 +544,7 @@ function stageFourKwitansiOrder(doc: GeneratedNota) {
   if (text.includes("mandor")) return 1;
   if (text.includes("kepala tukang")) return 2;
   if (text.includes("pekerja trampil") || text.includes("pekerja terampil")) return 3;
-  if (text.includes("pekerja buruh")) return 4;
+  if (text.includes("pekerja buruh") || /\bladen\b/.test(text)) return 4;
   if ((text.includes("sopir") || text.includes("supir")) && !text.includes("pembantu") && !text.includes("kenek")) return 5;
   if (text.includes("pembantu") || text.includes("kenek")) return 6;
   if (doc.vendorId === PPM_VENDOR_ID || text.includes("pratama project mandiri") || text.includes("ppm")) return 7;

@@ -10,6 +10,8 @@ export type DocumentType = "nota" | "kwitansi" | "resume" | "full_report";
 
 export type NotaDocumentType = "nota" | "kwitansi";
 
+export type KwitansiWorkerSlot = 1 | 2 | 3 | 4;
+
 export type Vendor = {
   id: string;
   name: string;
@@ -135,6 +137,7 @@ export type GeneratedNota = {
   source?: "auto" | "custom";
   status?: "draft" | "generated" | "reviewed" | "exported" | "archived";
   kwitansiReceiverName?: string;
+  kwitansiWorkerSlot?: KwitansiWorkerSlot;
   kwitansiNumber?: string;
   kwitansiPayerName?: string;
   kwitansiPaymentDescription?: string;

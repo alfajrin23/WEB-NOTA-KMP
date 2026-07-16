@@ -24,7 +24,7 @@ import {
   getKwitansiProjectLines,
   getKwitansiRole,
 } from "@/lib/kwitansi-fields";
-import { kwitansiSyncKeyForDoc, kwitansiSyncKeyFromText, kwitansiSyncLabel } from "@/lib/kwitansi-rules";
+import { buildKwitansiSyncKeyMap, kwitansiSyncKeyForDoc, kwitansiSyncLabel } from "@/lib/kwitansi-rules";
 import { getKwitansiGenerationDiagnostics, KWITANSI_TARGET_COUNTS } from "@/lib/nota-generator";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
 import { formatRupiah, numericInputValue } from "@/utils/format";
@@ -185,6 +185,7 @@ export function EditKwitansiView() {
 
   const regularDocs = useMemo(() => docs.filter((doc) => !doc.isSpecialKwitansi && doc.source !== "custom"), [docs]);
   const editedNoteIds = useMemo(() => new Set(kwitansiEdits.map((edit) => edit.noteId)), [kwitansiEdits]);
+  const syncKeysByDocId = useMemo(() => buildKwitansiSyncKeyMap(docs, getKwitansiRole), [docs]);
 
   const filteredDocs = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -438,25 +439,35 @@ export function EditKwitansiView() {
         warnaTemplate: draft.templateColor,
       };
       const receiverChanged = receiverName !== (editingDoc.kwitansiReceiverName ?? "").trim();
-      const syncKey = editingDoc.stageCode === "TAHAP_I" && receiverChanged
-        ? kwitansiSyncKeyFromText(draft.role) ?? kwitansiSyncKeyForDoc(editingDoc, getKwitansiRole(editingDoc))
+      const syncKey = receiverChanged
+        ? kwitansiSyncKeyForDoc(editingDoc, draft.role) ?? syncKeysByDocId.get(editingDoc.id) ?? null
         : null;
       const syncTargets = syncKey
         ? docs.filter((doc) => (
           doc.id !== editingDoc.id &&
+          doc.stageCode !== editingDoc.stageCode &&
           CORE_KWITANSI_SYNC_STAGES.has(doc.stageCode) &&
-          kwitansiSyncKeyForDoc(doc, getKwitansiRole(doc)) === syncKey
+          syncKeysByDocId.get(doc.id) === syncKey
         ))
         : [];
       const shouldSync = syncTargets.length > 0 && window.confirm(
-        `Nama penerima untuk jenis pekerjaan ${kwitansiSyncLabel(syncKey!)} ditemukan di tahap lain.\n\n` +
+        `Nama penerima ${kwitansiSyncLabel(syncKey!)} ditemukan di tahap lain. ` +
+        `Apakah ingin menyamakan nama penerima ${kwitansiSyncLabel(syncKey!)} untuk semua tahap?\n\n` +
         "OK = Ya, samakan semua tahap\nCancel = Tidak, ubah kwitansi ini saja",
       );
 
-      await updateKwitansiFields(editingDoc.projectId, editingDoc.id, patch);
+      await updateKwitansiFields(editingDoc.projectId, editingDoc.id, patch, {
+        receiverSource: "manual",
+        receiverSyncKey: syncKey ?? undefined,
+      });
       if (shouldSync) {
         for (const target of syncTargets) {
-          await updateKwitansiFields(target.projectId, target.id, { kwitansiReceiverName: receiverName });
+          await updateKwitansiFields(
+            target.projectId,
+            target.id,
+            { kwitansiReceiverName: receiverName },
+            { receiverSource: "sync", receiverSyncKey: syncKey ?? undefined },
+          );
         }
       }
       setEditingId(null);
@@ -467,7 +478,7 @@ export function EditKwitansiView() {
     } finally {
       setSaving(false);
     }
-  }, [docs, draft, editingDoc, saving, updateKwitansiFields]);
+  }, [docs, draft, editingDoc, saving, syncKeysByDocId, updateKwitansiFields]);
 
   if (loading && !project) {
     return <Card><CardContent className="p-8">Memuat kwitansi...</CardContent></Card>;
@@ -572,6 +583,7 @@ export function EditKwitansiView() {
               {filteredDocs.map((doc) => {
                 const edited = editedNoteIds.has(doc.id);
                 const active = selected?.id === doc.id;
+                const syncKey = syncKeysByDocId.get(doc.id);
                 return (
                   <article
                     key={doc.id}
@@ -587,6 +599,9 @@ export function EditKwitansiView() {
                       <dt className="text-slate-500">Desa</dt><dd className="font-medium">{project.villageName}</dd>
                       <dt className="text-slate-500">Nominal</dt><dd className="font-semibold">{formatRupiah(getKwitansiAmount(doc))}</dd>
                       <dt className="text-slate-500">Pemberi</dt><dd className="font-medium">{project ? getKwitansiPayerName(doc, project) || "-" : "-"}</dd>
+                      {syncKey?.startsWith("terampil_") || syncKey?.startsWith("buruh_") ? (
+                        <><dt className="text-slate-500">Slot pekerja</dt><dd className="font-medium">{kwitansiSyncLabel(syncKey)}</dd></>
+                      ) : null}
                       <dt className="text-slate-500">Penerima</dt><dd className={doc.kwitansiReceiverName?.trim() ? "font-medium" : "font-medium text-red-600"}>{doc.kwitansiReceiverName?.trim() || "Belum diisi"}</dd>
                     </dl>
                     <div className="mt-3 flex flex-wrap items-center justify-between gap-2">

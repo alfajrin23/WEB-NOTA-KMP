@@ -6,7 +6,8 @@ import { initialProjects, masterTemplateItems, vendors } from "@/constants/seed-
 import { ALL_TEMPLATE_ASSIGNMENTS } from "@/constants/template-mapping";
 import { getStageLabel } from "@/constants/stages";
 import { generateKwitansiDocuments, generateNotaDocuments } from "@/lib/nota-generator";
-import { getAutofillKwitansiReceiver } from "@/lib/kwitansi-rules";
+import { getAutofillKwitansiReceiver, kwitansiSyncKeyForDoc } from "@/lib/kwitansi-rules";
+import type { KwitansiSyncKey } from "@/lib/kwitansi-rules";
 import { isSpecialPLNKwitansi } from "@/lib/pln-document-groups";
 import {
   daysBetweenIsoDates,
@@ -857,7 +858,7 @@ export function useKdkmpStore() {
     GeneratedNota,
     "kwitansiReceiverName" | "kwitansiNumber" | "kwitansiPayerName" | "kwitansiPaymentDescription" | "kwitansiRoleName" | "kwitansiNote" |
     "kwitansiAmount" | "kwitansiAmountWords" | "kwitansiDate" | "kwitansiCity" | "warnaTemplate"
-  >>) => {
+  >>, options: { receiverSource?: "manual" | "sync" | "auto"; receiverSyncKey?: KwitansiSyncKey } = {}) => {
     const source = generatedNotasRef.current.find((doc) => doc.id === noteId);
     if (!source) {
       throw new Error("Kwitansi yang akan disimpan tidak ditemukan.");
@@ -871,7 +872,12 @@ export function useKdkmpStore() {
 
     const locksAmountToResume = isSpecialPLNKwitansi(nextDoc);
     const input: KwitansiEditInput = {};
-    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiReceiverName")) input.namaPenerima = nextDoc.kwitansiReceiverName ?? "";
+    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiReceiverName")) {
+      input.namaPenerima = nextDoc.kwitansiReceiverName ?? "";
+      input.receiverSource = options.receiverSource ?? "manual";
+      const receiverSyncKey = options.receiverSyncKey ?? kwitansiSyncKeyForDoc(nextDoc, nextDoc.kwitansiRoleName);
+      if (receiverSyncKey) input.receiverSyncKey = receiverSyncKey;
+    }
     if (Object.prototype.hasOwnProperty.call(patch, "warnaTemplate")) input.warnaTemplate = nextDoc.warnaTemplate ?? "default";
     if (Object.prototype.hasOwnProperty.call(patch, "kwitansiNumber")) input.noKwitansi = nextDoc.kwitansiNumber ?? "";
     if (Object.prototype.hasOwnProperty.call(patch, "kwitansiPayerName")) input.namaPemberi = nextDoc.kwitansiPayerName ?? "";
