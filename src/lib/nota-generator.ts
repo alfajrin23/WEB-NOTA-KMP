@@ -603,6 +603,7 @@ function makeSpecialPlnNotaDoc({
     terbilang: amountWords,
     kwitansiPayerName: `KDKMP DESA ${project.villageName.toUpperCase()}`,
     kwitansiPaymentDescription: paymentDescription,
+    kwitansiReceiverName: "",
     kwitansiAmount: amount,
     kwitansiAmountWords: amountWords,
     kwitansiDate,

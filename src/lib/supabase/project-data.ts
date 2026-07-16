@@ -228,6 +228,7 @@ function isPreservedReceiverEdit(edit: KwitansiEditRow | undefined | null) {
 }
 
 function withAutomaticKwitansiReceiver(doc: GeneratedNota) {
+  if (isSpecialPLNKwitansi(doc)) return { ...doc, kwitansiReceiverName: "" };
   if (doc.documentType !== "kwitansi" || doc.kwitansiReceiverName?.trim()) return doc;
   const receiver = getAutofillKwitansiReceiver(doc);
   return receiver ? { ...doc, kwitansiReceiverName: receiver } : doc;
@@ -564,6 +565,7 @@ function applyKwitansiEdit(doc: GeneratedNota, edit: KwitansiEdit | undefined): 
     kwitansiCity: customString(custom, "kota", doc.kwitansiCity),
     warnaTemplate: edit.warnaTemplate,
   };
+  if (isSpecialPLNKwitansi(withCustomFields)) return { ...withCustomFields, kwitansiReceiverName: "" };
   return {
     ...withCustomFields,
     kwitansiReceiverName: edit.namaPenerima?.trim()

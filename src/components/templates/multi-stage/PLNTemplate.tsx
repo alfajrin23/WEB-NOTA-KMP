@@ -6,6 +6,7 @@ import { CSSProperties } from "react";
 import { PrintPage } from "@/components/print/print-page";
 import { GeneratedNota, Project } from "@/types/domain";
 import { Stage1DebugBox } from "@/components/templates/stage1/Stage1Debug";
+import { isSpecialPLNKwitansi } from "@/lib/pln-document-groups";
 import {
   amountWordsItalic,
   chunk,
@@ -49,7 +50,7 @@ function PLNSlip({
   const receiptDate = doc.kwitansiDate?.trim() || doc.notaDate || doc.tanggal || doc.items[0]?.expenseDate || project.projectDate;
   const city = doc.kwitansiCity?.trim() || project.regencyName || project.districtName;
   const role = doc.kwitansiRoleName?.trim() || "Penerima";
-  const receiver = doc.kwitansiReceiverName?.trim() || "";
+  const receiver = isSpecialPLNKwitansi(doc) ? "" : doc.kwitansiReceiverName?.trim() || "";
   const note = doc.kwitansiNote?.trim() ?? "";
 
   return (
@@ -80,7 +81,7 @@ function PLNSlip({
   );
 }
 
-export { isSpecialPLNKwitansi } from "@/lib/pln-document-groups";
+export { isSpecialPLNKwitansi };
 
 export function PLNKwitansiBatchTemplate({
   docs,
