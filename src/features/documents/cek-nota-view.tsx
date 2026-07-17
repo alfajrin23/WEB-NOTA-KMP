@@ -15,6 +15,7 @@ import { DocumentTemplateRenderer } from "@/components/templates/DocumentTemplat
 import { isSpecialPLNKwitansi, PLNKwitansiBatchTemplate } from "@/components/templates/multi-stage/PLNTemplate";
 import { hashNotaData } from "@/lib/resume-calculations";
 import { getPLNDocumentGroup, groupDocumentsForPresentation } from "@/lib/pln-document-groups";
+import { moveSpecialNotasToStageEnd } from "@/lib/nota-output-order";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
 import { formatRupiah } from "@/utils/format";
 import { GeneratedNota, StageCode } from "@/types/domain";
@@ -60,9 +61,10 @@ export function CekNotaView() {
   const [visibleCount, setVisibleCount] = useState(6);
 
   const docs = useMemo(() => {
-    return generatedNotas
+    const sortedDocs = generatedNotas
       .filter((doc) => doc.projectId === projectId && doc.documentType === "nota")
       .sort((a, b) => docSortRank(a) - docSortRank(b) || a.vendorName.localeCompare(b.vendorName));
+    return moveSpecialNotasToStageEnd(sortedDocs);
   }, [generatedNotas, projectId]);
 
   const filteredDocs = useMemo(() => {

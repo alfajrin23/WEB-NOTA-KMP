@@ -3,6 +3,7 @@ import { STAGES } from "@/constants/stages";
 import { GeneratedNota, KwitansiGroupCode, KwitansiWorkerSlot, Project, ProjectMeta, ResumeItem, StageCode, TemplateAssignment, Vendor } from "@/types/domain";
 import { terbilangRupiah } from "@/utils/format";
 import { getAutofillKwitansiReceiver } from "./kwitansi-rules";
+import { moveSpecialNotasToStageEnd } from "./nota-output-order";
 import { getResumeItemAmount } from "./resume-calculations";
 
 const INTERNAL_VENDOR_ID = "vendor-internal";
@@ -759,13 +760,15 @@ export function generateNotaDocuments(
   const regularDocs = generateDocuments(project, vendors, templateAssignments, "nota");
   const specialPlnDocs = buildSpecialPlnNotaDocs(project, vendors);
 
-  return [...regularDocs, ...specialPlnDocs].sort((a, b) => {
+  const sortedDocs = [...regularDocs, ...specialPlnDocs].sort((a, b) => {
     const rankA = documentSortRank(a);
     const rankB = documentSortRank(b);
     if (rankA !== rankB) return rankA - rankB;
     if (a.printGroupKey && a.printGroupKey === b.printGroupKey) return (a.printOrder ?? 0) - (b.printOrder ?? 0);
     return a.vendorName.localeCompare(b.vendorName);
   });
+
+  return moveSpecialNotasToStageEnd(sortedDocs);
 }
 
 export function generateKwitansiDocuments(

@@ -13,6 +13,7 @@ import { MotionPage } from "@/components/ui/motion-page";
 import { STAGES, getStageLabel } from "@/constants/stages";
 import { DocumentPreviewModal, PreviewPayload } from "@/features/documents/preview-export";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
+import { moveSpecialNotasToStageEnd } from "@/lib/nota-output-order";
 import { groupDocumentsForPresentation } from "@/lib/pln-document-groups";
 import { formatRupiah } from "@/utils/format";
 import { GeneratedNota, StageCode } from "@/types/domain";
@@ -45,7 +46,10 @@ export function ExportView() {
       .sort((a, b) => docSortRank(a) - docSortRank(b) || a.vendorName.localeCompare(b.vendorName) || a.id.localeCompare(b.id));
   }, [generatedNotas, projectId]);
 
-  const docs = useMemo(() => allDocs.filter((doc) => doc.documentType === "nota"), [allDocs]);
+  const docs = useMemo(
+    () => moveSpecialNotasToStageEnd(allDocs.filter((doc) => doc.documentType === "nota")),
+    [allDocs],
+  );
   const kwitansiDocs = useMemo(() => allDocs.filter((doc) => doc.documentType === "kwitansi"), [allDocs]);
   const missingKwitansiReceivers = useMemo(() => kwitansiDocs.filter((doc) => !doc.kwitansiReceiverName?.trim()), [kwitansiDocs]);
 

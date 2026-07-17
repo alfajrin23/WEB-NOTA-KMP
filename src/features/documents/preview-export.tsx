@@ -11,6 +11,7 @@ import { DocumentTemplateRenderer } from "@/components/templates/DocumentTemplat
 import { KwitansiBatchTemplate } from "@/components/templates/kwitansi/KwitansiBatchTemplate";
 import { isSpecialPLNKwitansi, PLNKwitansiBatchTemplate } from "@/components/templates/multi-stage/PLNTemplate";
 import { buildProjectSummary, hashNotaData } from "@/lib/resume-calculations";
+import { moveSpecialNotasToStageEnd } from "@/lib/nota-output-order";
 import { cn } from "@/lib/utils";
 import { formatDateIndonesia, formatNumber, formatRupiah } from "@/utils/format";
 import { GeneratedNota, Project, TemplateAssignment } from "@/types/domain";
@@ -32,7 +33,7 @@ type PrintableNoteGroup =
 function groupPrintableNotes(docs: GeneratedNota[]): PrintableNoteGroup[] {
   const groups: PrintableNoteGroup[] = [];
 
-  for (const doc of docs) {
+  for (const doc of moveSpecialNotasToStageEnd(docs)) {
     if (!isSpecialPLNKwitansi(doc)) {
       groups.push({ kind: "document", key: doc.id, docs: [doc] });
       continue;
@@ -92,7 +93,7 @@ export async function downloadNotaDocumentsPdf({
   const { PDFDocument } = await import("pdf-lib");
   const merged = await PDFDocument.create();
 
-  for (const doc of docs) {
+  for (const doc of moveSpecialNotasToStageEnd(docs)) {
     const assignment = resolveTemplateAssignment(doc.stageCode, doc.vendorId, templateAssignments);
     const response = await fetch("/api/excel-pdf/download", {
       method: "POST",
@@ -214,7 +215,7 @@ export function DocumentPreviewModal({
   const [kwitansiVisibleCount, setKwitansiVisibleCount] = useState(8);
   const [downloading, setDownloading] = useState(false);
 
-  const docs = useMemo(() => payload?.docs ?? [], [payload?.docs]);
+  const docs = useMemo(() => moveSpecialNotasToStageEnd(payload?.docs ?? []), [payload?.docs]);
   const isKwitansiPayload = useMemo(() => docs.length > 0 && docs.every((doc) => doc.documentType === "kwitansi"), [docs]);
   const hasSpecialPlnNota = useMemo(() => docs.some((doc) => doc.documentType === "nota" && isSpecialPLNKwitansi(doc)), [docs]);
   const hasJasaElectricNota = useMemo(() => docs.some(isJasaElectricNota), [docs]);

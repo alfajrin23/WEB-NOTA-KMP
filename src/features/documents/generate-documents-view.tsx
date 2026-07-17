@@ -16,6 +16,7 @@ import { GeneratedNota, StageCode } from "@/types/domain";
 import { formatRupiah } from "@/utils/format";
 import { hashNotaData } from "@/lib/resume-calculations";
 import { getPLNDocumentGroup, groupDocumentsForPresentation } from "@/lib/pln-document-groups";
+import { moveSpecialNotasToStageEnd } from "@/lib/nota-output-order";
 import { DocumentTemplateRenderer } from "@/components/templates/DocumentTemplateRenderer";
 import { isSpecialPLNKwitansi, PLNKwitansiBatchTemplate } from "@/components/templates/multi-stage/PLNTemplate";
 import { getKwitansiPageChunk, KwitansiBatchTemplate } from "@/components/templates/kwitansi/KwitansiBatchTemplate";
@@ -78,13 +79,14 @@ export function GenerateDocumentsView() {
 
   const docs = useMemo(() => {
     if (!project) return [];
-    return generatedNotas
+    const sortedDocs = generatedNotas
       .filter((doc) => doc.projectId === project.id)
       .sort((a, b) => {
         const stageA = STAGES.findIndex((stage) => stage.code === a.stageCode);
         const stageB = STAGES.findIndex((stage) => stage.code === b.stageCode);
         return stageA - stageB || a.documentType.localeCompare(b.documentType) || a.templateName.localeCompare(b.templateName) || a.id.localeCompare(b.id);
       });
+    return moveSpecialNotasToStageEnd(sortedDocs);
   }, [generatedNotas, project]);
 
   const filteredDocs = useMemo(() => {

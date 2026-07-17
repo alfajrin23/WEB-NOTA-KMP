@@ -30,14 +30,17 @@ export function getResumeHistoryItemKey(
 export function applyResumeItemHistory(templateItems: ResumeItem[], historyItems: ResumeItem[] | undefined | null) {
   if (!historyItems?.length) return templateItems;
 
-  const historyByKey = new Map<string, ResumeItem>();
+  // Simpan antrean per key agar baris duplikat yang benar-benar identik tetap
+  // dicocokkan satu-ke-satu, bukan semuanya mengambil baris history terakhir.
+  const historyByKey = new Map<string, ResumeItem[]>();
   for (const item of [...historyItems].sort((a, b) => a.sortOrder - b.sortOrder)) {
     const key = getResumeHistoryItemKey(item);
-    if (key.trim()) historyByKey.set(key, item);
+    if (key.trim()) historyByKey.set(key, [...(historyByKey.get(key) ?? []), item]);
   }
 
   return templateItems.map((item) => {
-    const history = historyByKey.get(getResumeHistoryItemKey(item));
+    const matches = historyByKey.get(getResumeHistoryItemKey(item));
+    const history = matches?.shift();
     if (!history) return item;
 
     return {

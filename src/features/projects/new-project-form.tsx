@@ -11,14 +11,18 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { DateInput } from "@/components/ui/date-input";
 import { Input } from "@/components/ui/input";
 import { MotionPage } from "@/components/ui/motion-page";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
 import { DEFAULT_PROJECT_START_DATE } from "@/lib/project-date-shift";
 import { ProjectFormValues, projectSchema } from "@/schemas/project.schema";
 
+const DEFAULT_BUDGET_REFERENCE_VALUE = "__default_budget_template__";
+
 export function NewProjectForm() {
   const router = useRouter();
-  const { createProject, supabaseReady } = useKdkmpStore();
+  const { createProject, loading, projects, supabaseReady } = useKdkmpStore();
   const [saving, setSaving] = useState(false);
+  const [budgetReferenceValue, setBudgetReferenceValue] = useState<string>();
   const form = useForm<ProjectFormValues>({
     resolver: zodResolver(projectSchema),
     defaultValues: {
@@ -36,7 +40,12 @@ export function NewProjectForm() {
   async function submit(values: ProjectFormValues) {
     setSaving(true);
     try {
-      const project = await createProject(values);
+      const budgetReferenceProjectId = budgetReferenceValue === undefined
+        ? undefined
+        : budgetReferenceValue === DEFAULT_BUDGET_REFERENCE_VALUE
+          ? null
+          : budgetReferenceValue;
+      const project = await createProject(values, { budgetReferenceProjectId });
       router.push(`/projects/${project.id}/resume`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Gagal menyimpan project.");
@@ -55,7 +64,7 @@ export function NewProjectForm() {
             </div>
             <CardTitle className="text-xl">Tambah Desa</CardTitle>
             <CardDescription>
-              Project baru otomatis menyalin Master Template aktif dan disimpan ke Supabase.
+              Project baru memakai Master Template aktif. Qty dan harga satuan dapat mengikuti anggaran desa referensi.
               {!supabaseReady ? " Supabase belum dikonfigurasi, data hanya menjadi cache sementara." : ""}
             </CardDescription>
           </CardHeader>
@@ -97,10 +106,37 @@ export function NewProjectForm() {
                   ) : null}
                 </label>
               ))}
+              <div className="space-y-2 md:col-span-2">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
+                  Referensi Anggaran Dari Desa
+                </span>
+                <Select
+                  value={budgetReferenceValue}
+                  onValueChange={setBudgetReferenceValue}
+                  disabled={saving || loading}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={loading ? "Memuat daftar desa..." : "Pilih referensi anggaran (opsional)"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={DEFAULT_BUDGET_REFERENCE_VALUE}>Default / Template Awal</SelectItem>
+                    {[...projects]
+                      .sort((a, b) => a.villageName.localeCompare(b.villageName, "id"))
+                      .map((project) => (
+                        <SelectItem key={project.id} value={project.id}>
+                          {project.villageName} — {project.districtName}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Pilih desa untuk menyalin qty dan harga satuannya. Jika dibiarkan kosong, sistem memakai history desa terakhir.
+                </p>
+              </div>
               <div className="md:col-span-2">
-                <Button type="submit" className="w-full sm:w-auto" disabled={saving}>
+                <Button type="submit" className="w-full sm:w-auto" disabled={saving || loading}>
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                  {saving ? "Menyimpan" : "Simpan & Lanjut Resume"}
+                  {saving ? "Menyimpan" : loading ? "Memuat Data Desa" : "Simpan & Lanjut Resume"}
                 </Button>
               </div>
             </form>

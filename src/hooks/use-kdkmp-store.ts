@@ -382,20 +382,31 @@ export function useKdkmpStore() {
     return nextProject;
   }, [projects, supabaseReady, templateAssignments]);
 
-  const createProject = useCallback(async (input: Pick<Project, "projectName" | "villageName" | "districtName" | "regencyName" | "regionName" | "responsibleName" | "projectDate">) => {
-    const historyProject = latestEditedProject(projects);
+  const createProject = useCallback(async (
+    input: Pick<Project, "projectName" | "villageName" | "districtName" | "regencyName" | "regionName" | "responsibleName" | "projectDate">,
+    options: { budgetReferenceProjectId?: string | null } = {},
+  ) => {
+    const historyProject = options.budgetReferenceProjectId === undefined
+      ? latestEditedProject(projects)
+      : options.budgetReferenceProjectId === null
+        ? null
+        : projects.find((project) => project.id === options.budgetReferenceProjectId);
+
+    if (options.budgetReferenceProjectId !== undefined && options.budgetReferenceProjectId !== null && !historyProject) {
+      throw new Error("Desa referensi anggaran tidak ditemukan. Muat ulang halaman lalu pilih kembali desa referensi.");
+    }
 
     if (supabaseReady) {
       const project = await createSupabaseProject(input, {
         templateItems: masterItems,
-        historyItems: historyProject?.items,
+        historyItems: historyProject?.items ?? null,
       });
       setProjects((current) => [project, ...current]);
       toast.success("Project desa tersimpan ke Supabase");
       return project;
     }
 
-    const project = createLocalProject(input, masterItems, { historyItems: historyProject?.items });
+    const project = createLocalProject(input, masterItems, { historyItems: historyProject?.items ?? null });
     setProjects((current) => [project, ...current]);
     toast.warning("Supabase belum dikonfigurasi. Project hanya tersimpan sebagai cache lokal sementara.");
     return project;

@@ -29,6 +29,7 @@ import { terbilangRupiah } from "@/utils/format";
 
 const CACHE_KEY = "kdkmp.supabase.bundle.v1";
 const TEMPLATE_ID = "master-template-kdkmp-v1";
+const RESUME_ITEMS_PAGE_SIZE = 500;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -725,6 +726,33 @@ async function logHistory(client: SupabaseClient, projectId: string, action: str
   await client.from("note_history").insert({ project_id: projectId, action, description });
 }
 
+async function fetchAllResumeItemRows(client: SupabaseClient, projectIds: string[]) {
+  const allRows: ResumeItemRow[] = [];
+  let page = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const from = page * RESUME_ITEMS_PAGE_SIZE;
+    const { data, error } = await client
+      .from("resume_items")
+      .select("*")
+      .in("project_id", projectIds)
+      .order("project_id", { ascending: true })
+      .order("urutan", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + RESUME_ITEMS_PAGE_SIZE - 1);
+
+    if (error) return { data: allRows, error };
+
+    const rows = (data ?? []) as ResumeItemRow[];
+    allRows.push(...rows);
+    hasMore = rows.length === RESUME_ITEMS_PAGE_SIZE;
+    page += 1;
+  }
+
+  return { data: allRows, error: null };
+}
+
 export async function fetchProjectBundle(): Promise<ProjectBundle> {
   const client = supabase();
   if (!client) {
@@ -748,7 +776,7 @@ export async function fetchProjectBundle(): Promise<ProjectBundle> {
 
   const projectIds = projectsData.map((project) => project.id);
   const [itemsResult, notesResult, editsResult, customResult, historyResult] = await Promise.all([
-    client.from("resume_items").select("*").in("project_id", projectIds).order("urutan", { ascending: true }),
+    fetchAllResumeItemRows(client, projectIds),
     client.from("generated_notes").select("*").in("project_id", projectIds).order("created_at", { ascending: false }),
     client.from("kwitansi_edits").select("*").in("project_id", projectIds),
     client.from("custom_notes").select("*").in("project_id", projectIds).order("created_at", { ascending: false }),

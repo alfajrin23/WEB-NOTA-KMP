@@ -1,10 +1,10 @@
 "use client";
 
-import { ChangeEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChangeEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import { AlertTriangle, ChevronDown, ChevronRight, Download, Plus, Redo2, RefreshCcw, Save, Search, Trash2, Undo2, Upload } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Download, FileSpreadsheet, Loader2, Plus, Redo2, RefreshCcw, Save, Search, Trash2, Undo2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,7 +22,7 @@ import { shiftResumeItemsFromDefault } from "@/lib/project-date-shift";
 import { findPriceSyncSiblingItems } from "@/lib/resume-price-sync";
 import { compareResumeItems, mergeResumeItems, ParsedResume, ResumeImportDiff } from "@/lib/resume-import/parser";
 import { formatNumber, formatRupiah, formatThousands, formatTimeIndonesia, numericInputValue } from "@/utils/format";
-import { ResumeItem, StageCode } from "@/types/domain";
+import { Project, ResumeItem, StageCode } from "@/types/domain";
 import { cn } from "@/lib/utils";
 
 type DraftSnapshot = ResumeItem[];
@@ -62,6 +62,8 @@ export function ResumeEditor() {
     generatedNotas,
   } = useKdkmpStore();
   const project = projects.find((entry) => entry.id === projectId);
+  const latestProjectRef = useRef(project);
+  const pendingProjectDateCommitRef = useRef<Promise<Project | null> | null>(null);
   const [stage, setStage] = useState<StageCode>("TAHAP_I");
   const [query, setQuery] = useState("");
   const [vendorFilter, setVendorFilter] = useState("all");
@@ -71,8 +73,14 @@ export function ResumeEditor() {
   const [past, setPast] = useState<DraftSnapshot[]>([]);
   const [future, setFuture] = useState<DraftSnapshot[]>([]);
   const [importingResume, setImportingResume] = useState(false);
+  const [exportingExcel, setExportingExcel] = useState(false);
+  const [savingProjectDate, setSavingProjectDate] = useState(false);
   const [importPreview, setImportPreview] = useState<{ parsed: ParsedResume; diff: ResumeImportDiff } | null>(null);
   const resumeFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useLayoutEffect(() => {
+    latestProjectRef.current = project;
+  }, [project]);
 
   const summary = useMemo(() => (project ? buildProjectSummary(project, vendors) : null), [project, vendors]);
   const projectGeneratedNotas = useMemo(() => generatedNotas.filter((doc) => doc.projectId === projectId && doc.documentType === "nota"), [generatedNotas, projectId]);
@@ -224,25 +232,39 @@ export function ResumeEditor() {
     }
   }, [applyResumeImport, importPreview, project, remember]);
 
-  const handleProjectStartDateCommit = useCallback(async (value: string) => {
-    if (!project || value === project.projectDate) return;
+  const handleProjectStartDateCommit = useCallback((value: string) => {
+    if (!project || value === project.projectDate) return Promise.resolve(project ?? null);
     if (!value) {
       toast.error("Tanggal Awal Project wajib diisi.");
-      return;
+      return Promise.resolve(null);
     }
 
     const shiftExistingDates = window.confirm(
       "Tanggal Awal Project berubah. Pilih OK untuk menggeser ulang semua tanggal resume, nota, dan kwitansi berdasarkan tanggal baru. Pilih Cancel untuk hanya menyimpan tanggal project tanpa mengubah tanggal dokumen yang sudah ada.",
     );
 
-    try {
-      await updateProjectStartDate(project.id, value, shiftExistingDates);
-      setPast([]);
-      setFuture([]);
-      setSavedAt(new Date());
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Gagal memperbarui Tanggal Awal Project.");
-    }
+    setSavingProjectDate(true);
+    const commit = updateProjectStartDate(project.id, value, shiftExistingDates)
+      .then((updatedProject) => {
+        latestProjectRef.current = updatedProject;
+        setPast([]);
+        setFuture([]);
+        setSavedAt(new Date());
+        return updatedProject;
+      })
+      .catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : "Gagal memperbarui Tanggal Awal Project.");
+        return null;
+      })
+      .finally(() => {
+        if (pendingProjectDateCommitRef.current === commit) {
+          pendingProjectDateCommitRef.current = null;
+          setSavingProjectDate(false);
+        }
+      });
+
+    pendingProjectDateCommitRef.current = commit;
+    return commit;
   }, [project, updateProjectStartDate]);
 
   const handleUnitPriceCommit = useCallback((item: ResumeItem, value: string) => {
@@ -280,6 +302,59 @@ export function ResumeEditor() {
     setSavedAt(new Date());
     toast.success(targetGrandTotal == null ? "Target grand total resume dikosongkan." : "Target grand total resume tersimpan.");
   }, [project, updateProjectMeta]);
+
+  const exportResumeExcel = useCallback(async () => {
+    if (exportingExcel) return;
+
+    // Memindahkan fokus akan menjalankan commit input yang masih aktif. Tunggu
+    // satu task agar snapshot store terbaru sudah tersedia sebelum diexport.
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    const pendingProjectDateCommit = pendingProjectDateCommitRef.current;
+    if (pendingProjectDateCommit && !await pendingProjectDateCommit) return;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+
+    const currentProject = latestProjectRef.current;
+    if (!currentProject) return;
+
+    setExportingExcel(true);
+    try {
+      const response = await fetch("/api/resume-excel/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify({ project: currentProject, vendors }),
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? "Gagal membuat file Excel resume.");
+      }
+
+      const blob = await response.blob();
+      const disposition = response.headers.get("Content-Disposition") ?? "";
+      const encodedName = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+      const plainName = /filename="?([^";]+)"?/i.exec(disposition)?.[1];
+      const fallbackVillage = currentProject.villageName
+        .trim()
+        .replace(/[^\p{L}\p{N}]+/gu, "_")
+        .replace(/^_+|_+$/g, "") || "Project";
+      const fileName = encodedName
+        ? decodeURIComponent(encodedName)
+        : plainName || `Resume_KDKMP_Desa_${fallbackVillage}.xlsx`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toast.success("Resume Excel berhasil dibuat dari data terbaru.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Gagal export Excel resume.");
+    } finally {
+      setExportingExcel(false);
+    }
+  }, [exportingExcel, vendors]);
 
   const columns = useMemo<ColumnDef<ResumeItem>[]>(() => [
     {
@@ -469,6 +544,10 @@ export function ResumeEditor() {
               <Upload className="h-4 w-4" />{importingResume ? "Membaca..." : "Upload/Update Resume"}
             </Button>
             <input ref={resumeFileInputRef} type="file" accept="application/pdf,text/plain,.txt" className="hidden" onChange={handleResumeUpload} />
+            <Button variant="outline" onClick={exportResumeExcel} disabled={exportingExcel || savingProjectDate}>
+              {exportingExcel ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
+              {exportingExcel ? "Menyiapkan Excel" : savingProjectDate ? "Menyimpan Tanggal" : "Export Excel"}
+            </Button>
             <Button variant="outline" onClick={addResumeRow}><Plus className="h-4 w-4" />Tambah Baris</Button>
             <Button asChild variant="emerald"><Link href={`/projects/${project.id}/generate-nota`}><Download className="h-4 w-4" />Lanjut Buat Nota/Kwitansi Otomatis</Link></Button>
           </div>
