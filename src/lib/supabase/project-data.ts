@@ -30,6 +30,7 @@ import { terbilangRupiah } from "@/utils/format";
 const CACHE_KEY = "kdkmp.supabase.bundle.v1";
 const TEMPLATE_ID = "master-template-kdkmp-v1";
 const RESUME_ITEMS_PAGE_SIZE = 500;
+const MAX_LOCAL_CACHE_CHARS = 4_000_000;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -669,13 +670,58 @@ function readCache(): ProjectBundle | null {
     const value = window.localStorage.getItem(CACHE_KEY);
     return value ? (JSON.parse(value) as ProjectBundle) : null;
   } catch {
+    clearCache();
     return null;
   }
 }
 
+function clearCache() {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(CACHE_KEY);
+  } catch {
+    // Ignore unavailable browser storage.
+  }
+}
+
+function compactCacheBundle(bundle: ProjectBundle): ProjectBundle {
+  return {
+    projects: bundle.projects,
+    generatedNotas: [],
+    kwitansiEdits: [],
+    customNotes: [],
+    history: bundle.history.slice(0, 100),
+    source: "cache",
+  };
+}
+
+function serializeCacheBundle(bundle: ProjectBundle): string | null {
+  const serialized = JSON.stringify(bundle);
+  if (serialized.length <= MAX_LOCAL_CACHE_CHARS) return serialized;
+
+  const compactSerialized = JSON.stringify(compactCacheBundle(bundle));
+  return compactSerialized.length <= MAX_LOCAL_CACHE_CHARS ? compactSerialized : null;
+}
+
 function writeCache(bundle: ProjectBundle) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(CACHE_KEY, JSON.stringify(bundle));
+
+  if (bundle.source === "supabase") {
+    clearCache();
+    return;
+  }
+
+  try {
+    const serialized = serializeCacheBundle(bundle);
+    if (!serialized) {
+      clearCache();
+      return;
+    }
+    window.localStorage.setItem(CACHE_KEY, serialized);
+  } catch (error) {
+    clearCache();
+    console.warn("Cache lokal project terlalu besar atau tidak tersedia, data tetap disimpan di Supabase.", error);
+  }
 }
 
 export function readCachedProjectBundle(): ProjectBundle {

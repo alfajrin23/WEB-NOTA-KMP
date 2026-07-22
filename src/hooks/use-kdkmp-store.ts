@@ -70,7 +70,11 @@ function readStorage<T>(key: string, fallback: T): T {
 
 function writeStorage<T>(key: string, value: T) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(key, JSON.stringify(value));
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch (error) {
+    console.warn(`Gagal menyimpan cache lokal ${key}.`, error);
+  }
 }
 
 function mergeTemplateAssignments(value: TemplateAssignment[]) {
@@ -254,16 +258,18 @@ export function useKdkmpStore() {
   }, []);
 
   useEffect(() => {
-    const cachedData = applyBundle(readCachedProjectBundle());
-    setProjects(cachedData.projects);
-    setGeneratedNotas(cachedData.generatedNotas);
-    setKwitansiEdits(cachedData.kwitansiEdits);
-    setCustomNotes(cachedData.customNotes);
-    setHistory(cachedData.history);
+    if (!supabaseReady) {
+      const cachedData = applyBundle(readCachedProjectBundle());
+      setProjects(cachedData.projects);
+      setGeneratedNotas(cachedData.generatedNotas);
+      setKwitansiEdits(cachedData.kwitansiEdits);
+      setCustomNotes(cachedData.customNotes);
+      setHistory(cachedData.history);
+    }
     setMasterItems(normalizePlnResumeItems(readStorage(MASTER_KEY, masterTemplateItems)));
     setTemplateAssignments(mergeTemplateAssignments(readStorage(TEMPLATE_ASSIGNMENTS_KEY, ALL_TEMPLATE_ASSIGNMENTS)));
     void refresh();
-  }, [refresh]);
+  }, [refresh, supabaseReady]);
 
   useEffect(() => {
     if (hydrated) writeStorage(MASTER_KEY, masterItems);
@@ -274,14 +280,14 @@ export function useKdkmpStore() {
   }, [hydrated, templateAssignments]);
 
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || supabaseReady) return;
     cacheProjectBundle({
       projects,
       generatedNotas,
       kwitansiEdits,
       customNotes,
       history,
-      source: supabaseReady ? "supabase" : "cache",
+      source: "cache",
     });
   }, [customNotes, generatedNotas, history, hydrated, kwitansiEdits, projects, supabaseReady]);
 
