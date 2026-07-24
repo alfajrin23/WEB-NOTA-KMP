@@ -245,3 +245,124 @@ export function terbilangRupiah(value: number) {
 export function getAmount(volume: number, unitPrice: number) {
   return Math.round((Number(volume) || 0) * (Number(unitPrice) || 0));
 }
+
+export type WilayahTypeValue = "desa" | "kelurahan";
+export type WilayahLabelVariant = "long" | "short";
+
+type ProjectWilayahLike = {
+  wilayahType?: WilayahTypeValue | string | null;
+  villageName?: string | null;
+  districtName?: string | null;
+  regencyName?: string | null;
+  invoiceRecipientName?: string | null;
+  invoiceRecipientAddress?: string | null;
+};
+
+const WILAYAH_LABELS: Record<WilayahTypeValue, Record<WilayahLabelVariant, string>> = {
+  desa: { long: "Desa", short: "Ds." },
+  kelurahan: { long: "Kelurahan", short: "Kel." },
+};
+
+export const WILAYAH_TYPE_OPTIONS: Array<{ value: WilayahTypeValue; label: string }> = [
+  { value: "desa", label: "Desa" },
+  { value: "kelurahan", label: "Kelurahan" },
+];
+
+export function normalizeWilayahType(value: string | null | undefined): WilayahTypeValue {
+  const normalized = (value ?? "").trim().toLowerCase();
+  if (normalized === "kelurahan" || normalized === "kel" || normalized === "kel.") return "kelurahan";
+  return "desa";
+}
+
+export function wilayahLabel(type: string | null | undefined, variant: WilayahLabelVariant = "long") {
+  return WILAYAH_LABELS[normalizeWilayahType(type)][variant];
+}
+
+export function stripWilayahPrefix(name: string | null | undefined) {
+  return (name ?? "")
+    .trim()
+    .replace(/^(?:desa|ds\.?|kelurahan|kel\.?)\s+/i, "")
+    .trim();
+}
+
+export function formatWilayah(
+  type: string | null | undefined,
+  name: string | null | undefined,
+  variant: WilayahLabelVariant = "long",
+) {
+  const label = wilayahLabel(type, variant);
+  const cleanName = stripWilayahPrefix(name);
+  return cleanName ? `${label} ${cleanName}` : label;
+}
+
+export function formatKdkmpWilayah(
+  type: string | null | undefined,
+  name: string | null | undefined,
+  variant: WilayahLabelVariant = "short",
+) {
+  return `KDKMP ${formatWilayah(type, name, variant)}`;
+}
+
+export function formatProjectWilayah(project: ProjectWilayahLike, variant: WilayahLabelVariant = "long") {
+  return formatWilayah(project.wilayahType, project.villageName, variant);
+}
+
+export function formatProjectKdkmpWilayah(project: ProjectWilayahLike, variant: WilayahLabelVariant = "short") {
+  return formatKdkmpWilayah(project.wilayahType, project.villageName, variant);
+}
+
+function compactIdentity(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/\bkelurahan\b/g, "kel")
+    .replace(/\bdesa\b/g, "ds")
+    .replace(/\./g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+export function isAutoKdkmpWilayahText(value: string | null | undefined, name: string | null | undefined) {
+  const text = (value ?? "").trim();
+  const cleanName = stripWilayahPrefix(name);
+  if (!text || !cleanName) return false;
+
+  const candidates = [
+    formatKdkmpWilayah("desa", cleanName, "long"),
+    formatKdkmpWilayah("desa", cleanName, "short"),
+    formatKdkmpWilayah("kelurahan", cleanName, "long"),
+    formatKdkmpWilayah("kelurahan", cleanName, "short"),
+  ];
+  return candidates.some((candidate) => compactIdentity(candidate) === compactIdentity(text));
+}
+
+function isAutoWilayahAddress(value: string | null | undefined, project: ProjectWilayahLike) {
+  const text = (value ?? "").trim();
+  const cleanName = stripWilayahPrefix(project.villageName);
+  if (!text || !cleanName) return false;
+
+  const district = project.districtName?.trim() ?? "";
+  const regency = project.regencyName?.trim() ?? "";
+  const candidates = [
+    `${formatWilayah("desa", cleanName, "long")}, Kec. ${district}, Kab. ${regency}`,
+    `${formatWilayah("kelurahan", cleanName, "long")}, Kec. ${district}, Kab. ${regency}`,
+    `${formatWilayah("desa", cleanName, "long")} Kec. ${district}`,
+    `${formatWilayah("kelurahan", cleanName, "long")} Kec. ${district}`,
+  ];
+  return candidates.some((candidate) => compactIdentity(candidate) === compactIdentity(text));
+}
+
+export function formatProjectRecipientName(project: ProjectWilayahLike, variant: WilayahLabelVariant = "long") {
+  const custom = project.invoiceRecipientName?.trim();
+  if (custom && !isAutoKdkmpWilayahText(custom, project.villageName)) return custom;
+  return formatProjectKdkmpWilayah(project, variant);
+}
+
+export function formatProjectRecipientAddress(project: ProjectWilayahLike) {
+  const custom = project.invoiceRecipientAddress?.trim();
+  if (custom && !isAutoWilayahAddress(custom, project)) return custom;
+
+  const district = project.districtName?.trim() || "-";
+  const regency = project.regencyName?.trim() || "-";
+  return `${formatProjectWilayah(project, "long")}, Kec. ${district}, Kab. ${regency}`;
+}

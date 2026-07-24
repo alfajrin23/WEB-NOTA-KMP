@@ -17,7 +17,7 @@ import { hashNotaData } from "@/lib/resume-calculations";
 import { getPLNDocumentGroup, groupDocumentsForPresentation } from "@/lib/pln-document-groups";
 import { moveSpecialNotasToStageEnd } from "@/lib/nota-output-order";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
-import { formatRupiah } from "@/utils/format";
+import { formatProjectWilayah, formatRupiah } from "@/utils/format";
 import { GeneratedNota, StageCode } from "@/types/domain";
 
 type StageFilter = StageCode | "all";
@@ -125,7 +125,7 @@ export function CekNotaView() {
           <div>
             <h2 className="text-2xl font-bold tracking-normal">Cek Hasil Nota Otomatis</h2>
             <p className="text-sm text-slate-500">
-              {documentEntries.length} nota tersimpan untuk Desa {project.villageName}. PDF tidak dibuat saat halaman dibuka.
+              {documentEntries.length} nota tersimpan untuk {formatProjectWilayah(project)}. PDF tidak dibuat saat halaman dibuka.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

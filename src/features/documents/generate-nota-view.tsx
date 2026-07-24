@@ -13,7 +13,7 @@ import { STAGES } from "@/constants/stages";
 import { buildProjectSummary, buildResumeValidationReport, validateProjectResume } from "@/lib/resume-calculations";
 import { groupDocumentsForPresentation } from "@/lib/pln-document-groups";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
-import { formatRupiah } from "@/utils/format";
+import { formatProjectWilayah, formatRupiah } from "@/utils/format";
 
 export function GenerateNotaView() {
   const params = useParams<{ id: string }>();
@@ -58,7 +58,7 @@ export function GenerateNotaView() {
           <div>
             <h2 className="text-2xl font-bold tracking-normal">Generate Nota Otomatis</h2>
             <p className="text-sm text-slate-500">
-              Sumber data dari resume Desa {project.villageName}. Hasil generate disimpan ke Supabase.
+              Sumber data dari resume {formatProjectWilayah(project)}. Hasil generate disimpan ke Supabase.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

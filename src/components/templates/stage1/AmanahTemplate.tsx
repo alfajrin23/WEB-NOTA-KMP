@@ -11,6 +11,7 @@ import {
   itemAmount,
   NotaGroup,
   padRows,
+  projectKdkmpRecipient,
   Stage1TemplateProps,
 } from "./stage1-shared";
 
@@ -30,7 +31,7 @@ function AmanahSlot({ group, project }: { group: NotaGroup | null; project: Stag
         <div className="amanah-recipient">
           <div>Cianjur&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: <span>{group ? formatDateSlash(group.date) : ""}</span></div>
           <div className="font-bold">Kepada Yth. :</div>
-          <div className="recipient-underline">KDKMP Desa {project.villageName}</div>
+          <div className="recipient-underline">{projectKdkmpRecipient(project)}</div>
           <div className="recipient-underline">Kecamatan {project.districtName}</div>
         </div>
       </header>

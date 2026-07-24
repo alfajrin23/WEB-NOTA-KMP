@@ -9,6 +9,7 @@ import {
   itemAmount,
   NotaGroup,
   padRows,
+  projectKdkmpRecipient,
   Stage1TemplateProps,
 } from "./stage1-shared";
 
@@ -21,7 +22,7 @@ function NotaKosongSlot({ group, project }: { group: NotaGroup | null; project: 
       <header className="kosong-header">
         <div className="kosong-recipient">
           <div className="recipient-blank">Kepada Yth. :</div>
-          <div>KDKMP Desa {project.villageName}</div>
+          <div>{projectKdkmpRecipient(project)}</div>
           <div>Kecamatan {project.districtName}</div>
         </div>
         <div className="kosong-date">Cianjur&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: <span>{group ? formatDateSlash(group.date) : ""}</span></div>

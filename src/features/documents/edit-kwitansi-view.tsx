@@ -27,7 +27,7 @@ import {
 import { buildKwitansiSyncKeyMap, kwitansiSyncKeyForDoc, kwitansiSyncLabel } from "@/lib/kwitansi-rules";
 import { getKwitansiGenerationDiagnostics, KWITANSI_TARGET_COUNTS } from "@/lib/nota-generator";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
-import { formatRupiah, numericInputValue } from "@/utils/format";
+import { formatProjectKdkmpWilayah, formatProjectWilayah, formatRupiah, numericInputValue } from "@/utils/format";
 import { GeneratedNota, Project, StageCode } from "@/types/domain";
 
 type StageFilter = StageCode | "all";
@@ -76,7 +76,7 @@ function buildDraft(doc: EditableKwitansiDoc, project: Project): EditDraft {
     date: rangeStart || doc.tanggal || doc.notaDate || project.projectDate,
     receiver: doc.kwitansiReceiverName ?? "",
     note: doc.kwitansiNote ?? "",
-    location: doc.kwitansiCity?.trim() || projectLines[0] || `KDKMP Ds. ${project.villageName}`,
+    location: doc.kwitansiCity?.trim() || projectLines[0] || formatProjectKdkmpWilayah(project),
     role: doc.kwitansiRoleName?.trim() || getKwitansiRole(doc),
     templateColor: doc.warnaTemplate || "default",
     dateIsManual: Boolean(doc.kwitansiDate?.trim()),
@@ -596,7 +596,7 @@ export function EditKwitansiView() {
                       </div>
                     </div>
                     <dl className="mt-3 grid grid-cols-[92px_1fr] gap-x-2 gap-y-1 text-xs">
-                      <dt className="text-slate-500">Desa</dt><dd className="font-medium">{project.villageName}</dd>
+                      <dt className="text-slate-500">Wilayah</dt><dd className="font-medium">{formatProjectWilayah(project)}</dd>
                       <dt className="text-slate-500">Nominal</dt><dd className="font-semibold">{formatRupiah(getKwitansiAmount(doc))}</dd>
                       <dt className="text-slate-500">Pemberi</dt><dd className="font-medium">{project ? getKwitansiPayerName(doc, project) || "-" : "-"}</dd>
                       {syncKey?.startsWith("terampil_") || syncKey?.startsWith("buruh_") ? (

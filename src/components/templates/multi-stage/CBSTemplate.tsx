@@ -16,6 +16,7 @@ import {
   MultiStageTemplateProps,
   NotaGroup,
   padRows,
+  projectKdkmpRecipient,
   projectRecipient,
 } from "./shared";
 
@@ -55,7 +56,7 @@ function CBSSlot({
   const rows = padRows(group?.items ?? [], CBS_ROWS);
   const total = group ? groupTotal(group) : 0;
   const recipient = projectRecipient(project).toUpperCase();
-  const villageLine = recipient.includes(project.villageName.toUpperCase()) ? recipient : `KDKMP DESA ${project.villageName}`.toUpperCase();
+  const villageLine = recipient.includes(project.villageName.toUpperCase()) ? recipient : projectKdkmpRecipient(project).toUpperCase();
   const districtLine = `KECAMATAN ${project.districtName}`.toUpperCase();
 
   return (

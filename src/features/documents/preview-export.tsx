@@ -13,7 +13,7 @@ import { isSpecialPLNKwitansi, PLNKwitansiBatchTemplate } from "@/components/tem
 import { buildProjectSummary, hashNotaData } from "@/lib/resume-calculations";
 import { moveSpecialNotasToStageEnd } from "@/lib/nota-output-order";
 import { cn } from "@/lib/utils";
-import { formatDateIndonesia, formatNumber, formatRupiah } from "@/utils/format";
+import { formatDateIndonesia, formatNumber, formatProjectWilayah, formatRupiah } from "@/utils/format";
 import { GeneratedNota, Project, TemplateAssignment } from "@/types/domain";
 
 type PreviewKind = "resume" | "notes";
@@ -137,7 +137,7 @@ export const ResumePrintPreview = memo(function ResumePrintPreview({ project }: 
       <div className="border-b border-slate-300 pb-4">
         <h2 className="text-xl font-bold">Resume Project</h2>
         <div className="mt-2 grid grid-cols-2 gap-x-8 gap-y-1 text-sm">
-          <span>Desa: {project.villageName}</span>
+          <span>Desa / Kelurahan: {formatProjectWilayah(project)}</span>
           <span>Kecamatan: {project.districtName}</span>
           <span>Kabupaten: {project.regencyName}</span>
           <span>Wilayah/Kodim: {project.regionName}</span>

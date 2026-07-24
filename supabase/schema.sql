@@ -15,6 +15,7 @@ end $$;
 create table if not exists projects (
   id uuid primary key default gen_random_uuid(),
   nama_desa text not null,
+  jenis_wilayah text not null default 'desa' check (jenis_wilayah in ('desa', 'kelurahan')),
   kecamatan text not null,
   kabupaten text not null,
   nama_project text not null,
@@ -54,6 +55,7 @@ create table if not exists resume_categories (
 );
 
 alter table projects add column if not exists nama_desa text;
+alter table projects add column if not exists jenis_wilayah text default 'desa';
 alter table projects add column if not exists kecamatan text;
 alter table projects add column if not exists kabupaten text;
 alter table projects add column if not exists nama_project text;
@@ -91,6 +93,7 @@ begin
   update projects
   set
     nama_desa = coalesce(nama_desa, ''),
+    jenis_wilayah = coalesce(nullif(lower(jenis_wilayah), ''), 'desa'),
     kecamatan = coalesce(kecamatan, ''),
     kabupaten = coalesce(kabupaten, ''),
     nama_project = coalesce(nama_project, ''),
@@ -98,6 +101,12 @@ begin
     tanggal_laporan = coalesce(tanggal_laporan, project_date, current_date),
     project_date = coalesce(project_date, tanggal_laporan, current_date);
 end $$;
+
+alter table projects alter column jenis_wilayah set default 'desa';
+update projects set jenis_wilayah = 'desa' where jenis_wilayah is null or jenis_wilayah not in ('desa', 'kelurahan');
+alter table projects alter column jenis_wilayah set not null;
+alter table projects drop constraint if exists projects_jenis_wilayah_check;
+alter table projects add constraint projects_jenis_wilayah_check check (jenis_wilayah in ('desa', 'kelurahan'));
 
 create table if not exists resume_items (
   id uuid primary key default gen_random_uuid(),

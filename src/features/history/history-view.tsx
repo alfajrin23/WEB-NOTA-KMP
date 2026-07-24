@@ -12,7 +12,7 @@ import { MotionPage } from "@/components/ui/motion-page";
 import { groupDocumentsForPresentation } from "@/lib/pln-document-groups";
 import { buildProjectSummary } from "@/lib/resume-calculations";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
-import { formatDateIndonesia, formatDateTimeIndonesia, formatRupiah } from "@/utils/format";
+import { formatDateIndonesia, formatDateTimeIndonesia, formatProjectWilayah, formatRupiah } from "@/utils/format";
 
 export function HistoryView() {
   const { projects, vendors, generatedNotas, customNotes, history, loading } = useKdkmpStore();
@@ -49,7 +49,7 @@ export function HistoryView() {
             <p className="text-sm text-slate-500">Buka kembali project, resume, hasil generate, edit kwitansi, dan nota tambahan.</p>
           </div>
           <Button asChild>
-            <Link href="/tambah-desa"><FilePlus2 className="h-4 w-4" />Tambah Desa</Link>
+            <Link href="/tambah-desa"><FilePlus2 className="h-4 w-4" />Tambah Desa / Kelurahan</Link>
           </Button>
         </div>
 
@@ -62,7 +62,7 @@ export function HistoryView() {
             <div className="grid gap-3 lg:grid-cols-[1fr_190px_190px]">
               <div className="relative">
                 <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                <Input className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari nama desa, project, kecamatan, kabupaten" />
+                <Input className="pl-9" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari nama desa/kelurahan, project, kecamatan, kabupaten" />
               </div>
               <div className="relative">
                 <CalendarDays className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
@@ -82,7 +82,7 @@ export function HistoryView() {
               <CardHeader className="gap-3">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                   <div>
-                    <CardTitle>Desa {project.villageName}</CardTitle>
+                    <CardTitle>{formatProjectWilayah(project)}</CardTitle>
                     <CardDescription>
                       {project.projectName} - Kec. {project.districtName}, Kab. {project.regencyName}
                     </CardDescription>

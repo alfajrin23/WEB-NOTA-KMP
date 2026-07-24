@@ -15,7 +15,7 @@ import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
 import { STAGES } from "@/constants/stages";
 import { groupDocumentsForPresentation } from "@/lib/pln-document-groups";
 import { buildProjectSummary, validateProjectResume } from "@/lib/resume-calculations";
-import { formatRupiah } from "@/utils/format";
+import { formatProjectWilayah, formatRupiah } from "@/utils/format";
 
 const colors = ["#2563eb", "#10b981", "#0f766e", "#38bdf8", "#64748b"];
 
@@ -81,7 +81,7 @@ export function DashboardView() {
   }
 
   const cards = [
-    { label: "Total Desa", value: projects.length.toString(), icon: Users, tone: "text-blue-600" },
+    { label: "Total Wilayah", value: projects.length.toString(), icon: Users, tone: "text-blue-600" },
     { label: "Total Nominal", value: formatRupiah(totalNominal), icon: FileText, tone: "text-emerald-600" },
     { label: "Total Nota", value: documentEntries.length.toString(), icon: ReceiptText, tone: "text-sky-600" },
     { label: "Total Vendor", value: vendors.length.toString(), icon: Users, tone: "text-slate-600" },
@@ -93,12 +93,12 @@ export function DashboardView() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-2xl font-bold tracking-normal">Dashboard</h2>
-            <p className="text-sm text-slate-500">Pantau project desa, nominal, vendor, dan nota yang siap dicetak.</p>
+            <p className="text-sm text-slate-500">Pantau project wilayah, nominal, vendor, dan nota yang siap dicetak.</p>
           </div>
           <Button asChild>
             <Link href="/tambah-desa">
               <Plus className="h-4 w-4" />
-              Tambah Desa
+              Tambah Desa / Kelurahan
             </Link>
           </Button>
         </div>
@@ -235,7 +235,7 @@ export function DashboardView() {
                           {issue.severity}
                         </Badge>
                       </div>
-                      <p className="mt-1 text-xs opacity-80">Desa {issue.project.villageName}</p>
+                      <p className="mt-1 text-xs opacity-80">{formatProjectWilayah(issue.project)}</p>
                     </Link>
                   ))}
                   {allIssues.length > 12 && <p className="text-xs text-slate-500">+{allIssues.length - 12} warning lain.</p>}
@@ -248,11 +248,11 @@ export function DashboardView() {
         <Card>
           <CardHeader className="gap-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-              <CardTitle>Daftar Desa</CardTitle>
+              <CardTitle>Daftar Desa / Kelurahan</CardTitle>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                  <Input className="pl-9 sm:w-72" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari desa, kecamatan, kabupaten" />
+                  <Input className="pl-9 sm:w-72" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Cari desa/kelurahan, kecamatan, kabupaten" />
                 </div>
                 <Button variant="outline" onClick={() => setSort(sort === "newest" ? "name" : sort === "name" ? "total" : "newest")}>
                   <ArrowDownUp className="h-4 w-4" />
@@ -266,7 +266,7 @@ export function DashboardView() {
               <table className="w-full min-w-[780px] text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase text-slate-500 dark:bg-slate-900">
                   <tr>
-                    <th className="px-4 py-3">Desa</th>
+                    <th className="px-4 py-3">Desa / Kelurahan</th>
                     <th className="px-4 py-3">Project</th>
                     <th className="px-4 py-3">Nominal</th>
                     <th className="px-4 py-3">Nota</th>
@@ -279,7 +279,7 @@ export function DashboardView() {
                     <tr key={project.id} className="bg-white transition hover:bg-slate-50 dark:bg-slate-950 dark:hover:bg-slate-900/60">
                       <td className="px-4 py-4">
                         <Link href={`/projects/${project.id}/resume`} className="font-semibold text-blue-700 hover:underline dark:text-blue-300">
-                          Desa {project.villageName}
+                          {formatProjectWilayah(project)}
                         </Link>
                         <p className="text-xs text-slate-500">Kec. {project.districtName}, Kab. {project.regencyName}</p>
                       </td>

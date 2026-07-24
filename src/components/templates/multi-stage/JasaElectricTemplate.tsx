@@ -14,6 +14,7 @@ import {
   MultiStageTemplateProps,
   NotaGroup,
   padRows,
+  projectKdkmpRecipient,
 } from "./shared";
 
 const JASA_ROWS = 14;
@@ -83,7 +84,7 @@ function JasaSlot({
         <div className="jasa-recipient">
           <div><span>Tgl</span><b>:</b><strong>{formatDateLong(group.date)}</strong></div>
           <div><span>Tuan Toko</span><b>:</b></div>
-          <div>KDKMP Desa {project.villageName}</div>
+          <div>{projectKdkmpRecipient(project)}</div>
           <div>Kecamatan {project.districtName}</div>
         </div>
       </header>

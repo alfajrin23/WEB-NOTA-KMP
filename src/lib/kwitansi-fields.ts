@@ -1,5 +1,5 @@
 import { GeneratedNota, Project, ResumeItem, StageCode } from "@/types/domain";
-import { formatDateIndonesia, parseDateInputToIso, terbilangRupiah } from "@/utils/format";
+import { formatDateIndonesia, formatProjectKdkmpWilayah, parseDateInputToIso, terbilangRupiah } from "@/utils/format";
 import { getResumeItemAmount } from "./resume-calculations";
 
 function normalized(value: string | undefined | null) {
@@ -230,14 +230,14 @@ export function getDefaultKwitansiPaymentLines(doc: GeneratedNota, project: Proj
   if (isPpmDoc(doc)) {
     return [
       `Pembayaran Sewa Kebutuhan Peralatan dan Kendaraan ${getKwitansiStageShortText(doc.stageCode)}`,
-      `Pembangunan KDKMP Ds. ${project.villageName} Kec. ${project.districtName} Kab. ${project.regencyName}`,
+      `Pembangunan ${formatProjectKdkmpWilayah(project)} Kec. ${project.districtName} Kab. ${project.regencyName}`,
     ];
   }
 
   if (isLemburDoc(doc)) {
     return [
       `Pembayaran Upah Lembur Mandor dan Pekerja Tanggal ${startText} s.d ${endText}`,
-      `${getKwitansiStageShortText(doc.stageCode)} KDKMP Ds. ${project.villageName}`,
+      `${getKwitansiStageShortText(doc.stageCode)} ${formatProjectKdkmpWilayah(project)}`,
     ];
   }
 
@@ -245,7 +245,7 @@ export function getDefaultKwitansiPaymentLines(doc: GeneratedNota, project: Proj
     const workName = cleanRole(doc.items[0]?.itemName || role);
     const dateSuffix = startText ? ` pada tanggal ${startText}` : "";
     return [
-      `Pembayaran ${workName} Pembangunan KDKMP Ds. ${project.villageName}${dateSuffix}`,
+      `Pembayaran ${workName} Pembangunan ${formatProjectKdkmpWilayah(project)}${dateSuffix}`,
     ];
   }
 
@@ -253,7 +253,7 @@ export function getDefaultKwitansiPaymentLines(doc: GeneratedNota, project: Proj
   const dateText = !startText ? "" : startText === endText ? `Tanggal ${startText}` : `Tanggal ${startText} s.d ${endText}`;
   return [
     `${prefix} ${role} ${dateText}`.trim(),
-    `Pembangunan KDKMP Ds. ${project.villageName} ${stageText}`,
+    `Pembangunan ${formatProjectKdkmpWilayah(project)} ${stageText}`,
   ];
 }
 
@@ -272,5 +272,5 @@ export function getKwitansiProjectLines(doc: GeneratedNota, project: Project) {
   const customLocation = doc.kwitansiCity?.trim();
   if (customLocation) return [customLocation, role];
   if (isPpmServiceDoc(doc)) return ["CV. PRATAMA PROJECT MANDIRI", role];
-  return [`KDKMP Ds. ${project.villageName}`, role];
+  return [formatProjectKdkmpWilayah(project), role];
 }

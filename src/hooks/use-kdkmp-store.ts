@@ -20,6 +20,11 @@ import { buildResumeItemsForNewProject, latestEditedProject } from "@/lib/resume
 import { findPriceSyncItems } from "@/lib/resume-price-sync";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
 import {
+  formatProjectRecipientAddress,
+  formatProjectRecipientName,
+  normalizeWilayahType,
+} from "@/utils/format";
+import {
   backfillProjectKwitansiReceivers,
   cacheProjectBundle,
   createCustomNote,
@@ -53,6 +58,7 @@ import {
   ResumeItem,
   StageCode,
   TemplateAssignment,
+  WilayahType,
 } from "@/types/domain";
 
 const MASTER_KEY = "kdkmp.master-template.v1";
@@ -144,33 +150,53 @@ function normalizeResponsibleName(project: Project) {
 }
 
 function normalizeProjects(projects: Project[]) {
-  return projects.map((project) => ({
-    ...project,
-    responsibleName: normalizeResponsibleName(project),
-    items: normalizePlnResumeItems(project.items),
-  }));
+  return projects.map((project) => {
+    const wilayahType = normalizeWilayahType(
+      project.wilayahType ?? (
+        typeof project.metadataJson?.jenis_wilayah === "string"
+          ? project.metadataJson.jenis_wilayah
+          : typeof project.metadataJson?.wilayah_type === "string"
+            ? project.metadataJson.wilayah_type
+            : undefined
+      ),
+    ) as WilayahType;
+    const normalized = {
+      ...project,
+      wilayahType,
+      responsibleName: normalizeResponsibleName(project),
+      items: normalizePlnResumeItems(project.items),
+    };
+    return {
+      ...normalized,
+      invoiceRecipientName: formatProjectRecipientName(normalized, "long"),
+      invoiceRecipientAddress: formatProjectRecipientAddress(normalized),
+    };
+  });
 }
 
 function createLocalProject(
-  input: Pick<Project, "projectName" | "villageName" | "districtName" | "regencyName" | "regionName" | "responsibleName" | "projectDate">,
+  input: Pick<Project, "projectName" | "wilayahType" | "villageName" | "districtName" | "regencyName" | "regionName" | "responsibleName" | "projectDate">,
   sourceItems: ResumeItem[],
   options: { historyItems?: ResumeItem[] | null; shiftDatesFromDefault?: boolean } = {},
 ) {
   const id = `project-${crypto.randomUUID()}`;
   const now = new Date().toISOString();
+  const wilayahType = normalizeWilayahType(input.wilayahType) as WilayahType;
+  const identity = { ...input, wilayahType };
   const items = options.shiftDatesFromDefault === false
     ? sourceItems
     : buildResumeItemsForNewProject(sourceItems, input.projectDate, options.historyItems);
 
   return {
     ...input,
+    wilayahType,
     id,
     templateId: "master-template-kdkmp-v1",
     reportDate: input.projectDate,
     responsibleName: input.responsibleName,
     coordinates: "",
-    invoiceRecipientName: `KDKMP Desa ${input.villageName}`,
-    invoiceRecipientAddress: `Desa ${input.villageName}, Kec. ${input.districtName}, Kab. ${input.regencyName}`,
+    invoiceRecipientName: formatProjectRecipientName(identity, "long"),
+    invoiceRecipientAddress: formatProjectRecipientAddress(identity),
     targetGrandTotal: null,
     status: "draft",
     createdAt: now,
@@ -389,7 +415,7 @@ export function useKdkmpStore() {
   }, [projects, supabaseReady, templateAssignments]);
 
   const createProject = useCallback(async (
-    input: Pick<Project, "projectName" | "villageName" | "districtName" | "regencyName" | "regionName" | "responsibleName" | "projectDate">,
+    input: Pick<Project, "projectName" | "wilayahType" | "villageName" | "districtName" | "regencyName" | "regionName" | "responsibleName" | "projectDate">,
     options: { budgetReferenceProjectId?: string | null } = {},
   ) => {
     const historyProject = options.budgetReferenceProjectId === undefined
@@ -435,6 +461,7 @@ export function useKdkmpStore() {
     const copy = createLocalProject(
       {
         projectName: source.projectName,
+        wilayahType: source.wilayahType,
         villageName: `${source.villageName} Copy`,
         districtName: source.districtName,
         regencyName: source.regencyName,

@@ -21,13 +21,23 @@ import { buildProjectSummary, buildResumeValidationReport, getComputedAmount, ge
 import { shiftResumeItemsFromDefault } from "@/lib/project-date-shift";
 import { findPriceSyncSiblingItems } from "@/lib/resume-price-sync";
 import { compareResumeItems, mergeResumeItems, ParsedResume, ResumeImportDiff } from "@/lib/resume-import/parser";
-import { formatNumber, formatRupiah, formatThousands, formatTimeIndonesia, numericInputValue } from "@/utils/format";
-import { Project, ResumeItem, StageCode } from "@/types/domain";
+import {
+  formatNumber,
+  formatProjectWilayah,
+  formatRupiah,
+  formatThousands,
+  formatTimeIndonesia,
+  numericInputValue,
+  wilayahLabel,
+  WILAYAH_TYPE_OPTIONS,
+} from "@/utils/format";
+import { Project, ResumeItem, StageCode, WilayahType } from "@/types/domain";
 import { cn } from "@/lib/utils";
 
 type DraftSnapshot = ResumeItem[];
 type ProjectMetadataDraft = {
   projectName: string;
+  wilayahType: WilayahType;
   villageName: string;
   districtName: string;
   regencyName: string;
@@ -339,7 +349,7 @@ export function ResumeEditor() {
         .replace(/^_+|_+$/g, "") || "Project";
       const fileName = encodedName
         ? decodeURIComponent(encodedName)
-        : plainName || `Resume_KDKMP_Desa_${fallbackVillage}.xlsx`;
+        : plainName || `Resume_KDKMP_${wilayahLabel(currentProject.wilayahType, "long")}_${fallbackVillage}.xlsx`;
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
@@ -533,7 +543,7 @@ export function ResumeEditor() {
           <div>
             <h2 className="text-2xl font-bold tracking-normal">Resume Editor</h2>
             <p className="text-sm text-slate-500">
-              Desa {project.villageName}, Kec. {project.districtName}, Kab. {project.regencyName}
+              {formatProjectWilayah(project)}, Kec. {project.districtName}, Kab. {project.regencyName}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1040,7 +1050,13 @@ function ProjectMetadataCard({
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
           <LabeledEditable label="Nama project" value={project.projectName} onCommit={(value) => onPatch({ projectName: value })} />
           <LabeledEditable label="Wilayah/Kodim" value={project.regionName} onCommit={(value) => onPatch({ regionName: value })} />
-          <LabeledEditable label="Desa/KDKMP" value={project.villageName} onCommit={(value) => onPatch({ villageName: value })} />
+          <LabeledSelect
+            label="Jenis Wilayah"
+            value={project.wilayahType}
+            onCommit={(value) => onPatch({ wilayahType: value as WilayahType })}
+            options={WILAYAH_TYPE_OPTIONS}
+          />
+          <LabeledEditable label="Nama Desa / Kelurahan" value={project.villageName} onCommit={(value) => onPatch({ villageName: value })} />
           <LabeledEditable label="Kecamatan" value={project.districtName} onCommit={(value) => onPatch({ districtName: value })} />
           <LabeledEditable label="Kabupaten" value={project.regencyName} onCommit={(value) => onPatch({ regencyName: value })} />
           <LabeledEditable label="Tanggal Awal Project" type="date" value={project.projectDate} onCommit={onProjectDateCommit} required />
@@ -1088,6 +1104,34 @@ function LabeledEditable({
         requiredMessage={requiredMessage ?? `${label} wajib diisi.`}
         className="text-sm font-normal text-slate-950 dark:text-slate-50"
       />
+    </label>
+  );
+}
+
+function LabeledSelect({
+  label,
+  value,
+  onCommit,
+  options,
+}: {
+  label: string;
+  value: string;
+  onCommit: (value: string) => void;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <label className="space-y-1 text-xs font-semibold text-slate-500">
+      <span>{label}</span>
+      <Select value={value} onValueChange={onCommit}>
+        <SelectTrigger className="text-sm font-normal text-slate-950 dark:text-slate-50">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map((option) => (
+            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </label>
   );
 }

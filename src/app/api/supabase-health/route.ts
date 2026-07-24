@@ -30,7 +30,7 @@ export async function GET() {
 
   const { data, error, count } = await supabase
     .from("projects")
-    .select("id,nama_desa,nama_project,status,created_at,updated_at", { count: "exact" })
+    .select("id,nama_desa,jenis_wilayah,nama_project,status,created_at,updated_at", { count: "exact" })
     .limit(5);
 
   if (error) {

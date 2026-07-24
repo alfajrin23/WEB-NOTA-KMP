@@ -17,7 +17,7 @@ import { DEFAULT_PROJECT_START_DATE } from "@/lib/project-date-shift";
 import { buildProjectSummary } from "@/lib/resume-calculations";
 import { latestEditedProject } from "@/lib/resume-history";
 import { ProjectFormValues, projectSchema } from "@/schemas/project.schema";
-import { formatDateIndonesia, formatRupiah } from "@/utils/format";
+import { formatDateIndonesia, formatProjectWilayah, formatRupiah, WILAYAH_TYPE_OPTIONS } from "@/utils/format";
 
 const DEFAULT_BUDGET_REFERENCE_VALUE = "__default_budget_template__";
 
@@ -30,6 +30,7 @@ export function NewProjectForm() {
     resolver: zodResolver(projectSchema),
     defaultValues: {
       projectName: "Pembangunan Gedung KDKMP",
+      wilayahType: "desa",
       villageName: "",
       districtName: "",
       regencyName: "Cianjur",
@@ -39,6 +40,7 @@ export function NewProjectForm() {
     },
   });
   const projectDateValue = form.watch("projectDate");
+  const wilayahTypeValue = form.watch("wilayahType");
   const sortedProjects = useMemo(
     () => [...projects].sort((a, b) => a.villageName.localeCompare(b.villageName, "id")),
     [projects],
@@ -86,9 +88,9 @@ export function NewProjectForm() {
             <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-200">
               <Building2 className="h-6 w-6" />
             </div>
-            <CardTitle className="text-xl">Tambah Desa</CardTitle>
+            <CardTitle className="text-xl">Tambah Desa / Kelurahan</CardTitle>
             <CardDescription>
-              Project baru memakai Master Template aktif. Qty dan harga satuan dapat mengikuti anggaran desa referensi.
+              Project baru memakai Master Template aktif. Qty dan harga satuan dapat mengikuti anggaran wilayah referensi.
               {!supabaseReady ? " Supabase belum dikonfigurasi, data hanya menjadi cache sementara." : ""}
             </CardDescription>
           </CardHeader>
@@ -96,7 +98,7 @@ export function NewProjectForm() {
             <form onSubmit={form.handleSubmit(submit)} className="grid gap-4 md:grid-cols-2">
               {[
                 ["projectName", "Nama Project"],
-                ["villageName", "Nama Desa"],
+                ["villageName", "Nama Desa / Kelurahan"],
                 ["districtName", "Kecamatan"],
                 ["regencyName", "Kabupaten"],
                 ["regionName", "Wilayah"],
@@ -130,9 +132,28 @@ export function NewProjectForm() {
                   ) : null}
                 </label>
               ))}
+              <label className="space-y-2">
+                <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">Jenis Wilayah</span>
+                <Select
+                  value={wilayahTypeValue ?? "desa"}
+                  onValueChange={(value) => form.setValue("wilayahType", value as ProjectFormValues["wilayahType"], { shouldDirty: true, shouldValidate: true })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {WILAYAH_TYPE_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.formState.errors.wilayahType?.message ? (
+                  <span className="text-xs text-red-600">{form.formState.errors.wilayahType.message}</span>
+                ) : null}
+              </label>
               <div className="space-y-2 md:col-span-2">
                 <span className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-                  Referensi Anggaran Dari Desa
+                  Referensi Anggaran Dari Desa / Kelurahan
                 </span>
                 <Select
                   value={budgetReferenceValue}
@@ -140,7 +161,7 @@ export function NewProjectForm() {
                   disabled={saving || loading}
                 >
                   <SelectTrigger>
-                    <SelectValue className="truncate text-left" placeholder={loading ? "Memuat daftar desa..." : "Pilih referensi anggaran (opsional)"} />
+                      <SelectValue className="truncate text-left" placeholder={loading ? "Memuat daftar wilayah..." : "Pilih referensi anggaran (opsional)"} />
                   </SelectTrigger>
                   <SelectContent className="max-w-[calc(100vw-2rem)]">
                     <SelectItem className="whitespace-normal" value={DEFAULT_BUDGET_REFERENCE_VALUE}>
@@ -148,13 +169,13 @@ export function NewProjectForm() {
                     </SelectItem>
                     {sortedProjects.map((project) => (
                       <SelectItem className="whitespace-normal" key={project.id} value={project.id}>
-                        {project.villageName} - Kec. {project.districtName} - {formatRupiah(projectBudgetSummaries.get(project.id)?.grandTotal ?? 0)}
+                        {formatProjectWilayah(project)} - Kec. {project.districtName} - {formatRupiah(projectBudgetSummaries.get(project.id)?.grandTotal ?? 0)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Pilih desa untuk menyalin qty dan harga satuannya. Keterangan di bawah menunjukkan anggaran yang benar-benar akan dipakai.
+                  Pilih wilayah untuk menyalin qty dan harga satuannya. Keterangan di bawah menunjukkan anggaran yang benar-benar akan dipakai.
                 </p>
                 <div className="rounded-xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900 dark:bg-blue-950/30">
                   <div className="flex items-start gap-3">
@@ -165,14 +186,16 @@ export function NewProjectForm() {
                       <p className="text-sm font-bold text-slate-900 dark:text-slate-100">
                         {usesTemplateDefault
                           ? "Anggaran: Default / Template Awal"
-                          : usesHistoryFallback
-                            ? `Anggaran otomatis dari ${effectiveReferenceProject?.villageName ?? "desa terakhir"}`
-                            : `Anggaran dari ${effectiveReferenceProject?.villageName ?? "desa referensi"}`}
+                          : usesHistoryFallback && effectiveReferenceProject
+                            ? `Anggaran otomatis dari ${formatProjectWilayah(effectiveReferenceProject)}`
+                            : effectiveReferenceProject
+                              ? `Anggaran dari ${formatProjectWilayah(effectiveReferenceProject)}`
+                              : "Anggaran dari wilayah referensi"}
                       </p>
                       <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-300">
                         {usesTemplateDefault
                           ? "Qty dan harga satuan memakai nilai bawaan Master Template aktif."
-                          : `${effectiveReferenceProject?.projectName ?? "Project"}, Kec. ${effectiveReferenceProject?.districtName ?? "-"}. ${usesHistoryFallback ? "Pilihan masih kosong, jadi sistem memakai history desa terakhir sesuai fallback lama." : "Desa ini dipilih sebagai sumber anggaran."}`}
+                          : `${effectiveReferenceProject?.projectName ?? "Project"}, Kec. ${effectiveReferenceProject?.districtName ?? "-"}. ${usesHistoryFallback ? "Pilihan masih kosong, jadi sistem memakai history wilayah terakhir sesuai fallback lama." : "Wilayah ini dipilih sebagai sumber anggaran."}`}
                       </p>
                     </div>
                   </div>
@@ -201,14 +224,14 @@ export function NewProjectForm() {
                   ) : null}
 
                   <p className="mt-3 border-t border-blue-200 pt-3 text-xs font-medium text-blue-800 dark:border-blue-900 dark:text-blue-200">
-                    Hanya Qty/Volume dan Harga Satuan yang disalin. Nama desa, Babinsa, tanggal project, nota, dan kwitansi tetap mengikuti desa baru.
+                    Hanya Qty/Volume dan Harga Satuan yang disalin. Nama wilayah, Babinsa, tanggal project, nota, dan kwitansi tetap mengikuti wilayah baru.
                   </p>
                 </div>
               </div>
               <div className="md:col-span-2">
                 <Button type="submit" className="w-full sm:w-auto" disabled={saving || loading}>
                   {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
-                  {saving ? "Menyimpan" : loading ? "Memuat Data Desa" : "Simpan & Lanjut Resume"}
+                  {saving ? "Menyimpan" : loading ? "Memuat Data Wilayah" : "Simpan & Lanjut Resume"}
                 </Button>
               </div>
             </form>

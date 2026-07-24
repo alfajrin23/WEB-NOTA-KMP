@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PDFDocument, PageSizes, StandardFonts, rgb } from "pdf-lib";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
-import { formatDateIndonesia, terbilangRupiah } from "@/utils/format";
+import { formatDateIndonesia, formatProjectKdkmpWilayah, formatProjectWilayah, terbilangRupiah } from "@/utils/format";
 import { ExcelTemplateRequest, RenderedExcelPdf } from "./types";
 
 const A4 = PageSizes.A4;
@@ -75,7 +75,7 @@ export async function renderKwitansiImageToPdf(request: ExcelTemplateRequest): P
       const left = x;
       const color = rgb(0, 0, 0);
 
-      page.drawText("KDKMP Ds. " + request.project.villageName, {
+      page.drawText(formatProjectKdkmpWilayah(request.project), {
         x: left + slotWidth * 0.44,
         y: top - slotHeight * 0.2,
         size: 12,
@@ -96,7 +96,7 @@ export async function renderKwitansiImageToPdf(request: ExcelTemplateRequest): P
         font: regular,
         color,
       });
-      page.drawText(`${request.project.projectName} Ds. ${request.project.villageName} ${item.stageName}`, {
+      page.drawText(`${request.project.projectName} ${formatProjectWilayah(request.project, "short")} ${item.stageName}`, {
         x: left + slotWidth * 0.44,
         y: top - slotHeight * 0.53,
         size: 9,

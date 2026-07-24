@@ -1,7 +1,13 @@
 import XlsxPopulate, { Cell, Range, Sheet } from "xlsx-populate";
 import { STAGES } from "@/constants/stages";
 import { buildProjectSummary, getResumeItemAmount } from "@/lib/resume-calculations";
-import { parseDateInputToIso } from "@/utils/format";
+import {
+  formatProjectKdkmpWilayah,
+  formatProjectWilayah,
+  parseDateInputToIso,
+  stripWilayahPrefix,
+  wilayahLabel,
+} from "@/utils/format";
 import { Project, ResumeItem, Vendor } from "@/types/domain";
 
 const XLSX_CURRENCY_FORMAT = '"Rp" #,##0;[Red]-"Rp" #,##0';
@@ -96,7 +102,7 @@ const STAGE_TABLE_HEADER_ROW = 8;
 const STAGE_TABLE_FIRST_ROW = STAGE_TABLE_HEADER_ROW + 1;
 const STAGE_LAST_COLUMN = STAGE_SHEET_COLUMNS.length;
 
-type WorkbookProjectIdentity = Pick<Project, "projectName" | "villageName">;
+type WorkbookProjectIdentity = Pick<Project, "projectName" | "wilayahType" | "villageName">;
 
 type VendorSubtotal = {
   key: string;
@@ -197,11 +203,11 @@ function safeFileSegment(value: string) {
 }
 
 export function safeResumeExcelFileName(project: WorkbookProjectIdentity) {
-  const villageWithoutPrefix = project.villageName.trim().replace(/^desa\b[\s_-]*/i, "");
-  const segment = safeFileSegment(villageWithoutPrefix)
+  const locationWithoutPrefix = stripWilayahPrefix(project.villageName);
+  const segment = safeFileSegment(locationWithoutPrefix)
     || safeFileSegment(project.projectName)
     || "Project";
-  return `Resume_KDKMP_Desa_${segment}.xlsx`;
+  return `Resume_KDKMP_${wilayahLabel(project.wilayahType, "long")}_${segment}.xlsx`;
 }
 
 function validateWorkbookInput(project: Project) {
@@ -264,7 +270,7 @@ function writeSummarySheet(sheet: Sheet, project: Project, vendors: Vendor[]) {
   setSheetColumnWidths(sheet, [30, 16, 18, 24, 24, 22, 22, 24]);
   sheet.row(1).height(30);
   mergeRow(sheet, 1, 1, 8).style(TITLE_STYLE);
-  sheet.cell(1, 1).value(`RESUME KDKMP - DESA ${project.villageName || "-"}`);
+  sheet.cell(1, 1).value(`RESUME ${formatProjectKdkmpWilayah(project, "long").toUpperCase()}`);
   mergeRow(sheet, 2, 1, 8).style(SUBTITLE_STYLE);
   sheet.cell(2, 1).value(project.projectName || "Resume Project");
 
@@ -273,8 +279,8 @@ function writeSummarySheet(sheet: Sheet, project: Project, vendors: Vendor[]) {
     row: 4,
     leftLabel: "Nama Project",
     leftValue: project.projectName || "-",
-    rightLabel: "Desa",
-    rightValue: project.villageName || "-",
+    rightLabel: "Desa / Kelurahan",
+    rightValue: formatProjectWilayah(project, "long") || "-",
   });
   writeMetadataPair({
     sheet,
@@ -371,8 +377,8 @@ function writeStageMetadata(sheet: Sheet, project: Project) {
     row: 3,
     leftLabel: "Nama Project",
     leftValue: project.projectName || "-",
-    rightLabel: "Desa",
-    rightValue: project.villageName || "-",
+    rightLabel: "Desa / Kelurahan",
+    rightValue: formatProjectWilayah(project, "long") || "-",
     lastColumn: STAGE_LAST_COLUMN,
   });
   writeMetadataPair({
@@ -484,7 +490,7 @@ function writeStageSheet({
   setSheetColumnWidths(sheet, STAGE_SHEET_COLUMNS.map((column) => column.width));
   sheet.row(1).height(30);
   mergeRow(sheet, 1, 1, STAGE_LAST_COLUMN).style(TITLE_STYLE);
-  sheet.cell(1, 1).value(`RESUME ${stageLabel.toUpperCase()} - DESA ${project.villageName || "-"}`);
+  sheet.cell(1, 1).value(`RESUME ${stageLabel.toUpperCase()} - ${formatProjectWilayah(project, "long").toUpperCase()}`);
   mergeRow(sheet, 2, 1, STAGE_LAST_COLUMN).style(SUBTITLE_STYLE);
   sheet.cell(2, 1).value(project.projectName || "Resume Project");
   writeStageMetadata(sheet, project);

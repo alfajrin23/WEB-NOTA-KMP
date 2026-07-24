@@ -25,7 +25,12 @@ import {
   StageCode,
   TemplateAssignment,
 } from "@/types/domain";
-import { terbilangRupiah } from "@/utils/format";
+import {
+  formatProjectRecipientAddress,
+  formatProjectRecipientName,
+  normalizeWilayahType,
+  terbilangRupiah,
+} from "@/utils/format";
 
 const CACHE_KEY = "kdkmp.supabase.bundle.v1";
 const TEMPLATE_ID = "master-template-kdkmp-v1";
@@ -37,6 +42,7 @@ type JsonRecord = Record<string, unknown>;
 type ProjectRow = {
   id: string;
   nama_desa: string;
+  jenis_wilayah: string | null;
   kecamatan: string;
   kabupaten: string;
   nama_project: string;
@@ -298,6 +304,7 @@ function vendorIdByName(name: string | undefined | null) {
 function projectMeta(project: Project): ProjectMeta {
   return {
     projectName: project.projectName,
+    wilayahType: normalizeWilayahType(project.wilayahType),
     villageName: project.villageName,
     districtName: project.districtName,
     regencyName: project.regencyName,
@@ -349,16 +356,30 @@ function rowToResumeItem(row: ResumeItemRow): ResumeItem {
 
 function rowToProject(row: ProjectRow, itemRows: ResumeItemRow[]): Project {
   const meta = asRecord(row.metadata_json);
+  const wilayahType = normalizeWilayahType(
+    row.jenis_wilayah ?? asString(meta.jenis_wilayah, asString(meta.wilayah_type)),
+  );
   const projectItemRows = itemRows.filter((item) => item.project_id === row.id);
   const items = projectItemRows
     .map(rowToResumeItem)
     .sort((a, b) => a.sortOrder - b.sortOrder);
   const updatedAt = latestTimestamp([row.updated_at, ...projectItemRows.map((item) => item.updated_at)]);
+  const invoiceRecipientName = asString(meta.invoice_recipient_name);
+  const invoiceRecipientAddress = asString(meta.invoice_recipient_address);
+  const identity = {
+    wilayahType,
+    villageName: row.nama_desa,
+    districtName: row.kecamatan,
+    regencyName: row.kabupaten,
+    invoiceRecipientName,
+    invoiceRecipientAddress,
+  };
 
   return {
     id: row.id,
     templateId: asString(meta.template_id, TEMPLATE_ID),
     projectName: row.nama_project,
+    wilayahType,
     villageName: row.nama_desa,
     districtName: row.kecamatan,
     regencyName: row.kabupaten,
@@ -370,8 +391,8 @@ function rowToProject(row: ProjectRow, itemRows: ResumeItemRow[]): Project {
       asString(meta.responsible_name, asString(meta.nama_babinsa, asString(meta.penanggung_jawab))),
     ),
     coordinates: asString(meta.coordinates),
-    invoiceRecipientName: asString(meta.invoice_recipient_name, `KDKMP Desa ${row.nama_desa}`),
-    invoiceRecipientAddress: asString(meta.invoice_recipient_address, `Desa ${row.nama_desa}, Kec. ${row.kecamatan}, Kab. ${row.kabupaten}`),
+    invoiceRecipientName: formatProjectRecipientName(identity, "long"),
+    invoiceRecipientAddress: formatProjectRecipientAddress(identity),
     targetGrandTotal: asOptionalNumber(meta.target_grand_total_resume) ?? null,
     metadataJson: meta,
     status: row.status,
@@ -422,8 +443,10 @@ function resumeItemToRow(projectId: string, item: ResumeItem) {
 }
 
 function projectToRow(project: Project) {
+  const wilayahType = normalizeWilayahType(project.wilayahType);
   return {
     nama_desa: project.villageName,
+    jenis_wilayah: wilayahType,
     kecamatan: project.districtName,
     kabupaten: project.regencyName,
     nama_project: project.projectName,
@@ -435,6 +458,8 @@ function projectToRow(project: Project) {
     metadata_json: {
       ...(project.metadataJson ?? {}),
       template_id: project.templateId,
+      jenis_wilayah: wilayahType,
+      wilayah_type: wilayahType,
       babinsa_responsible_name: project.responsibleName,
       responsible_name: project.responsibleName,
       coordinates: project.coordinates ?? "",
@@ -854,17 +879,20 @@ export async function fetchProjectBundle(): Promise<ProjectBundle> {
 }
 
 export async function createSupabaseProject(
-  input: Pick<Project, "projectName" | "villageName" | "districtName" | "regencyName" | "regionName" | "responsibleName" | "projectDate">,
+  input: Pick<Project, "projectName" | "wilayahType" | "villageName" | "districtName" | "regencyName" | "regionName" | "responsibleName" | "projectDate">,
   options: { templateItems?: ResumeItem[]; historyItems?: ResumeItem[] | null } = {},
 ) {
   const client = ensureClient(supabase());
-  const invoiceRecipientName = `KDKMP Desa ${input.villageName}`;
-  const invoiceRecipientAddress = `Desa ${input.villageName}, Kec. ${input.districtName}, Kab. ${input.regencyName}`;
+  const wilayahType = normalizeWilayahType(input.wilayahType);
+  const identity = { ...input, wilayahType };
+  const invoiceRecipientName = formatProjectRecipientName(identity, "long");
+  const invoiceRecipientAddress = formatProjectRecipientAddress(identity);
 
   const { data: projectRow, error: projectError } = await client
     .from("projects")
     .insert({
       nama_desa: input.villageName,
+      jenis_wilayah: wilayahType,
       kecamatan: input.districtName,
       kabupaten: input.regencyName,
       nama_project: input.projectName,
@@ -875,6 +903,8 @@ export async function createSupabaseProject(
       status: "draft",
       metadata_json: {
         template_id: TEMPLATE_ID,
+        jenis_wilayah: wilayahType,
+        wilayah_type: wilayahType,
         babinsa_responsible_name: input.responsibleName,
         responsible_name: input.responsibleName,
         coordinates: "",
@@ -903,7 +933,7 @@ export async function createSupabaseProject(
 
   const project = rowToProject(projectRow as ProjectRow, (itemRows ?? []) as ResumeItemRow[]);
   await saveResumeSummary(project);
-  await logHistory(client, project.id, "project_created", `Project Desa ${project.villageName} dibuat.`);
+  await logHistory(client, project.id, "project_created", `Project ${formatProjectRecipientName(project, "long")} dibuat.`);
   return project;
 }
 
@@ -965,6 +995,7 @@ export async function duplicateSupabaseProject(source: Project) {
   const client = ensureClient(supabase());
   const copy = await createSupabaseProject({
     projectName: source.projectName,
+    wilayahType: source.wilayahType,
     villageName: `${source.villageName} Copy`,
     districtName: source.districtName,
     regencyName: source.regencyName,
@@ -988,7 +1019,7 @@ export async function duplicateSupabaseProject(source: Project) {
     items: ((data ?? []) as ResumeItemRow[]).map(rowToResumeItem),
   };
   await saveResumeSummary(project);
-  await logHistory(client, project.id, "project_duplicated", `Project disalin dari Desa ${source.villageName}.`);
+  await logHistory(client, project.id, "project_duplicated", `Project disalin dari ${formatProjectRecipientName(source, "long")}.`);
   return project;
 }
 

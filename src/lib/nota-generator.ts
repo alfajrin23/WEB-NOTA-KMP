@@ -1,7 +1,7 @@
 import { findTemplateDefinition, resolveExplicitTemplateAssignment } from "@/constants/template-mapping";
 import { STAGES } from "@/constants/stages";
 import { GeneratedNota, KwitansiGroupCode, KwitansiWorkerSlot, Project, ProjectMeta, ResumeItem, StageCode, TemplateAssignment, Vendor } from "@/types/domain";
-import { terbilangRupiah } from "@/utils/format";
+import { formatProjectKdkmpWilayah, normalizeWilayahType, terbilangRupiah } from "@/utils/format";
 import { getAutofillKwitansiReceiver } from "./kwitansi-rules";
 import { moveSpecialNotasToStageEnd } from "./nota-output-order";
 import { getResumeItemAmount } from "./resume-calculations";
@@ -56,6 +56,7 @@ function firstDate(items: ResumeItem[], fallback: string) {
 function projectMeta(project: Project): ProjectMeta {
   return {
     projectName: project.projectName,
+    wilayahType: normalizeWilayahType(project.wilayahType),
     villageName: project.villageName,
     districtName: project.districtName,
     regencyName: project.regencyName,
@@ -607,7 +608,7 @@ function makeSpecialPlnNotaDoc({
     subtotal: amount,
     totalAmount: amount,
     terbilang: amountWords,
-    kwitansiPayerName: `KDKMP DESA ${project.villageName.toUpperCase()}`,
+    kwitansiPayerName: formatProjectKdkmpWilayah(project, "long").toUpperCase(),
     kwitansiPaymentDescription: paymentDescription,
     kwitansiReceiverName: "",
     kwitansiAmount: amount,

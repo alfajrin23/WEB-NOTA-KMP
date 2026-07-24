@@ -20,7 +20,7 @@
 import { Document, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import { Project, ResumeItem } from "@/types/domain";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
-import { terbilangRupiah } from "@/utils/format";
+import { formatProjectKdkmpWilayah, terbilangRupiah } from "@/utils/format";
 import {
   KWIT_PAGE_PAD_V,
   KWIT_PAGE_PAD_H,
@@ -237,7 +237,7 @@ function Coupon({ project, item }: { project: Project; item: ResumeItem }) {
 
   // "Untuk pembayaran" purpose text — two lines so it wraps cleanly
   const purposeLine1 = `Pembayaran Honor ${person}, Tanggal ${dateSlash(item.expenseDate)} s.d ${dateSlash(project.projectDate)}`;
-  const purposeLine2 = `Pembangunan KDKMP Ds. ${project.villageName} Pekerjaan Tahap I`;
+  const purposeLine2 = `Pembangunan ${formatProjectKdkmpWilayah(project)} Pekerjaan Tahap I`;
 
   return (
     <View style={S.coupon}>
@@ -299,7 +299,7 @@ function Coupon({ project, item }: { project: Project; item: ResumeItem }) {
           {/* KDKMP info — right-aligned within field area */}
           <View style={S.infoRow}>
             <Text style={S.infoText}>
-              {"KDKMP Ds. "}{project.villageName}{"\n"}{person}
+              {formatProjectKdkmpWilayah(project)}{"\n"}{person}
             </Text>
           </View>
         </View>

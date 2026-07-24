@@ -15,6 +15,7 @@ import {
   MultiStageTemplateProps,
   NotaGroup,
   padRows,
+  projectKdkmpRecipient,
 } from "./shared";
 
 const HPM_ROWS = 8;
@@ -33,6 +34,7 @@ function HPMInvoice({
   const rows = padRows(group.items, HPM_ROWS);
   const total = groupTotal(group);
   const dueDate = addDays(group.date, 31);
+  const recipient = projectKdkmpRecipient(project).toUpperCase();
 
   return (
     <PrintPage zoom={zoom} orientation="portrait" className="multi-hpm-page" debug={debug}>
@@ -51,7 +53,7 @@ function HPMInvoice({
         <section className="hpm-recipient">
           <div>Kepada</div>
           <b>:</b>
-          <strong>KDKMP DESA {project.villageName.toUpperCase()}</strong>
+          <strong>{recipient}</strong>
           <span></span>
           <span></span>
           <strong>KECAMATAN {project.districtName.toUpperCase()}</strong>

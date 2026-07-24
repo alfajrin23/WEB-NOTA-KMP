@@ -14,6 +14,8 @@ import {
   itemAmount,
   NotaGroup,
   padRows,
+  projectInvoiceAddress,
+  projectInvoiceRecipient,
   Stage1TemplateProps,
 } from "./stage1-shared";
 
@@ -54,8 +56,8 @@ function CBBInvoicePage({
 
       <section className="cbb-customer">
         <h3>PELANGGAN</h3>
-        <p><span>NAMA</span><b>:</b> {project.invoiceRecipientName || "PROJECT KDKMP CIANJUR"}</p>
-        <p><span>ALAMAT</span><b>:</b> {project.invoiceRecipientAddress || `Desa ${project.villageName} Kec. ${project.districtName}`}</p>
+        <p><span>NAMA</span><b>:</b> {projectInvoiceRecipient(project)}</p>
+        <p><span>ALAMAT</span><b>:</b> {projectInvoiceAddress(project)}</p>
         <p><span>TELP</span><b>:</b></p>
       </section>
 

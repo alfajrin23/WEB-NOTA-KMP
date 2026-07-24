@@ -2,7 +2,13 @@ import { existsSync } from "node:fs";
 import XlsxPopulate from "xlsx-populate";
 import { CBS_DOCUMENT_LAYOUT, NOTA_LEFT_MARGIN_INCHES, usesNotaLeftMargin } from "@/constants/document-layout";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
-import { parseDateInputToIso, terbilangRupiah, todayInIndonesiaIsoDate } from "@/utils/format";
+import {
+  formatProjectKdkmpWilayah,
+  formatProjectWilayah,
+  parseDateInputToIso,
+  terbilangRupiah,
+  todayInIndonesiaIsoDate,
+} from "@/utils/format";
 import { ExcelTemplateRequest, RenderedExcelPdf } from "./types";
 import { resolveExcelTemplate } from "./template-registry";
 import { exportWorkbookBufferToPdf } from "./office-pdf-exporter";
@@ -523,15 +529,23 @@ function writeDates(sheet: Sheet, request: ExcelTemplateRequest) {
 }
 
 function writeProjectIdentity(sheet: Sheet, request: ExcelTemplateRequest) {
-  const village = request.project.villageName;
   const district = request.project.districtName;
   const regency = request.project.regencyName;
+  const wilayahLong = formatProjectWilayah(request.project, "long");
+  const wilayahShort = formatProjectWilayah(request.project, "short");
+  const kdkmpLong = formatProjectKdkmpWilayah(request.project, "long");
+  const kdkmpShort = formatProjectKdkmpWilayah(request.project, "short");
 
-  setCellIfTextIncludes(sheet, "kdkmp desa", `KDKMP Desa ${village}`);
+  setCellIfTextIncludes(sheet, "kdkmp desa", kdkmpLong);
+  setCellIfTextIncludes(sheet, "kdkmp ds.", kdkmpShort);
+  setCellIfTextIncludes(sheet, "kdkmp kelurahan", kdkmpLong);
+  setCellIfTextIncludes(sheet, "kdkmp kel.", kdkmpShort);
   setCellIfTextIncludes(sheet, "kecamatan", `Kecamatan ${district}`);
 
   replaceMatchingText(sheet, [
-    [/Desa\s+Mekarsari/gi, `Desa ${village}`],
+    [/KDKMP\s+(?:Desa|Ds\.?|Kelurahan|Kel\.?)\s+Mekarsari/gi, kdkmpLong],
+    [/\b(?:Desa|Kelurahan)\s+Mekarsari\b/gi, wilayahLong],
+    [/\b(?:Ds\.?|Kel\.?)\s+Mekarsari\b/gi, wilayahShort],
     [/Kec\.\s*Cianjur/gi, `Kec. ${district}`],
     [/Kecamatan\s+Cianjur/gi, `Kecamatan ${district}`],
     [/KDKMP\s+CIANJUR/gi, `KDKMP ${regency.toUpperCase()}`],

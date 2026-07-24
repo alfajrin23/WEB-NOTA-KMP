@@ -14,6 +14,7 @@ import {
   MultiStageTemplateProps,
   NotaGroup,
   padRows,
+  projectKdkmpRecipient,
 } from "./shared";
 
 const CTK_ROWS = 8;
@@ -40,7 +41,7 @@ function CahayaTimurNote({
 
       <section className="ctk-recipient">
         <div>Kepada Yth :</div>
-        <div>KDKMP Desa {project.villageName}</div>
+        <div>{projectKdkmpRecipient(project)}</div>
         <div>Kecamatan {project.districtName}</div>
       </section>
 

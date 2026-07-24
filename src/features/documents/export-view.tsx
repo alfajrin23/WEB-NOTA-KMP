@@ -15,7 +15,7 @@ import { DocumentPreviewModal, PreviewPayload } from "@/features/documents/previ
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
 import { moveSpecialNotasToStageEnd } from "@/lib/nota-output-order";
 import { groupDocumentsForPresentation } from "@/lib/pln-document-groups";
-import { formatRupiah } from "@/utils/format";
+import { formatProjectWilayah, formatRupiah } from "@/utils/format";
 import { GeneratedNota, StageCode } from "@/types/domain";
 
 function docsForStage(docs: GeneratedNota[], stageCode: StageCode) {
@@ -62,6 +62,7 @@ export function ExportView() {
   const filteredKwitansiDocs = useMemo(() => {
     return kwitansiDocs.filter((doc) => `${doc.vendorName} ${doc.templateName} ${doc.stageName}`.toLowerCase().includes(query.toLowerCase()));
   }, [kwitansiDocs, query]);
+  const locationTitle = project ? formatProjectWilayah(project) : "Wilayah";
 
   if (loading && !project) {
     return <Card><CardContent className="p-8">Memuat data export...</CardContent></Card>;
@@ -94,7 +95,7 @@ export function ExportView() {
                 className="w-full"
                 onClick={() => setPayload({
                   kind: "resume",
-                  title: `Preview Resume - Desa ${project.villageName}`,
+                  title: `Preview Resume - ${locationTitle}`,
                   project,
                   fileName: `resume-${project.villageName}`,
                 })}
@@ -115,7 +116,7 @@ export function ExportView() {
                 disabled={docs.length === 0}
                 onClick={() => setPayload({
                   kind: "notes",
-                  title: `Preview Semua Nota - Desa ${project.villageName}`,
+                  title: `Preview Semua Nota - ${locationTitle}`,
                   project,
                   docs,
                   fileName: `nota-all-${project.villageName}`,
@@ -137,7 +138,7 @@ export function ExportView() {
                 disabled={kwitansiDocs.length === 0}
                 onClick={() => setPayload({
                   kind: "notes",
-                  title: `Preview Semua Kwitansi - Desa ${project.villageName}`,
+                  title: `Preview Semua Kwitansi - ${locationTitle}`,
                   project,
                   docs: kwitansiDocs,
                   fileName: `kwitansi-all-${project.villageName}`,
@@ -172,7 +173,7 @@ export function ExportView() {
                     disabled={stageDocs.length === 0}
                     onClick={() => setPayload({
                       kind: "notes",
-                      title: `Preview ${stage.label} - Desa ${project.villageName}`,
+                      title: `Preview ${stage.label} - ${locationTitle}`,
                       project,
                       docs: stageDocs,
                       fileName: `nota-${stage.shortLabel}-${project.villageName}`,
@@ -204,7 +205,7 @@ export function ExportView() {
                     disabled={stageDocs.length === 0}
                     onClick={() => setPayload({
                       kind: "notes",
-                      title: `Preview Kwitansi ${stageLabel(stage.code)} - Desa ${project.villageName}`,
+                      title: `Preview Kwitansi ${stageLabel(stage.code)} - ${locationTitle}`,
                       project,
                       docs: stageDocs,
                       fileName: `kwitansi-${stage.shortLabel}-${project.villageName}`,

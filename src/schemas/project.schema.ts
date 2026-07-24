@@ -2,7 +2,8 @@ import { z } from "zod";
 
 export const projectSchema = z.object({
   projectName: z.string().min(3, "Nama project wajib diisi"),
-  villageName: z.string().min(2, "Nama desa wajib diisi"),
+  wilayahType: z.enum(["desa", "kelurahan"]),
+  villageName: z.string().min(2, "Nama desa / kelurahan wajib diisi"),
   districtName: z.string().min(2, "Kecamatan wajib diisi"),
   regencyName: z.string().min(2, "Kabupaten wajib diisi"),
   regionName: z.string().min(2, "Wilayah wajib diisi"),

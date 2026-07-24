@@ -1,4 +1,5 @@
 import { Project, ResumeItem, StageCode, Vendor } from "@/types/domain";
+import { formatProjectRecipientAddress, formatProjectRecipientName } from "@/utils/format";
 
 export const vendors: Vendor[] = [
   { id: "vendor-murah-maju", name: "MURAH MAJU", type: "material", address: "Cibadak, Puncak-Cipanas" },
@@ -363,21 +364,26 @@ export const masterTemplateItems: ResumeItem[] = [
   item("all-a-010", "RESUME_ALL", "A", "8", "2026-02-11", "Dukungan Operasional Babinsa (92 hari)", 92, 200000, "HARI", 18400000, 9, 10, "KWITANSI"),
 ];
 
+const initialProjectIdentity = {
+  wilayahType: "desa",
+  villageName: "Mekarsari",
+  districtName: "Cianjur",
+  regencyName: "Cianjur",
+} as const;
+
 export const initialProjects: Project[] = [
   {
     id: "project-mekarsari",
     templateId: "master-template-kdkmp-v1",
     projectName: "Pembangunan Gedung KDKMP",
-    villageName: "Mekarsari",
-    districtName: "Cianjur",
-    regencyName: "Cianjur",
+    ...initialProjectIdentity,
     regionName: "KODIM 0608/CIANJUR",
     projectDate: "2025-11-03",
     reportDate: "2025-11-03",
     responsibleName: "Sigit Soegiarto",
     coordinates: "",
-    invoiceRecipientName: "KDKMP Desa Mekarsari",
-    invoiceRecipientAddress: "Desa Mekarsari, Kec. Cianjur, Kab. Cianjur",
+    invoiceRecipientName: formatProjectRecipientName(initialProjectIdentity, "long"),
+    invoiceRecipientAddress: formatProjectRecipientAddress(initialProjectIdentity),
     targetGrandTotal: null,
     status: "draft",
     createdAt: "2026-06-29T00:00:00.000Z",

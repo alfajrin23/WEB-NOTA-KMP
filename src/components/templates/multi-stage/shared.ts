@@ -1,6 +1,13 @@
 import { getResumeItemAmount } from "@/lib/resume-calculations";
 import { GeneratedNota, Project, ResumeItem } from "@/types/domain";
-import { addDaysIsoDate, formatDateIndonesia, formatDateLongIndonesia, terbilangRupiah } from "@/utils/format";
+import {
+  addDaysIsoDate,
+  formatDateIndonesia,
+  formatDateLongIndonesia,
+  formatProjectKdkmpWilayah,
+  formatProjectRecipientName,
+  terbilangRupiah,
+} from "@/utils/format";
 
 export type MultiStageTemplateProps = {
   doc: GeneratedNota;
@@ -95,7 +102,11 @@ export function amountWordsItalic(value: number) {
 }
 
 export function projectRecipient(project: Project) {
-  return project.invoiceRecipientName || `KDKMP Desa ${project.villageName}`;
+  return formatProjectRecipientName(project, "long");
+}
+
+export function projectKdkmpRecipient(project: Project) {
+  return formatProjectKdkmpWilayah(project, "long");
 }
 
 export function splitLongText(value: string, limit = 48) {

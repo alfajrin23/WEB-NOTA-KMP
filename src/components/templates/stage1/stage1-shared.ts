@@ -1,6 +1,12 @@
 import { GeneratedNota, Project, ResumeItem } from "@/types/domain";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
-import { formatDateIndonesia, terbilangRupiah } from "@/utils/format";
+import {
+  formatDateIndonesia,
+  formatProjectKdkmpWilayah,
+  formatProjectRecipientAddress,
+  formatProjectRecipientName,
+  terbilangRupiah,
+} from "@/utils/format";
 
 export type Stage1TemplateProps = {
   doc: GeneratedNota;
@@ -80,4 +86,16 @@ export function amountWords(value: number) {
 
 export function personName(itemName: string) {
   return itemName.replace(/\s*\(.+?\)\s*/g, "").trim();
+}
+
+export function projectKdkmpRecipient(project: Project) {
+  return formatProjectKdkmpWilayah(project, "long");
+}
+
+export function projectInvoiceRecipient(project: Project) {
+  return formatProjectRecipientName(project, "long");
+}
+
+export function projectInvoiceAddress(project: Project) {
+  return formatProjectRecipientAddress(project);
 }

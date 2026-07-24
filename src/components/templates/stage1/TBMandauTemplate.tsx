@@ -9,6 +9,7 @@ import {
   itemAmount,
   NotaGroup,
   padRows,
+  projectKdkmpRecipient,
   Stage1TemplateProps,
 } from "./stage1-shared";
 
@@ -26,7 +27,7 @@ function TBMandauSlot({ group, project }: { group: NotaGroup | null; project: St
         </div>
         <div className="mandauRecipientBlock">
           <div className="font-bold">Kepada Yth. :</div>
-          <div>KDKMP Desa {project.villageName}</div>
+          <div>{projectKdkmpRecipient(project)}</div>
           <div>Kecamatan {project.districtName}</div>
         </div>
       </header>

@@ -24,7 +24,12 @@ import {
 } from "@react-pdf/renderer";
 import { Project, ResumeItem, Vendor } from "@/types/domain";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
-import { terbilangRupiah } from "@/utils/format";
+import {
+  formatProjectKdkmpWilayah,
+  formatProjectRecipientAddress,
+  formatProjectRecipientName,
+  terbilangRupiah,
+} from "@/utils/format";
 import {
   A4L_W,
   A4L_H,
@@ -517,7 +522,7 @@ function HeaderMurah({ project, group }: { project: Project; group: NotaGroup })
           <Text style={S.underline}>{dateSlash(group.date)}</Text>
         </Text>
         <Text style={{ marginTop: 10, fontFamily: "Helvetica-Bold" }}>Kepada Yth. :</Text>
-        <Text>KDKMP Desa {project.villageName}</Text>
+        <Text>{formatProjectKdkmpWilayah(project, "long")}</Text>
         <Text>Kecamatan {project.districtName}</Text>
       </View>
     </View>
@@ -543,7 +548,7 @@ function HeaderAmanah({ project, group }: { project: Project; group: NotaGroup }
         </Text>
         <Text style={{ marginTop: 8, fontFamily: "Helvetica-Bold" }}>Kepada Yth. :</Text>
         <Text style={{ marginTop: 28, borderBottomWidth: 0.75, borderColor: "#000" }}>
-          KDKMP Desa {project.villageName}
+          {formatProjectKdkmpWilayah(project, "long")}
         </Text>
         <Text style={{ borderBottomWidth: 0.75, borderColor: "#000" }}>
           Kecamatan {project.districtName}
@@ -560,7 +565,7 @@ function HeaderPlain({ project, group }: { project: Project; group: NotaGroup })
       <View style={{ width: "54%", paddingTop: 4, fontSize: 13, lineHeight: 1.35 }}>
         <Text>{"Cianjur        : "}{dateSlash(group.date)}</Text>
         <Text style={{ fontFamily: "Times-Bold" }}>Kepada Yth.  :</Text>
-        <Text>KDKMP Desa {project.villageName}</Text>
+        <Text>{formatProjectKdkmpWilayah(project, "long")}</Text>
         <Text>Kecamatan {project.districtName}</Text>
       </View>
     </View>
@@ -794,12 +799,12 @@ function CbbPage({ project, group }: { project: Project; group: NotaGroup }) {
           <View style={S.cbbCustRow}>
             <Text style={S.cbbCustLabel}>NAMA</Text>
             <Text style={S.cbbCustSep}>:</Text>
-            <Text style={S.cbbCustVal}>PROJECT KDKMP CIANJUR</Text>
+            <Text style={S.cbbCustVal}>{formatProjectRecipientName(project, "long")}</Text>
           </View>
           <View style={S.cbbCustRow}>
             <Text style={S.cbbCustLabel}>ALAMAT</Text>
             <Text style={S.cbbCustSep}>:</Text>
-            <Text style={S.cbbCustVal}>Desa {project.villageName} Kec. {project.districtName}</Text>
+            <Text style={S.cbbCustVal}>{formatProjectRecipientAddress(project)}</Text>
           </View>
           <View style={S.cbbCustRow}>
             <Text style={S.cbbCustLabel}>TELP</Text>

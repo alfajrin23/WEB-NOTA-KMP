@@ -10,6 +10,8 @@ export type DocumentType = "nota" | "kwitansi" | "resume" | "full_report";
 
 export type NotaDocumentType = "nota" | "kwitansi";
 
+export type WilayahType = "desa" | "kelurahan";
+
 export type KwitansiWorkerSlot = 1 | 2 | 3 | 4;
 
 export type Vendor = {
@@ -56,6 +58,7 @@ export type Project = {
   id: string;
   templateId: string;
   projectName: string;
+  wilayahType: WilayahType;
   villageName: string;
   districtName: string;
   regencyName: string;
@@ -101,6 +104,7 @@ export type TemplateAssignment = {
 export type ProjectMeta = Pick<
   Project,
   | "projectName"
+  | "wilayahType"
   | "villageName"
   | "districtName"
   | "regencyName"

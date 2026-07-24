@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 
 const navigation = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/tambah-desa", label: "Tambah Desa", icon: Plus },
+  { href: "/tambah-desa", label: "Tambah Wilayah", icon: Plus },
   { href: "/history", label: "History", icon: History },
   { href: "/master-template", label: "Template", icon: TableProperties },
   { href: "/vendors", label: "Vendor", icon: Users },
