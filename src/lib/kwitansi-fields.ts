@@ -273,8 +273,7 @@ export function getDefaultKwitansiPaymentLines(doc: GeneratedNota, project: Proj
   if (isOutsideCoreWork(doc)) {
     const workName = outsideCoreWorkName(doc, role);
     return [
-      `Pembayaran ${workName}`,
-      outsideCoreContextLine(workName, project, startText),
+      `Pembayaran ${workName} ${outsideCoreContextLine(workName, project, startText)}`,
     ];
   }
 

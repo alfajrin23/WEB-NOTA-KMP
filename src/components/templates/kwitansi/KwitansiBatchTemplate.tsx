@@ -68,23 +68,18 @@ function fieldStyle(box: Stage1Box): CSSProperties {
   return { left: box.x, top: box.y, width: box.width, height: box.height };
 }
 
-function splitOutsideCorePurposeLine(line: string) {
-  const trimmed = line.trim();
-  const namedActivity = /^(Pembayaran\s+(?:Sosialisasi|Rapat Koordinasi)\s+Pembangunan)\s+(KDKMP\s+(?:Ds|Kel)\.\s+.+)$/i.exec(trimmed);
-  if (namedActivity && /\bpada tanggal\b/i.test(namedActivity[2])) return [namedActivity[1].trim(), namedActivity[2].trim()];
-
-  const developmentContext = /^(Pembayaran\s+.+?)\s+(Pembangunan\s+KDKMP\s+(?:Ds|Kel)\.\s+.+)$/i.exec(trimmed);
-  if (developmentContext && /\bpada tanggal\b/i.test(developmentContext[2])) return [developmentContext[1].trim(), developmentContext[2].trim()];
-
-  const wilayahContext = /^(Pembayaran\s+.+?)\s+(KDKMP\s+(?:Ds|Kel)\.\s+.+)$/i.exec(trimmed);
-  if (wilayahContext && /\bpada tanggal\b/i.test(wilayahContext[2])) return [wilayahContext[1].trim(), wilayahContext[2].trim()];
-
-  return [line];
-}
-
 function visiblePurposeLines(doc: GeneratedNota, purposeLines: string[]) {
   if (doc.stageCode !== "RESUME_ALL") return purposeLines;
-  return purposeLines.flatMap((line, index) => index === 0 ? splitOutsideCorePurposeLine(line) : [line]);
+  const [first, second, ...rest] = purposeLines;
+  if (
+    first &&
+    second &&
+    /^Pembayaran\b/i.test(first) &&
+    /^(?:Pembangunan\s+)?KDKMP\s+(?:Ds|Kel)\./i.test(second)
+  ) {
+    return [`${first} ${second}`.replace(/\s+/g, " ").trim(), ...rest];
+  }
+  return purposeLines;
 }
 
 function KwitansiSlip({
