@@ -122,6 +122,35 @@ function outsideWorkRole(doc: GeneratedNota) {
   return null;
 }
 
+function outsideCoreWorkName(doc: GeneratedNota, fallbackRole: string) {
+  const raw = cleanRole(doc.items[0]?.itemName || fallbackRole);
+  const text = normalized(raw);
+
+  if (text.includes("pencarian") || text.includes("survei kelayakan lahan") || text.includes("survey kelayakan lahan")) {
+    return "Pencarian dan Survei Kelayakan Lahan";
+  }
+  if (text.includes("sosialisasi")) return "Sosialisasi Pembangunan";
+  if (text.includes("rapat koordinasi")) return "Rapat Koordinasi Pembangunan";
+  if (text.includes("pengukuran lahan")) {
+    return text.includes("persyaratan")
+      ? "Proses Pengukuran Lahan Sesuai Persyaratan"
+      : "Proses Pengukuran Lahan";
+  }
+  if (text.includes("pematangan lahan")) return "Pematangan Lahan";
+  if (text.includes("pembersihan lahan")) return "Pembersihan Lahan";
+  if (/\bcut\s+(?:n|and)?\s*fill\b/.test(text)) return "Cut n Fill";
+  if (text.includes("sumur bor")) return "Sumur Bor";
+
+  return raw;
+}
+
+function outsideCoreContextLine(workName: string, project: Project, dateText: string) {
+  const text = normalized(workName);
+  const prefix = text.endsWith("pembangunan") ? "" : "Pembangunan ";
+  const dateSuffix = dateText ? ` pada tanggal ${dateText}` : "";
+  return `${prefix}${formatProjectKdkmpWilayah(project)}${dateSuffix}`.trim();
+}
+
 export function getDefaultKwitansiRole(doc: GeneratedNota) {
   if (isPpmServiceDoc(doc)) return "Pemilik";
   if (isLemburDoc(doc)) return "Mandor";
@@ -242,10 +271,10 @@ export function getDefaultKwitansiPaymentLines(doc: GeneratedNota, project: Proj
   }
 
   if (isOutsideCoreWork(doc)) {
-    const workName = cleanRole(doc.items[0]?.itemName || role);
-    const dateSuffix = startText ? ` pada tanggal ${startText}` : "";
+    const workName = outsideCoreWorkName(doc, role);
     return [
-      `Pembayaran ${workName} Pembangunan ${formatProjectKdkmpWilayah(project)}${dateSuffix}`,
+      `Pembayaran ${workName}`,
+      outsideCoreContextLine(workName, project, startText),
     ];
   }
 
