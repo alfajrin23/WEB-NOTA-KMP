@@ -89,7 +89,7 @@ function KwitansiSlip({
   const fields = kwitansiTemplateLayout.fields;
 
   return (
-    <div className="stage1-kwitansi-slip" data-kwitansi-id={doc.id} data-template-color={color} data-overlap-container data-overlap-label="Kwitansi">
+    <div className="stage1-kwitansi-slip" data-kwitansi-id={doc.id} data-stage-code={doc.stageCode} data-template-color={color} data-overlap-container data-overlap-label="Kwitansi">
       <img src={kwitansiTemplateLayout.backgrounds[color]} alt="" className="stage1-kwitansi-bg" />
       {number ? <div className="kwitansi-text kwitansi-number-value" style={fieldStyle(fields.number)}>{number}</div> : null}
       <div className="kwitansi-text kwitansi-from" style={fieldStyle(fields.payer)}>{payer}</div>
