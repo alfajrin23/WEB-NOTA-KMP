@@ -689,10 +689,6 @@ textarea {
   white-space: normal;
 }
 
-.stage1-kwitansi-slip[data-stage-code="RESUME_ALL"] .kwitansi-purpose {
-  line-height: 1.58;
-}
-
 .kwitansi-purpose div + div {
   margin-top: 1.05mm;
 }

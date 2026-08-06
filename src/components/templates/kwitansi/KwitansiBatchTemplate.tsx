@@ -68,6 +68,17 @@ function fieldStyle(box: Stage1Box): CSSProperties {
   return { left: box.x, top: box.y, width: box.width, height: box.height };
 }
 
+function splitOutsideCorePurposeLine(line: string) {
+  const match = /^(.*\bKDKMP\s+(?:Ds|Kel)\.)\s+(.+)$/i.exec(line.trim());
+  if (!match || !/\bpada tanggal\b/i.test(match[2])) return [line];
+  return [match[1].trim(), match[2].trim()];
+}
+
+function visiblePurposeLines(doc: GeneratedNota, purposeLines: string[]) {
+  if (doc.stageCode !== "RESUME_ALL") return purposeLines;
+  return purposeLines.flatMap((line, index) => index === 0 ? splitOutsideCorePurposeLine(line) : [line]);
+}
+
 function KwitansiSlip({
   doc,
   project,
@@ -87,6 +98,7 @@ function KwitansiSlip({
   const number = doc.kwitansiNumber?.trim() ?? "";
   const color = templateColor(doc, index);
   const fields = kwitansiTemplateLayout.fields;
+  const renderedPurposeLines = visiblePurposeLines(doc, purposeLines);
 
   return (
     <div className="stage1-kwitansi-slip" data-kwitansi-id={doc.id} data-stage-code={doc.stageCode} data-template-color={color} data-overlap-container data-overlap-label="Kwitansi">
@@ -95,7 +107,7 @@ function KwitansiSlip({
       <div className="kwitansi-text kwitansi-from" style={fieldStyle(fields.payer)}>{payer}</div>
       <div className="kwitansi-text kwitansi-words" style={fieldStyle(fields.amountWords)}>{getKwitansiAmountWords(doc)}</div>
       <div className="kwitansi-text kwitansi-purpose" style={fieldStyle(fields.payment)} data-overlap-role="table">
-        {purposeLines.slice(0, 3).map((line, lineIndex) => <div key={lineIndex}>{line}</div>)}
+        {renderedPurposeLines.slice(0, 3).map((line, lineIndex) => <div key={lineIndex}>{line}</div>)}
       </div>
       <div className="kwitansi-text kwitansi-project" style={fieldStyle(fields.project)}>{projectLines[0] ?? ""}</div>
       <div className="kwitansi-text kwitansi-role" style={fieldStyle(fields.role)}>{projectLines[1] ?? ""}</div>
