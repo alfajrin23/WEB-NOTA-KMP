@@ -1072,6 +1072,7 @@ async function generateAndPersistAutoDocuments(
   project: Project,
   templateAssignments: TemplateAssignment[] = ALL_TEMPLATE_ASSIGNMENTS,
   documentKind: "nota" | "kwitansi",
+  sourceProject: Project = project,
 ) {
   const client = ensureClient(supabase());
   const generatedDocs = documentKind === "kwitansi"
@@ -1230,7 +1231,7 @@ async function generateAndPersistAutoDocuments(
   if (rows.length === 0) {
     if (documentKind === "nota") {
       await client.from("projects").update({ status: "review" }).eq("id", project.id);
-      await saveResumeSummary({ ...project, status: "review" });
+      await saveResumeSummary({ ...sourceProject, status: "review" });
     }
     await logHistory(
       client,
@@ -1305,7 +1306,7 @@ async function generateAndPersistAutoDocuments(
   }
 
   await client.from("projects").update({ status: "generated" }).eq("id", project.id);
-  await saveResumeSummary({ ...project, status: "generated" });
+  await saveResumeSummary({ ...sourceProject, status: "generated" });
   await logHistory(
     client,
     project.id,
@@ -1329,8 +1330,12 @@ async function generateAndPersistAutoDocuments(
   return rowsToGeneratedNotas(inserted, refreshedEdits);
 }
 
-export async function generateAndPersistNotes(project: Project, templateAssignments: TemplateAssignment[] = ALL_TEMPLATE_ASSIGNMENTS) {
-  return generateAndPersistAutoDocuments(project, templateAssignments, "nota");
+export async function generateAndPersistNotes(
+  project: Project,
+  templateAssignments: TemplateAssignment[] = ALL_TEMPLATE_ASSIGNMENTS,
+  sourceProject: Project = project,
+) {
+  return generateAndPersistAutoDocuments(project, templateAssignments, "nota", sourceProject);
 }
 
 export async function generateAndPersistKwitansi(project: Project, templateAssignments: TemplateAssignment[] = ALL_TEMPLATE_ASSIGNMENTS) {

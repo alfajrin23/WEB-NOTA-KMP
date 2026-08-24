@@ -64,6 +64,19 @@ import {
 const MASTER_KEY = "kdkmp.master-template.v1";
 const TEMPLATE_ASSIGNMENTS_KEY = "kdkmp.template-assignments.v1";
 
+type VendorItemUpdate = {
+  projectId: string;
+  itemId: string;
+  itemName?: string;
+  unitPrice?: number;
+  nameScope?: "note" | "all";
+};
+
+type GenerateNotaOptions = {
+  refresh?: boolean;
+  notify?: boolean;
+};
+
 function readStorage<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
@@ -504,6 +517,56 @@ export function useKdkmpStore() {
     }
   }, [projects, supabaseReady]);
 
+  const updateVendorItem = useCallback(async ({ projectId, itemId, itemName, unitPrice, nameScope = "note" }: VendorItemUpdate) => {
+    const sourceProject = projects.find((project) => project.id === projectId);
+    const sourceItem = sourceProject?.items.find((item) => item.id === itemId);
+    if (!sourceProject || !sourceItem) throw new Error("Material pada nota tidak ditemukan.");
+
+    if (unitPrice !== undefined && (!Number.isFinite(unitPrice) || unitPrice < 0)) {
+      throw new Error("Harga satuan harus angka valid dan tidak boleh minus.");
+    }
+
+    const oldName = sourceItem.itemName.trim().toLowerCase();
+    const sameVendor = (item: ResumeItem) => {
+      if (sourceItem.vendorId && item.vendorId) return item.vendorId === sourceItem.vendorId;
+      return (item.vendorName ?? "").trim().toLowerCase() === (sourceItem.vendorName ?? "").trim().toLowerCase();
+    };
+    const shouldChangeName = itemName !== undefined;
+    const shouldChangeAllNames = shouldChangeName && nameScope === "all";
+    const affected: Array<{ projectId: string; item: ResumeItem }> = [];
+    const nextProjects = projects.map((project) => {
+      const nextItems = project.items.map((item) => {
+        const isTarget = project.id === projectId && item.id === itemId;
+        const isMatchingGlobalName = shouldChangeAllNames && sameVendor(item) && item.itemName.trim().toLowerCase() === oldName;
+        if (!isTarget && !isMatchingGlobalName) return item;
+
+        const nextItem = {
+          ...item,
+          ...(shouldChangeName && (isTarget || isMatchingGlobalName) ? { itemName } : {}),
+          ...(isTarget && unitPrice !== undefined ? { unitPrice, amountOverride: null } : {}),
+        };
+        affected.push({ projectId: project.id, item: nextItem });
+        return nextItem;
+      });
+      return nextItems === project.items ? project : { ...project, updatedAt: new Date().toISOString(), items: nextItems };
+    });
+
+    if (affected.length === 0) return { affectedCount: 0 };
+    setProjects(nextProjects);
+
+    if (supabaseReady) {
+      await Promise.all(affected.map(({ projectId: affectedProjectId, item }) => saveResumeItem(affectedProjectId, item)));
+      await Promise.all(
+        [...new Set(affected.map(({ projectId: affectedProjectId }) => affectedProjectId))].map((affectedProjectId) => {
+          const project = nextProjects.find((entry) => entry.id === affectedProjectId);
+          return project ? saveResumeSummary(project) : Promise.resolve();
+        }),
+      );
+    }
+
+    return { affectedCount: affected.length };
+  }, [projects, supabaseReady]);
+
   const updateItemUnitPrice = useCallback(async (projectId: string, itemId: string, unitPrice: number, syncAcrossStages: boolean) => {
     const source = projects.find((project) => project.id === projectId);
     const sourceItem = source?.items.find((item) => item.id === itemId);
@@ -756,29 +819,38 @@ export function useKdkmpStore() {
     toast.success("Cache lokal dikembalikan ke template awal");
   }, []);
 
-  const generateProjectNotas = useCallback(async (projectId: string) => {
+  const generateProjectNotas = useCallback(async (
+    projectId: string,
+    itemOverrides: Record<string, Partial<ResumeItem>> = {},
+    options: GenerateNotaOptions = {},
+  ) => {
     const project = projects.find((entry) => entry.id === projectId);
     if (!project) throw new Error("Project tidak ditemukan.");
+    const shouldRefresh = options.refresh ?? true;
+    const shouldNotify = options.notify ?? true;
+    const generationProject = Object.keys(itemOverrides).length === 0
+      ? project
+      : {
+        ...project,
+        items: project.items.map((item) => itemOverrides[item.id] ? { ...item, ...itemOverrides[item.id], amountOverride: null } : item),
+      };
 
     if (supabaseReady) {
-      const docs = await generateAndPersistNotes(project, templateAssignments);
-      const bundle: ProjectBundle = {
-        projects,
-        generatedNotas,
-        kwitansiEdits,
-        customNotes,
-        history,
-        source: "supabase",
-      };
-      const merged = mergeBundleWithGenerated(bundle, projectId, docs, "nota");
-      setProjects(merged.projects);
-      setGeneratedNotas(merged.generatedNotas);
-      generatedNotasRef.current = merged.generatedNotas;
-      toast.success(`${docs.length} nota tersimpan ke Supabase`);
+      const docs = await generateAndPersistNotes(generationProject, templateAssignments, project);
+      if (shouldRefresh) {
+        const refreshedBundle = applyBundle(await fetchProjectBundle());
+        setProjects(refreshedBundle.projects);
+        setGeneratedNotas(refreshedBundle.generatedNotas);
+        generatedNotasRef.current = refreshedBundle.generatedNotas;
+        setKwitansiEdits(refreshedBundle.kwitansiEdits);
+        setCustomNotes(refreshedBundle.customNotes);
+        setHistory(refreshedBundle.history);
+      }
+      if (shouldNotify) toast.success(`${docs.length} nota tersimpan ke Supabase`);
       return docs;
     }
 
-    const docs = generateNotaDocuments(project, vendors, templateAssignments).map((doc) => ({ ...doc, source: "auto" as const, status: "generated" as const }));
+    const docs = generateNotaDocuments(generationProject, vendors, templateAssignments).map((doc) => ({ ...doc, source: "auto" as const, status: "generated" as const }));
     const generatedItemToNote = new Map(docs.flatMap((doc) => doc.itemIds.map((itemId) => [itemId, doc.id] as const)));
     setProjects((current) =>
       current.map((entry) =>
@@ -807,9 +879,9 @@ export function useKdkmpStore() {
       generatedNotasRef.current = nextDocs;
       return nextDocs;
     });
-    toast.warning("Supabase belum dikonfigurasi. Hasil generate hanya ada di cache lokal.");
+    if (shouldNotify) toast.warning("Supabase belum dikonfigurasi. Hasil generate hanya ada di cache lokal.");
     return docs;
-  }, [customNotes, generatedNotas, history, kwitansiEdits, projects, supabaseReady, templateAssignments]);
+  }, [projects, supabaseReady, templateAssignments]);
 
   const generateProjectKwitansi = useCallback(async (projectId: string) => {
     const project = projects.find((entry) => entry.id === projectId);
@@ -996,6 +1068,7 @@ export function useKdkmpStore() {
     duplicateProject,
     deleteProject,
     updateItem,
+    updateVendorItem,
     updateItemUnitPrice,
     addItem,
     deleteItem,

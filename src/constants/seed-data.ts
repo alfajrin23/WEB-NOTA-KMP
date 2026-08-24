@@ -271,7 +271,7 @@ export const masterTemplateItems: ResumeItem[] = [
   item("t3-e-009", "TAHAP_III", "E", "9", "2026-01-21", "Semen Gresik", 5, 54000, "Zak", 270000, 5, 44, "CBB"),
   item("t3-e-010", "TAHAP_III", "E", "10", "2026-01-21", "Pasir pasang", 1, 264000, "M3", 264000, 5, 45, "AMANAH"),
   item("t3-e-011", "TAHAP_III", "E", "11", "2026-01-21", "Batu Bata Merah", 1500, 1000, "Buah", 1500000, 5, 46, "CBS"),
-  item("t3-e-012", "TAHAP_III", "E", "12", "2026-01-21", "Besi beton polos 8", 4, 37000, "Btg", 148000, 5, 47, "CBB"),
+  item("t3-e-012", "TAHAP_III", "E", "12", "2026-01-21", "Besi Polos 8", 4, 37000, "Btg", 148000, 5, 47, "CBB"),
   item("t3-e-013", "TAHAP_III", "E", "13", "2026-01-21", "Kawat bendrat", 1, 38000, "Kg", 38000, 5, 48, "CBB"),
   item("t3-e-014", "TAHAP_III", "E", "14", "2026-01-21", "Air kerja", 500, 100, "Liter", 50000, 6, 1, "-"),
   item("t3-f-001", "TAHAP_III", "F", "1", "2026-01-05", "Air kerja", 1660, 100, "Liter", 166000, 6, 2, "-"),

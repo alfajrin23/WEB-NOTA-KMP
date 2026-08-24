@@ -23,6 +23,7 @@ export type PreviewPayload = {
   title: string;
   project: Project;
   docs?: GeneratedNota[];
+  projectEntries?: Array<{ project: Project; docs: GeneratedNota[] }>;
   fileName: string;
 };
 
@@ -74,47 +75,54 @@ async function downloadBlob(blob: Blob, fileName: string) {
   const link = document.createElement("a");
   link.href = url;
   link.download = fileName;
+  document.body.appendChild(link);
   link.click();
+  link.remove();
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export async function downloadNotaDocumentsPdf({
   project,
   docs,
+  entries,
   templateAssignments,
   fileName,
 }: {
-  project: Project;
-  docs: GeneratedNota[];
+  project?: Project;
+  docs?: GeneratedNota[];
+  entries?: Array<{ project: Project; docs: GeneratedNota[] }>;
   templateAssignments: TemplateAssignment[];
   fileName: string;
 }) {
-  if (docs.length === 0) return;
+  const sourceEntries = entries ?? (project ? [{ project, docs: docs ?? [] }] : []);
+  if (sourceEntries.every((entry) => entry.docs.length === 0)) return;
   const { PDFDocument } = await import("pdf-lib");
   const merged = await PDFDocument.create();
 
-  for (const doc of moveSpecialNotasToStageEnd(docs)) {
-    const assignment = resolveTemplateAssignment(doc.stageCode, doc.vendorId, templateAssignments);
-    const response = await fetch("/api/excel-pdf/download", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        type: doc.documentType,
-        project,
-        vendor: doc.vendor,
-        items: doc.items,
-        templateAssignment: assignment ? { ...assignment, templateId: doc.templateId } : undefined,
-      }),
-    });
+  for (const entry of sourceEntries) {
+    for (const doc of moveSpecialNotasToStageEnd(entry.docs)) {
+      const assignment = resolveTemplateAssignment(doc.stageCode, doc.vendorId, templateAssignments);
+      const response = await fetch("/api/excel-pdf/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: doc.documentType,
+          project: entry.project,
+          vendor: doc.vendor,
+          items: doc.items,
+          templateAssignment: assignment ? { ...assignment, templateId: doc.templateId } : undefined,
+        }),
+      });
 
-    if (!response.ok) {
-      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-      throw new Error(payload?.error ?? `Gagal generate PDF ${doc.vendorName}.`);
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(payload?.error ?? `Gagal generate PDF ${doc.vendorName}.`);
+      }
+
+      const source = await PDFDocument.load(await response.arrayBuffer());
+      const pages = await merged.copyPages(source, source.getPageIndices());
+      for (const page of pages) merged.addPage(page);
     }
-
-    const source = await PDFDocument.load(await response.arrayBuffer());
-    const pages = await merged.copyPages(source, source.getPageIndices());
-    for (const page of pages) merged.addPage(page);
   }
 
   const bytes = await merged.save();
@@ -215,11 +223,17 @@ export function DocumentPreviewModal({
   const [kwitansiVisibleCount, setKwitansiVisibleCount] = useState(8);
   const [downloading, setDownloading] = useState(false);
 
+  const projectEntries = useMemo(
+    () => payload?.projectEntries ?? (payload ? [{ project: payload.project, docs: payload.docs ?? [] }] : []),
+    [payload],
+  );
   const docs = useMemo(() => moveSpecialNotasToStageEnd(payload?.docs ?? []), [payload?.docs]);
-  const isKwitansiPayload = useMemo(() => docs.length > 0 && docs.every((doc) => doc.documentType === "kwitansi"), [docs]);
-  const hasSpecialPlnNota = useMemo(() => docs.some((doc) => doc.documentType === "nota" && isSpecialPLNKwitansi(doc)), [docs]);
-  const hasJasaElectricNota = useMemo(() => docs.some(isJasaElectricNota), [docs]);
-  const missingKwitansiReceivers = useMemo(() => docs.filter((doc) => doc.documentType === "kwitansi" && !doc.kwitansiReceiverName?.trim()), [docs]);
+  const allPayloadDocs = useMemo(() => projectEntries.flatMap((entry) => entry.docs), [projectEntries]);
+  const hasMultipleProjects = projectEntries.length > 1;
+  const isKwitansiPayload = useMemo(() => allPayloadDocs.length > 0 && allPayloadDocs.every((doc) => doc.documentType === "kwitansi"), [allPayloadDocs]);
+  const hasSpecialPlnNota = useMemo(() => allPayloadDocs.some((doc) => doc.documentType === "nota" && isSpecialPLNKwitansi(doc)), [allPayloadDocs]);
+  const hasJasaElectricNota = useMemo(() => allPayloadDocs.some(isJasaElectricNota), [allPayloadDocs]);
+  const missingKwitansiReceivers = useMemo(() => allPayloadDocs.filter((doc) => doc.documentType === "kwitansi" && !doc.kwitansiReceiverName?.trim()), [allPayloadDocs]);
   const renderedNoteDocs = useMemo(() => {
     const visible = docs.slice(0, visibleCount);
     const next = docs[visibleCount];
@@ -297,8 +311,7 @@ export function DocumentPreviewModal({
     setDownloading(true);
     try {
       await downloadNotaDocumentsPdf({
-        project: payload.project,
-        docs,
+        entries: projectEntries,
         templateAssignments,
         fileName: payload.fileName,
       });
@@ -307,7 +320,7 @@ export function DocumentPreviewModal({
     } finally {
       setDownloading(false);
     }
-  }, [docs, hasJasaElectricNota, hasSpecialPlnNota, isKwitansiPayload, missingKwitansiReceivers.length, payload, templateAssignments]);
+  }, [hasJasaElectricNota, hasSpecialPlnNota, isKwitansiPayload, missingKwitansiReceivers.length, payload, projectEntries, templateAssignments]);
 
   if (!payload) return null;
 
@@ -319,6 +332,7 @@ export function DocumentPreviewModal({
             <h2 className="text-lg font-bold">{payload.title}</h2>
             <p className="text-sm text-slate-500">
               Preview ditampilkan lebih dulu. PDF baru dibuat setelah tombol Download PDF diklik.
+              {hasMultipleProjects ? ` ${projectEntries.length} desa akan digabung dalam satu PDF.` : ""}
             </p>
             {isKwitansiPayload && missingKwitansiReceivers.length > 0 ? (
               <p className="mt-1 text-sm font-semibold text-amber-600">
@@ -342,7 +356,7 @@ export function DocumentPreviewModal({
               <Printer className="h-4 w-4" />
               Cetak
             </Button>
-            <Button onClick={downloadPdf} disabled={downloading || (payload.kind === "notes" && docs.length === 0)}>
+            <Button onClick={downloadPdf} disabled={downloading || (payload.kind === "notes" && allPayloadDocs.length === 0)}>
               {downloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
               {downloading ? "Menyiapkan" : "Download PDF"}
             </Button>
@@ -379,6 +393,45 @@ export function DocumentPreviewModal({
                 {specialPLNKwitansiDocs.length > 0 ? (
                   <PLNKwitansiBatchTemplate docs={specialPLNKwitansiDocs} project={payload.project} zoom={1} />
                 ) : null}
+              </div>
+            </div>
+          ) : payload.projectEntries ? (
+            <div>
+              <div className="no-print space-y-5">
+                {projectEntries.map((entry) => (
+                  <section key={entry.project.id} className="space-y-3">
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
+                      <p className="font-semibold">{formatProjectWilayah(entry.project)}</p>
+                      <p className="text-xs text-slate-500">{entry.docs.length} dokumen nota</p>
+                    </div>
+                    {groupPrintableNotes(entry.docs).map((group) => group.kind === "pln" ? (
+                      <PLNKwitansiBatchTemplate key={group.key} docs={group.docs} project={entry.project} zoom={zoom} />
+                    ) : (
+                      <DocumentTemplateRenderer
+                        key={`${group.docs[0].id}-${hashNotaData(group.docs[0])}`}
+                        doc={group.docs[0]}
+                        project={entry.project}
+                        zoom={zoom}
+                      />
+                    ))}
+                  </section>
+                ))}
+              </div>
+              <div className="hidden print:block">
+                {projectEntries.map((entry) => (
+                  <section key={`print-${entry.project.id}`}>
+                    {groupPrintableNotes(entry.docs).map((group) => group.kind === "pln" ? (
+                      <PLNKwitansiBatchTemplate key={group.key} docs={group.docs} project={entry.project} zoom={1} />
+                    ) : (
+                      <DocumentTemplateRenderer
+                        key={`print-${group.docs[0].id}-${hashNotaData(group.docs[0])}`}
+                        doc={group.docs[0]}
+                        project={entry.project}
+                        zoom={1}
+                      />
+                    ))}
+                  </section>
+                ))}
               </div>
             </div>
           ) : (
