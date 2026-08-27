@@ -56,7 +56,7 @@ function PLNSlip({
   return (
     <section className="pln-slip" data-overlap-container data-overlap-label="PLN kwitansi">
       <img src="/template-assets/multi-stage/pln-logo.png" alt="PLN" className="pln-logo" />
-      <h2>KWINTASI PEMBAYARAN</h2>
+      <h2>NOTA PEMBAYARAN PLN</h2>
 
       <div className="pln-row pln-number"><span>No.</span><b>:</b><strong>{number || "-"}</strong></div>
       <div className="pln-row"><span>Telah Terima Dari</span><b>:</b><strong>{payer}</strong></div>

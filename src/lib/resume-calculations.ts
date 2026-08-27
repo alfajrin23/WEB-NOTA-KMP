@@ -170,7 +170,9 @@ export function buildProjectSummary(project: Project, vendors: Vendor[]): Projec
 
   const stages = [...stageRows.values()];
   const grandTotal = stages.reduce((sum, stage) => sum + stage.total, 0);
-  const outsideCoreTotal = stageRows.get("RESUME_ALL")?.total ?? 0;
+  const outsideCoreTotal = [...stageRows.values()]
+    .filter((stage) => stage.stageCode === "TAHAP_VI" || stage.stageCode === "TAHAP_VII" || stage.stageCode === "RESUME_ALL")
+    .reduce((sum, stage) => sum + stage.total, 0);
 
   return {
     stages,
@@ -338,7 +340,7 @@ export function buildResumeValidationReport(
   }
 
   const resumeTotal = stageRows.reduce((sum, stage) => sum + stage.total, 0);
-  const missingVendorItems = includedItems.filter((item) => !item.vendorId && (item.vendorName ?? "").trim() !== "-");
+  const missingVendorItems = includedItems.filter((item) => !item.vendorId && !["", "-", "nota kosong", "internal / non vendor"].includes((item.vendorName ?? "").trim().toLowerCase()));
   const dashVendorItems = includedItems.filter((item) => (item.vendorName ?? "").trim() === "-");
   const kwitansiItems = includedItems.filter((item) => isKwitansiResumeItem(item, vendors) || (item.vendorName ?? "").trim().toUpperCase() === "KWITANSI");
   const kwitansiItemIds = new Set(kwitansiItems.map((item) => item.id));

@@ -685,16 +685,24 @@ textarea {
 
 .kwitansi-purpose {
   font-size: 7pt;
-  line-height: 1.16;
+  line-height: 1.08;
   white-space: normal;
+  overflow: hidden;
 }
 
+.stage1-kwitansi-slip[data-stage-code="TAHAP_VI"] .kwitansi-purpose,
+.stage1-kwitansi-slip[data-stage-code="TAHAP_VII"] .kwitansi-purpose,
 .stage1-kwitansi-slip[data-stage-code="RESUME_ALL"] .kwitansi-purpose {
   line-height: 1.42;
 }
 
 .kwitansi-purpose div + div {
-  margin-top: 1.05mm;
+  margin-top: 0.65mm;
+}
+
+.kwitansi-purpose div {
+  max-width: 100%;
+  overflow-wrap: break-word;
 }
 
 .kwitansi-project,

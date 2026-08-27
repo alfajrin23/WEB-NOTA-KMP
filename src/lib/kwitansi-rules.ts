@@ -223,7 +223,7 @@ export function getAutofillKwitansiReceiver(doc: GeneratedNota) {
   if (text.includes("signage")) return "Nuryadi Mulyawan";
   if (text.includes("folding door")) return "Jamal";
   if (text.includes("folding gate")) return "Riki Subagja";
-  if (text.includes("listrik")) return "Dian";
+  if (text.includes("listrik") || text.includes("sumuran grounding") || text.includes("sumur grounding")) return "Dian";
   if (text.includes("sopir") || text.includes("supir")) return "Renaldy Prayoga";
 
   return "";

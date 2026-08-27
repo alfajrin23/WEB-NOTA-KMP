@@ -175,6 +175,13 @@ export function resolveResumeVendorName(item: Pick<ResumeItem, "vendorId" | "ven
   return vendor?.name?.trim() || item.vendorName?.trim() || "Belum ada vendor";
 }
 
+function resumeCategoryDisplayName(item: Pick<ResumeItem, "category" | "categoryCode" | "categoryName">) {
+  const code = item.categoryCode?.trim() ?? "";
+  const name = (item.categoryName ?? item.category ?? "Tanpa kategori").trim();
+  if (!code || name.toUpperCase().startsWith(`${code.toUpperCase()} `) || name.toUpperCase().startsWith(`${code.toUpperCase()}.`)) return name;
+  return `${code} ${name}`;
+}
+
 function buildVendorSubtotals(items: ResumeItem[], vendors: Vendor[]) {
   const subtotals = new Map<string, VendorSubtotal>();
 
@@ -189,6 +196,56 @@ function buildVendorSubtotals(items: ResumeItem[], vendors: Vendor[]) {
   }
 
   return [...subtotals.values()];
+}
+
+const PDF_SECTION_LABELS: Record<string, string> = {
+  I: "I - PEKERJAAN PERSIAPAN",
+  II: "II - PEKERJAAN STRUKTUR",
+  III: "III - PEKERJAAN ARSITEKTUR",
+  IV: "IV - PEKERJAAN MEKANIKAL",
+  V: "V - PEKERJAAN ELEKTRIKAL",
+  VI: "VI - PEKERJAAN DI LUAR KONSTRUKSI INTI",
+  VII: "VII. DUKUNGAN OPERASIONAL GERAI",
+};
+
+type ResumeDisplayCategory = { code: string; label: string; total: number };
+type ResumeDisplayGroup = { stageCode: ResumeItem["stageCode"]; code: string; label: string; total: number; categories: ResumeDisplayCategory[] };
+
+function displayCategoryLabel(item: ResumeItem) {
+  const code = item.categoryCode?.trim() ?? "";
+  const name = (item.categoryName ?? item.category ?? "Tanpa kategori").trim();
+  if (!code || name.toUpperCase().startsWith(`${code.toUpperCase()} `) || name.toUpperCase().startsWith(`${code.toUpperCase()}.`)) return name;
+  return code.length === 1 ? `${code}. ${name}` : `${code} ${name}`;
+}
+
+function buildResumeDisplayGroups(project: Project): ResumeDisplayGroup[] {
+  const groups = new Map<string, ResumeDisplayGroup>();
+  const stageOrder = new Map(STAGES.map((stage, index) => [stage.code, index]));
+
+  for (const item of project.items.filter((entry) => entry.isIncludedInResumeTotal !== false)) {
+    const roman = item.categoryCode?.match(/^([IVX]+)(?:\.|$)/i)?.[1]?.toUpperCase()
+      ?? (item.stageCode === "TAHAP_I" ? "I" : item.stageCode === "TAHAP_II" ? "II" : item.stageCode === "TAHAP_III" ? "III" : item.stageCode === "TAHAP_IV" ? "IV" : item.stageCode === "TAHAP_V" ? "V" : item.stageCode === "TAHAP_VII" ? "VII" : "VI");
+    const key = `${item.stageCode}:${roman}`;
+    const stage = STAGES.find((entry) => entry.code === item.stageCode);
+    const group = groups.get(key) ?? {
+      stageCode: item.stageCode,
+      code: roman,
+      label: PDF_SECTION_LABELS[roman] ?? stage?.label ?? item.stageCode,
+      total: 0,
+      categories: [],
+    };
+    group.total += itemAmount(item);
+    const categoryCode = item.categoryCode?.trim() || "-";
+    const category = group.categories.find((entry) => entry.code === categoryCode);
+    if (category) category.total += itemAmount(item);
+    else group.categories.push({ code: categoryCode, label: displayCategoryLabel(item), total: itemAmount(item) });
+    groups.set(key, group);
+  }
+
+  return [...groups.values()].sort((left, right) => {
+    return (stageOrder.get(left.stageCode) ?? 99) - (stageOrder.get(right.stageCode) ?? 99)
+      || left.code.localeCompare(right.code, "en", { numeric: true });
+  });
 }
 
 function safeFileSegment(value: string) {
@@ -265,9 +322,10 @@ function writeMetadataPair({
 function writeSummarySheet(sheet: Sheet, project: Project, vendors: Vendor[]) {
   const summary = buildProjectSummary(project, vendors);
   finiteNumber(summary.grandTotal, "Grand total resume");
+  const displayGroups = buildResumeDisplayGroups(project);
 
   sheet.name("Ringkasan");
-  setSheetColumnWidths(sheet, [30, 16, 18, 24, 24, 22, 22, 24]);
+  setSheetColumnWidths(sheet, [8, 24, 18, 18, 18, 18, 18, 24]);
   sheet.row(1).height(30);
   mergeRow(sheet, 1, 1, 8).style(TITLE_STYLE);
   sheet.cell(1, 1).value(`RESUME ${formatProjectKdkmpWilayah(project, "long").toUpperCase()}`);
@@ -310,27 +368,46 @@ function writeSummarySheet(sheet: Sheet, project: Project, vendors: Vendor[]) {
   });
 
   const headerRow = 9;
-  ["Tahap Pekerjaan", "Jumlah Item", "Jumlah Vendor", "Subtotal Tahap"].forEach((header, index) => {
-    sheet.cell(headerRow, index + 1).value(header);
-  });
-  sheet.range(`A${headerRow}:D${headerRow}`).style(TABLE_HEADER_STYLE);
+  sheet.cell(headerRow, 1).value("No.");
+  mergeRow(sheet, headerRow, 2, 7).style(TABLE_HEADER_STYLE);
+  sheet.cell(headerRow, 2).value("Uraian Pekerjaan");
+  sheet.cell(headerRow, 8).value("Jumlah Harga Satuan (Rp)");
+  sheet.range(`A${headerRow}:H${headerRow}`).style(TABLE_HEADER_STYLE);
   sheet.row(headerRow).height(28);
 
-  summary.stages.forEach((stage, index) => {
-    const row = headerRow + index + 1;
-    finiteNumber(stage.total, `Subtotal ${stage.label}`);
-    sheet.cell(row, 1).value(stage.label);
-    sheet.cell(row, 2).value(stage.itemCount).style("numberFormat", XLSX_INTEGER_FORMAT);
-    sheet.cell(row, 3).value(stage.vendorCount).style("numberFormat", XLSX_INTEGER_FORMAT);
-    sheet.cell(row, 4).value(stage.total).style(MONEY_STYLE);
-    styleGrid(sheet.range(`A${row}:D${row}`));
-  });
+  let row = headerRow + 1;
+  let groupNumber = 1;
+  for (const group of displayGroups) {
+    finiteNumber(group.total, `Subtotal ${group.label}`);
+    sheet.cell(row, 1).value(group.code || groupNumber);
+    mergeRow(sheet, row, 2, 7);
+    sheet.cell(row, 2).value(group.label);
+    sheet.cell(row, 8).value(group.total).style(MONEY_STYLE);
+    sheet.range(`A${row}:H${row}`).style({
+      bold: true,
+      fill: COLORS.slateSoft,
+      border: GRID_BORDER,
+      verticalAlignment: "center",
+      wrapText: true,
+    });
+    row += 1;
 
-  const grandTotalRow = headerRow + summary.stages.length + 1;
-  mergeRow(sheet, grandTotalRow, 1, 3);
-  sheet.cell(grandTotalRow, 1).value("GRAND TOTAL RESUME");
-  sheet.cell(grandTotalRow, 4).value(summary.grandTotal).style(MONEY_STYLE);
-  sheet.range(`A${grandTotalRow}:D${grandTotalRow}`).style({
+    for (const category of group.categories) {
+      sheet.cell(row, 1).value(category.code);
+      mergeRow(sheet, row, 2, 7);
+      sheet.cell(row, 2).value(category.label);
+      sheet.cell(row, 8).value(category.total).style(MONEY_STYLE);
+      sheet.range(`A${row}:H${row}`).style({ border: GRID_BORDER, verticalAlignment: "center", wrapText: true });
+      row += 1;
+    }
+    groupNumber += 1;
+  }
+
+  const grandTotalRow = row + 1;
+  mergeRow(sheet, grandTotalRow, 1, 7);
+  sheet.cell(grandTotalRow, 1).value("JUMLAH TOTAL");
+  sheet.cell(grandTotalRow, 8).value(summary.grandTotal).style(MONEY_STYLE);
+  sheet.range(`A${grandTotalRow}:H${grandTotalRow}`).style({
     bold: true,
     fill: COLORS.greenSoft,
     border: GRID_BORDER,
@@ -349,22 +426,22 @@ function writeSummarySheet(sheet: Sheet, project: Project, vendors: Vendor[]) {
         ? "Resume melebihi target (perlu dikurangi)."
         : "Grand total resume sudah sesuai target.";
 
-    mergeRow(sheet, targetRow, 1, 3);
+    mergeRow(sheet, targetRow, 1, 7);
     sheet.cell(targetRow, 1).value("TARGET GRAND TOTAL");
-    sheet.cell(targetRow, 4).value(target).style(MONEY_STYLE);
-    sheet.range(`A${targetRow}:D${targetRow}`).style({ bold: true, border: GRID_BORDER });
+    sheet.cell(targetRow, 8).value(target).style(MONEY_STYLE);
+    sheet.range(`A${targetRow}:H${targetRow}`).style({ bold: true, border: GRID_BORDER });
 
-    mergeRow(sheet, differenceRow, 1, 3);
+    mergeRow(sheet, differenceRow, 1, 7);
     sheet.cell(differenceRow, 1).value("SELISIH TARGET (TARGET - GRAND TOTAL)");
-    sheet.cell(differenceRow, 4).value(difference).style(MONEY_STYLE);
-    sheet.range(`A${differenceRow}:D${differenceRow}`).style({
+    sheet.cell(differenceRow, 8).value(difference).style(MONEY_STYLE);
+    sheet.range(`A${differenceRow}:H${differenceRow}`).style({
       bold: true,
       fill: COLORS.amberSoft,
       border: GRID_BORDER,
     });
 
     sheet.cell(statusRow, 1).value("STATUS SELISIH").style(METADATA_LABEL_STYLE);
-    mergeRow(sheet, statusRow, 2, 4).style(METADATA_VALUE_STYLE);
+    mergeRow(sheet, statusRow, 2, 8).style(METADATA_VALUE_STYLE);
     sheet.cell(statusRow, 2).value(status);
   }
 
@@ -411,7 +488,7 @@ function writeStageItemRow(sheet: Sheet, row: number, item: ResumeItem, index: n
     item.itemNo?.trim() || index + 1,
     null,
     item.stageName || item.stageCode,
-    item.category || item.categoryName || item.categoryCode || "Tanpa kategori",
+    resumeCategoryDisplayName(item),
     resolveResumeVendorName(item, vendors),
     item.itemName,
     item.volume,

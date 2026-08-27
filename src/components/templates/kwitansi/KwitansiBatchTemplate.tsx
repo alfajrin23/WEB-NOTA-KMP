@@ -69,7 +69,7 @@ function fieldStyle(box: Stage1Box): CSSProperties {
 }
 
 function visiblePurposeLines(doc: GeneratedNota, purposeLines: string[]) {
-  if (doc.stageCode !== "RESUME_ALL") return purposeLines;
+  if (doc.stageCode !== "TAHAP_VI" && doc.stageCode !== "TAHAP_VII" && doc.stageCode !== "RESUME_ALL") return purposeLines;
   const [first, second, ...rest] = purposeLines;
   if (
     first &&
@@ -80,6 +80,22 @@ function visiblePurposeLines(doc: GeneratedNota, purposeLines: string[]) {
     return [`${first} ${second}`.replace(/\s+/g, " ").trim(), ...rest];
   }
   return purposeLines;
+}
+
+function wrapPurposeLines(lines: string[]) {
+  const wrapped: string[] = [];
+  for (const line of lines) {
+    const dateIndex = line.search(/\s+Tanggal\s+/i);
+    // Baris honor borongan sering terlalu panjang untuk lebar kolom template.
+    // Pisahkan bagian pekerjaan dan tanggal supaya baris berikutnya tidak
+    // terdorong ke area project/role di sisi kanan kwitansi.
+    if (dateIndex > 36) {
+      wrapped.push(line.slice(0, dateIndex).trim(), line.slice(dateIndex + 1).trim());
+    } else {
+      wrapped.push(line);
+    }
+  }
+  return wrapped;
 }
 
 function KwitansiSlip({
@@ -101,7 +117,7 @@ function KwitansiSlip({
   const number = doc.kwitansiNumber?.trim() ?? "";
   const color = templateColor(doc, index);
   const fields = kwitansiTemplateLayout.fields;
-  const renderedPurposeLines = visiblePurposeLines(doc, purposeLines);
+  const renderedPurposeLines = wrapPurposeLines(visiblePurposeLines(doc, purposeLines));
 
   return (
     <div className="stage1-kwitansi-slip" data-kwitansi-id={doc.id} data-stage-code={doc.stageCode} data-template-color={color} data-overlap-container data-overlap-label="Kwitansi">

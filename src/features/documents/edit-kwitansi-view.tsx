@@ -34,7 +34,7 @@ type StageFilter = StageCode | "all";
 
 type EditableKwitansiDoc = GeneratedNota;
 
-const CORE_KWITANSI_SYNC_STAGES = new Set<StageCode>(["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV"]);
+const CORE_KWITANSI_SYNC_STAGES = new Set<StageCode>(["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "TAHAP_V"]);
 
 type EditDraft = {
   number: string;
@@ -91,7 +91,7 @@ function normalizeEditableText(value: string) {
 }
 
 function kwitansiStageLabel(stageCode: StageCode) {
-  return stageCode === "RESUME_ALL" ? "DI LUAR PEKERJAAN INTI" : getStageLabel(stageCode);
+  return getStageLabel(stageCode);
 }
 
 function normalizedText(value: string | undefined | null) {
@@ -118,10 +118,13 @@ const OUTSIDE_CORE_LABELS = [
   "sosialisasi",
   "rapat koordinasi",
   "pengukuran lahan",
+  "penyiapan lahan",
   "pematangan lahan",
   "pembersihan lahan",
   "cut n fill",
   "sumur bor",
+  "trafo",
+  "operasional gerai",
 ] as const;
 
 function outsideCoreLabel(text: string) {
@@ -131,7 +134,6 @@ function outsideCoreLabel(text: string) {
 function isStageFourAllowedDoc(doc: GeneratedNota) {
   const text = docWorkText(doc);
   if (outsideCoreLabel(text)) return false;
-  if (text.includes("sumuran grounding")) return false;
   return (
     text.includes("mandor") ||
     text.includes("kepala tukang") ||
@@ -245,18 +247,18 @@ export function EditKwitansiView() {
   const generationIssues = useMemo(() => {
     const issues = generationDiagnostics?.issues.map((issue) => issue.message) ?? [];
     if (regularDocs.length > 0) {
-      const stageFourDocs = regularDocs.filter((doc) => doc.stageCode === "TAHAP_IV");
-      const outsideDocs = regularDocs.filter((doc) => doc.stageCode === "RESUME_ALL");
+      const stageFourDocs = regularDocs.filter((doc) => doc.stageCode === "TAHAP_IV" || doc.stageCode === "TAHAP_V");
+      const outsideDocs = regularDocs.filter((doc) => doc.stageCode === "TAHAP_VI" || doc.stageCode === "TAHAP_VII" || doc.stageCode === "RESUME_ALL");
       const outsideFound = new Set(outsideDocs.map((doc) => outsideCoreLabel(docWorkText(doc))).filter((label): label is NonNullable<typeof label> => Boolean(label)));
       const missingOutside = OUTSIDE_CORE_LABELS.filter((label) => !outsideFound.has(label));
       for (const label of missingOutside) {
-        issues.push(`Kwitansi Di Luar Pekerjaan Inti belum tampil untuk item: ${label}.`);
+          issues.push(`Kwitansi Tahap 6/7 belum tampil untuk item: ${label}.`);
       }
       for (const doc of stageFourDocs) {
         const text = docWorkText(doc);
         const outsideLabel = outsideCoreLabel(text);
         if (outsideLabel) {
-          issues.push(`Item luar inti "${docWorkTitle(doc)}" masih masuk Tahap 4; harus pindah ke Di Luar Pekerjaan Inti.`);
+          issues.push(`Item luar inti "${docWorkTitle(doc)}" masih masuk Tahap 4/5; harus dipetakan ke Tahap 6 atau 7.`);
         } else if (!isStageFourAllowedDoc(doc)) {
           issues.push(`Kwitansi Tahap 4 di luar whitelist: ${docWorkTitle(doc)}.`);
         }

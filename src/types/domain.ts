@@ -1,6 +1,18 @@
-export type StageCode = "TAHAP_I" | "TAHAP_II" | "TAHAP_III" | "TAHAP_IV" | "RESUME_ALL";
+/**
+ * Tahap resmi pada resume KDKMP. RESUME_ALL dipertahankan hanya untuk
+ * membaca data lama yang dulu menyatukan Tahap VI dan VII.
+ */
+export type StageCode =
+  | "TAHAP_I"
+  | "TAHAP_II"
+  | "TAHAP_III"
+  | "TAHAP_IV"
+  | "TAHAP_V"
+  | "TAHAP_VI"
+  | "TAHAP_VII"
+  | "RESUME_ALL";
 
-export type KwitansiGroupCode = "TAHAP_1" | "TAHAP_2" | "TAHAP_3" | "TAHAP_4" | "LUAR_INTI";
+export type KwitansiGroupCode = "TAHAP_1" | "TAHAP_2" | "TAHAP_3" | "TAHAP_4" | "TAHAP_5" | "TAHAP_6" | "TAHAP_7" | "LUAR_INTI";
 
 export type VendorType = "material" | "equipment" | "labor" | "utility" | "internal";
 
@@ -45,6 +57,9 @@ export type ResumeItem = {
   sourcePage?: number | null;
   sourceRow?: number | null;
   sourceType?: "pdf" | "excel" | "manual" | "seed";
+  expenseType?: "material" | "labor" | "equipment";
+  /** Jumlah kwitansi yang ditulis pada sumber Excel, bila tersedia. */
+  kwitansiCount?: number;
   isManualAdded?: boolean;
   isIncludedInResumeTotal?: boolean;
   isGeneratedToNote?: boolean;

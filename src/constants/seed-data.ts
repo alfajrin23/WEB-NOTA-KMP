@@ -1,5 +1,6 @@
 import { Project, ResumeItem, StageCode, Vendor } from "@/types/domain";
 import { formatProjectRecipientAddress, formatProjectRecipientName } from "@/utils/format";
+import { EXCEL_BASE_ROWS, ExcelBaseRow } from "./excel-base-data";
 
 export const vendors: Vendor[] = [
   { id: "vendor-murah-maju", name: "MURAH MAJU", type: "material", address: "Cibadak, Puncak-Cipanas" },
@@ -17,11 +18,14 @@ export const vendors: Vendor[] = [
 ];
 
 const stageNames: Record<StageCode, string> = {
-  TAHAP_I: "Tahap I - Pekerjaan Persiapan dan Pondasi",
-  TAHAP_II: "Tahap II - Struktur Utama dan Atap",
-  TAHAP_III: "Tahap III - Pekerjaan Penutup Dinding dan Finishing Interior",
-  TAHAP_IV: "Tahap IV - Penyelesaian Akhir dan Serah Terima",
-  RESUME_ALL: "Pekerjaan Di Luar Konstruksi Inti",
+  TAHAP_I: "I - PEKERJAAN PERSIAPAN",
+  TAHAP_II: "II - PEKERJAAN STRUKTUR",
+  TAHAP_III: "III - PEKERJAAN ARSITEKTUR",
+  TAHAP_IV: "IV - PEKERJAAN MEKANIKAL",
+  TAHAP_V: "V - PEKERJAAN ELEKTRIKAL",
+  TAHAP_VI: "VI - PEKERJAAN DI LUAR KONSTRUKSI INTI",
+  TAHAP_VII: "VII. DUKUNGAN OPERASIONAL GERAI",
+  RESUME_ALL: "VI - PEKERJAAN DI LUAR KONSTRUKSI INTI",
 };
 
 const categoryNames: Record<string, string> = {
@@ -49,18 +53,32 @@ const categoryNames: Record<string, string> = {
   "TAHAP_III:H": "Tenaga Kerja Pembangunan KDKMP",
   "TAHAP_III:I": "Tenaga Lembur",
   "TAHAP_IV:A": "Pek. Mekanikal",
-  "TAHAP_IV:B": "Pek. Elektrikal",
-  "TAHAP_IV:C": "Pekerjaan Instalasi Proteksi Petir",
+  "TAHAP_V:B": "Pek. Elektrikal",
+  "TAHAP_V:C": "Pekerjaan Instalasi Proteksi Petir",
   "TAHAP_IV:G": "Sewa Peralatan dan Kendaraan",
   "TAHAP_IV:H": "Tenaga Kerja Pembangunan KDKMP",
-  "RESUME_ALL:A": "Pek. Di luar Konstruksi Inti",
+  "TAHAP_V:H": "Tenaga Kerja Pembangunan KDKMP",
+  "TAHAP_VI:A": "Pek. Di luar Konstruksi Inti",
+  "TAHAP_VII:A": "Dukungan Operasional Gerai",
 };
+
+function normalizeSeedStage(stageCode: StageCode, categoryCode: string, itemName: string): StageCode {
+  const name = itemName.toLowerCase();
+  if (stageCode === "TAHAP_IV" && (categoryCode === "B" || categoryCode === "C" || name.includes("sumuran grounding") || name.includes("tukang listrik"))) {
+    return "TAHAP_V";
+  }
+  if (stageCode === "RESUME_ALL") {
+    return name.includes("operasional gerai") || name.includes("operasional babinsa") ? "TAHAP_VII" : "TAHAP_VI";
+  }
+  return stageCode;
+}
 
 let sortOrder = 0;
 
 function vendorIdFromName(vendorName: string) {
   const normalized = vendorName.trim().toLowerCase();
   if (!normalized || normalized === "-") return "";
+  if (normalized === "nota kosong" || normalized === "internal / non vendor") return "vendor-internal";
   return vendors.find((vendor) => {
     const names = [vendor.name, ...(vendor.aliases ?? [])].map((entry) => entry.toLowerCase());
     return names.includes(normalized);
@@ -82,14 +100,15 @@ function item(
   sourceRow: number,
   vendorName = "",
 ): ResumeItem {
-  const categoryKey = `${stageCode}:${categoryCode}`;
+  const effectiveStageCode = normalizeSeedStage(stageCode, categoryCode, itemName);
+  const categoryKey = `${effectiveStageCode}:${categoryCode}`;
   const computedAmount = Math.round(volume * unitPrice);
   const amountOverride = computedAmount === amount ? null : amount;
   sortOrder += 1;
   return {
     id,
-    stageCode,
-    stageName: stageNames[stageCode],
+    stageCode: effectiveStageCode,
+    stageName: stageNames[effectiveStageCode],
     categoryCode,
     categoryName: categoryNames[categoryKey],
     category: `${categoryCode}. ${categoryNames[categoryKey]}`,
@@ -118,7 +137,7 @@ function item(
   };
 }
 
-export const masterTemplateItems: ResumeItem[] = [
+const legacyMasterTemplateItems: ResumeItem[] = [
   item("t1-a-001", "TAHAP_I", "A", "1", "2025-11-03", "Kayu Balok Meranti 4 M", 4, 350000, "Btg", 1400000, 2, 1, "MURAH MAJU"),
   item("t1-a-002", "TAHAP_I", "A", "2", "2025-11-03", "Paku 3 inch, 4 inch", 2, 25000, "Kg", 50000, 2, 2, "MURAH MAJU"),
   item("t1-a-003", "TAHAP_I", "A", "3", "2025-11-03", "Cangkul", 8, 60000, "BH", 480000, 2, 3, "MURAH MAJU"),
@@ -363,6 +382,45 @@ export const masterTemplateItems: ResumeItem[] = [
   item("all-a-009", "RESUME_ALL", "A", "7", "2026-02-11", "Penambahan Daya Listrik Menjadi 16.500 VA", 1, 15500000, "HARI", 15500000, 9, 9, "PLN"),
   item("all-a-010", "RESUME_ALL", "A", "8", "2026-02-11", "Dukungan Operasional Babinsa (92 hari)", 92, 200000, "HARI", 18400000, 9, 10, "KWITANSI"),
 ];
+
+function itemFromExcelRow(row: ExcelBaseRow, index: number): ResumeItem {
+  const computedAmount = Math.round(row.volume * row.unitPrice);
+  const amountOverride = computedAmount === row.amount ? null : row.amount;
+  return {
+    id: `excel-${String(row.excelRow).padStart(3, "0")}`,
+    stageCode: row.stageCode,
+    stageName: stageNames[row.stageCode],
+    categoryCode: row.categoryCode,
+    categoryName: row.categoryName,
+    category: `${row.categoryCode} ${row.categoryName}`,
+    itemNo: row.categoryCode,
+    expenseDate: row.date,
+    itemName: row.itemName,
+    volume: row.volume,
+    unit: row.unit,
+    unitPrice: row.unitPrice,
+    amountOverride,
+    vendorId: vendorIdFromName(row.vendorName),
+    vendorName: row.vendorName,
+    notes: "",
+    sortOrder: index + 1,
+    sourceFile: "G.xlsx",
+    sourceRow: row.excelRow,
+    sourceType: "excel",
+    expenseType: row.expenseType,
+    kwitansiCount: row.kwitansiCount,
+    isManualAdded: false,
+    isIncludedInResumeTotal: true,
+    isGeneratedToNote: false,
+    noteId: null,
+    categoryTotal: null,
+    stageTotal: null,
+    validationStatus: amountOverride === null ? "valid" : "warning",
+  };
+}
+
+/** Base resume resmi diambil dari rincian transaksi G.xlsx. */
+export const masterTemplateItems: ResumeItem[] = EXCEL_BASE_ROWS.map(itemFromExcelRow);
 
 const initialProjectIdentity = {
   wilayahType: "desa",

@@ -1,4 +1,4 @@
-import { getStageLabel } from "@/constants/stages";
+import { getStageLabel, STAGE_CODES } from "@/constants/stages";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
 import { ResumeItem, StageCode, Vendor } from "@/types/domain";
 
@@ -40,7 +40,7 @@ type CategoryRef = {
   total?: number;
 };
 
-const STAGE_ORDER: StageCode[] = ["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "RESUME_ALL"];
+const STAGE_ORDER: StageCode[] = [...STAGE_CODES];
 
 const DEFAULT_CATEGORY_NAMES: Record<string, string[]> = {
   TAHAP_I: [
@@ -73,13 +73,21 @@ const DEFAULT_CATEGORY_NAMES: Record<string, string[]> = {
     "Tenaga Lembur",
   ],
   TAHAP_IV: [
-    "Pek. Mekanikal (Saluran Air Bersih, Air Bekas, Air Hujan)",
-    "Pek. Elektrikal (Distribusi listrik, Instalasi Penerangan dan Kontak)",
-    "Pekerjaan Instalasi Proteksi Petir",
+    "Air Bersih",
+    "Air Kotor / Air Bekas",
+    "Pipa Air Hujan",
     "Sewa Peralatan dan Kendaraan",
     "Tenaga Kerja Pembangunan KDKMP",
   ],
-  RESUME_ALL: ["Pek. Di luar Konstruksi Inti"],
+  TAHAP_V: [
+    "Distribusi listrik",
+    "Penerangan / Kotak Kontak",
+    "Proteksi Petir",
+    "Sewa Peralatan dan Kendaraan",
+    "Tenaga Kerja Pembangunan KDKMP",
+  ],
+  TAHAP_VI: ["Di luar konstruksi inti"],
+  TAHAP_VII: ["Dukungan Operasional Gerai"],
 };
 
 function cleanText(value: string) {
@@ -126,12 +134,18 @@ function parseDate(value: string | undefined) {
 
 function stageFromLine(line: string): StageCode | null {
   const upper = line.toUpperCase();
-  if (!upper.includes("PERIHAL")) return null;
-  if (upper.includes("DI LUAR KONSTRUKSI INTI")) return "RESUME_ALL";
+  if (upper.startsWith("VII") && upper.includes("DUKUNGAN OPERASIONAL")) return "TAHAP_VII";
+  if (upper.includes("VI - PEKERJAAN DI LUAR") || upper.includes("DI LUAR KONSTRUKSI INTI")) return "TAHAP_VI";
+  if (upper.includes("V - PEKERJAAN ELEKTRIKAL")) return "TAHAP_V";
+  if (upper.includes("IV - PEKERJAAN MEKANIKAL")) return "TAHAP_IV";
   if (upper.includes("TAHAP IV")) return "TAHAP_IV";
+  if (upper.includes("III - PEKERJAAN ARSITEKTUR")) return "TAHAP_III";
   if (upper.includes("TAHAP III")) return "TAHAP_III";
+  if (upper.includes("II - PEKERJAAN STRUKTUR")) return "TAHAP_II";
   if (upper.includes("TAHAP II")) return "TAHAP_II";
+  if (upper.includes("I - PEKERJAAN PERSIAPAN")) return "TAHAP_I";
   if (upper.includes("TAHAP I ") || upper.endsWith("TAHAP I")) return "TAHAP_I";
+  if (upper.includes("PERIHAL")) return null;
   return null;
 }
 
@@ -165,7 +179,7 @@ function buildSections(lines: LineRef[]) {
     if (nextStage) {
       current = sections.get(nextStage) ?? {
         stageCode: nextStage,
-        stageName: nextStage === "RESUME_ALL" ? "Pekerjaan Di Luar Konstruksi Inti" : getStageLabel(nextStage),
+        stageName: getStageLabel(nextStage),
         lines: [],
       };
       sections.set(nextStage, current);
@@ -185,7 +199,7 @@ function collectCategories(section: Section): CategoryRef[] {
   const byCode = new Map<string, CategoryRef>();
 
   for (const line of section.lines) {
-    const match = line.text.match(/^([A-I])\.\s+(.+)$/);
+    const match = line.text.match(/^((?:[IVX]+\.\d+)|[A-I])(?:\.\s+|\s+)(.+)$/i);
     if (!match) continue;
     if (/^Terbilang|^JUMLAH/i.test(match[2])) continue;
     byCode.set(match[1], { code: match[1], name: cleanText(match[2]) });
@@ -217,6 +231,85 @@ function splitAmountAndVendor(line: string) {
     amount: parseNumber(match[1]),
     vendorName: cleanText(match[2] ?? ""),
   };
+}
+
+function categoryFromLine(line: string) {
+  const match = line.match(/^((?:[IVX]+\.\d+)|[A-I])(?:\.\s+|\s+)(.+)$/i);
+  if (!match || /^Terbilang|^JUMLAH/i.test(match[2])) return null;
+  return { code: match[1], name: cleanText(match[2]) } satisfies CategoryRef;
+}
+
+function expenseVendorForHeading(line: string, vendors: Vendor[]) {
+  const upper = line.toUpperCase();
+  if (upper.includes("UPAH / HONORARIUM")) {
+    const vendor = vendors.find((entry) => entry.id === "vendor-kwitansi");
+    return { vendorId: vendor?.id ?? "vendor-kwitansi", vendorName: vendor?.name ?? "KWITANSI" };
+  }
+  if (upper.includes("SEWA ALAT / FASILITAS")) {
+    const vendor = vendors.find((entry) => entry.id === "vendor-ppm");
+    return { vendorId: vendor?.id ?? "vendor-ppm", vendorName: vendor?.name ?? "PPM" };
+  }
+  if (upper.includes("BAHAN / MATERIAL")) {
+    const vendor = vendors.find((entry) => entry.id === "vendor-internal");
+    return { vendorId: vendor?.id ?? "vendor-internal", vendorName: vendor?.name ?? "INTERNAL / NON VENDOR" };
+  }
+  return null;
+}
+
+function parseTableRow(line: string) {
+  const dateMatch = line.match(/^(\d{2}-\d{2}-\d{4})\s+(.+)$/);
+  if (!dateMatch) return null;
+
+  const date = parseDate(dateMatch[1]);
+  const tokens = dateMatch[2].split(/\s+/).filter(Boolean);
+  if (tokens.length < 5) return null;
+
+  const amountToken = tokens.at(-1);
+  const priceToken = tokens.at(-2);
+  if (!isMoneyToken(amountToken) || !isMoneyToken(priceToken)) return null;
+  const amount = parseNumber(amountToken);
+  const unitPrice = parseNumber(priceToken);
+
+  // Kolom upah: Orang, Hari, Tarif Harian, Total Biaya. Disimpan sebagai
+  // Orang-Hari agar qty x harga tetap sama dengan total pada PDF.
+  const peopleToken = tokens.at(-4);
+  const daysToken = tokens.at(-3);
+  if (isNumericToken(peopleToken) && isNumericToken(daysToken)) {
+    const people = parseNumber(peopleToken);
+    const days = parseNumber(daysToken);
+    const itemName = tokens.slice(0, -4).join(" ");
+    if (itemName && people > 0 && days > 0) {
+      return { date, itemName, volume: people * days, unit: "Orang-Hari", unitPrice, amount, exact: Math.round(people * days * unitPrice) === amount };
+    }
+  }
+
+  // Kolom sewa: Qty, Durasi (angka + satuan), Tarif per Durasi, Total Biaya.
+  const durationNumber = tokens.at(-4);
+  const durationUnit = tokens.at(-3);
+  const quantityToken = tokens.at(-5);
+  if (isNumericToken(quantityToken) && isNumericToken(durationNumber) && durationUnit && !isMoneyToken(durationUnit)) {
+    const quantity = parseNumber(quantityToken);
+    const duration = parseNumber(durationNumber);
+    const itemName = tokens.slice(0, -5).join(" ");
+    if (itemName && quantity > 0 && duration > 0) {
+      return { date, itemName, volume: quantity * duration, unit: durationUnit, unitPrice, amount, exact: Math.round(quantity * duration * unitPrice) === amount };
+    }
+  }
+
+  // Kolom bahan: Uraian, Qty, Sat, Harga Satuan, Total Biaya. Pilih kandidat
+  // yang menghasilkan total persis untuk menghindari angka pada nama barang.
+  const candidates: Array<{ itemName: string; volume: number; unit: string; exact: boolean }> = [];
+  for (let index = 1; index < tokens.length - 2; index += 1) {
+    if (!isNumericToken(tokens[index]) || isMoneyToken(tokens[index + 1]) || !isMoneyToken(tokens[index + 2])) continue;
+    const volume = parseNumber(tokens[index]);
+    const unit = tokens[index + 1];
+    const itemName = tokens.slice(0, index).join(" ");
+    if (!itemName || !unit || volume <= 0) continue;
+    candidates.push({ itemName, volume, unit, exact: Math.round(volume * unitPrice) === amount });
+  }
+  const candidate = candidates.find((entry) => entry.exact) ?? candidates.at(-1);
+  if (!candidate) return null;
+  return { date, ...candidate, unitPrice, amount };
 }
 
 function stripLeadingIdentity(value: string) {
@@ -286,13 +379,22 @@ function parseQuantityPriceUnit(rest: string, amount: number) {
 
 function isNonItemLine(line: string) {
   return (
+    /^RINCIAN PENGGUNAAN DANA/i.test(line) ||
+    /^RESUME PENGGUNAAN DANA/i.test(line) ||
     /^NAMA PROJECT/i.test(line) ||
     /^WILAYAH/i.test(line) ||
     /^KDKMP/i.test(line) ||
     /^PERIHAL/i.test(line) ||
+    /^(?:[IVX]+|VII)\s*-\s*PEKERJAAN/i.test(line) ||
+    /^VII\./i.test(line) ||
     /^NO\b/i.test(line) ||
     /^BELANJA\b/i.test(line) ||
     /^BARANG \/ JASA/i.test(line) ||
+    /^(?:BAHAN \/ MATERIAL|UPAH \/ HONORARIUM|SEWA ALAT \/ FASILITAS)$/i.test(line) ||
+    /^SUBTOTAL\b/i.test(line) ||
+    /^TOTAL:\s*Rp/i.test(line) ||
+    /^Dokumen ini dicetak/i.test(line) ||
+    /^Dicetak oleh/i.test(line) ||
     /^VOL\b/i.test(line) ||
     /^SAT\b/i.test(line) ||
     /^VENDOR\b/i.test(line) ||
@@ -308,14 +410,37 @@ function parseSection(section: Section, vendors: Vendor[], sourceFile: string, w
   const categoryTotals = new Map<string, number>();
   const items: ResumeItem[] = [];
   let categoryIndex = 0;
+  let currentCategory: CategoryRef | undefined;
+  let currentExpenseVendor = expenseVendorForHeading("BAHAN / MATERIAL", vendors);
+  const itemNumbers = new Map<string, number>();
 
   for (const line of section.lines) {
     const text = line.text;
-    if (isNonItemLine(text) || /^([A-I])\.\s+/.test(text)) continue;
+    const categoryLine = categoryFromLine(text);
+    if (categoryLine) {
+      currentCategory = categories.find((category) => category.code.toUpperCase() === categoryLine.code.toUpperCase()) ?? categoryLine;
+      continue;
+    }
+
+    const expenseVendor = expenseVendorForHeading(text, vendors);
+    if (expenseVendor) {
+      currentExpenseVendor = expenseVendor;
+      continue;
+    }
+
+    const total = text.match(/^TOTAL:\s*Rp\.?\s*([\d.]+)$/i);
+    if (total && currentCategory) {
+      const amount = parseNumber(total[1]);
+      currentCategory.total = amount;
+      categoryTotals.set(currentCategory.code, amount);
+      continue;
+    }
+
+    if (isNonItemLine(text) || /^(?:Tanggal|Uraian|Qty|Sat|Harga Satuan|Total Biaya|Orang|Hari|Tarif Harian|Durasi)$/i.test(text)) continue;
 
     const subtotal = text.match(/^Rp\.?\s*([\d.]+)$/i);
     if (subtotal) {
-      const category = categories[categoryIndex];
+      const category = currentCategory ?? categories[categoryIndex];
       if (category) {
         const amount = parseNumber(subtotal[1]);
         category.total = amount;
@@ -325,15 +450,19 @@ function parseSection(section: Section, vendors: Vendor[], sourceFile: string, w
       continue;
     }
 
-    const amountVendor = splitAmountAndVendor(text);
-    if (!amountVendor) continue;
+    const tableRow = parseTableRow(text);
+    const amountVendor = tableRow ? null : splitAmountAndVendor(text);
+    if (!tableRow && !amountVendor) continue;
 
-    const category = categories[Math.min(categoryIndex, categories.length - 1)] ?? { code: "A", name: "Kategori" };
-    const { itemNo, date, rest } = stripLeadingIdentity(amountVendor.beforeAmount);
-    const parsed = parseQuantityPriceUnit(rest, amountVendor.amount);
-    const amountOverride = parsed.exact ? null : amountVendor.amount;
-    const rawVendor = amountVendor.vendorName.trim();
-    const vendorId = vendorIdFromName(rawVendor, vendors);
+    const category = currentCategory ?? categories[Math.min(categoryIndex, categories.length - 1)] ?? { code: "A", name: "Kategori" };
+    const legacyIdentity = amountVendor ? stripLeadingIdentity(amountVendor.beforeAmount) : null;
+    const parsed = tableRow ?? parseQuantityPriceUnit(legacyIdentity?.rest ?? "", amountVendor?.amount ?? 0);
+    const amount = tableRow?.amount ?? amountVendor?.amount ?? 0;
+    const amountOverride = parsed.exact ? null : amount;
+    const rawVendor = amountVendor?.vendorName.trim() || currentExpenseVendor?.vendorName || "";
+    const vendorId = amountVendor
+      ? vendorIdFromName(rawVendor, vendors)
+      : currentExpenseVendor?.vendorId ?? vendorIdFromName(rawVendor, vendors);
     const categoryName = category.name;
     const itemName = normalizeItemName(cleanText(parsed.itemName));
 
@@ -347,9 +476,9 @@ function parseSection(section: Section, vendors: Vendor[], sourceFile: string, w
       stageName: section.stageName,
       categoryCode: category.code,
       categoryName,
-      category: `${category.code}. ${categoryName}`,
-      itemNo: itemNo || `${items.length + 1}`,
-      expenseDate: date,
+      category: category.code.includes(".") ? `${category.code} ${categoryName}` : `${category.code}. ${categoryName}`,
+      itemNo: legacyIdentity?.itemNo || `${(itemNumbers.get(category.code) ?? 0) + 1}`,
+      expenseDate: tableRow?.date ?? legacyIdentity?.date ?? "",
       itemName,
       volume: parsed.volume,
       unit: parsed.unit,
@@ -370,6 +499,7 @@ function parseSection(section: Section, vendors: Vendor[], sourceFile: string, w
       categoryTotal: categoryTotals.get(category.code) ?? null,
       validationStatus: amountOverride === null ? "valid" : "warning",
     });
+    itemNumbers.set(category.code, (itemNumbers.get(category.code) ?? 0) + 1);
   }
 
   const computedCategoryTotals = new Map<string, number>();
@@ -383,11 +513,61 @@ function parseSection(section: Section, vendors: Vendor[], sourceFile: string, w
   }));
 }
 
+function parseSummaryOnly(text: string, vendors: Vendor[], sourceFile: string, warnings: string[]) {
+  if (!/RESUME PENGGUNAAN DANA/i.test(text) || /RINCIAN PENGGUNAAN DANA/i.test(text)) return [];
+  const internalVendor = vendors.find((entry) => entry.id === "vendor-internal");
+  const items: ResumeItem[] = [];
+  let stageCode: StageCode | null = null;
+
+  for (const line of pageLines(text)) {
+    stageCode = stageFromLine(line.text) ?? stageCode;
+    const match = line.text.match(/^((?:[IVX]+)\.\d+)\s+(.+?)\s+([\d.]+(?:,\d+)?)$/i);
+    if (!match || !stageCode) continue;
+    const amount = parseNumber(match[3]);
+    const categoryCode = match[1].toUpperCase();
+    const categoryName = cleanText(match[2]);
+    items.push({
+      id: `summary-${stageCode.toLowerCase()}-${categoryCode.toLowerCase()}-${items.length + 1}`,
+      stageCode,
+      stageName: getStageLabel(stageCode),
+      categoryCode,
+      categoryName,
+      category: `${categoryCode} ${categoryName}`,
+      itemNo: categoryCode,
+      expenseDate: "",
+      itemName: categoryName,
+      volume: 1,
+      unit: "Ls",
+      unitPrice: amount,
+      amountOverride: null,
+      vendorId: internalVendor?.id ?? "vendor-internal",
+      vendorName: internalVendor?.name ?? "INTERNAL / NON VENDOR",
+      notes: "Ringkasan kategori dari PDF resume",
+      sortOrder: items.length + 1,
+      sourceFile,
+      sourcePage: line.page,
+      sourceRow: line.row,
+      sourceType: "pdf",
+      isManualAdded: false,
+      isIncludedInResumeTotal: true,
+      isGeneratedToNote: false,
+      noteId: null,
+      categoryTotal: amount,
+      stageTotal: null,
+      validationStatus: "valid",
+    });
+  }
+
+  if (items.length > 0) warnings.push("File yang diunggah adalah resume ringkasan. Gunakan PDF rincian untuk memuat seluruh barang, upah, dan sewa.");
+  return items;
+}
+
 export function parseResumeText(text: string, { sourceFile, vendors }: { sourceFile: string; vendors: Vendor[] }): ParsedResume {
   const warnings: string[] = [];
   const lines = pageLines(text);
   const sections = buildSections(lines);
-  const items = sections.flatMap((section) => parseSection(section, vendors, sourceFile, warnings));
+  const detailedItems = sections.flatMap((section) => parseSection(section, vendors, sourceFile, warnings));
+  const items = detailedItems.length > 0 ? detailedItems : parseSummaryOnly(text, vendors, sourceFile, warnings);
   const sortedItems = items.map((item, index) => ({ ...item, sortOrder: index + 1 }));
 
   const byStage: Record<string, number> = {};

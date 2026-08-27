@@ -70,12 +70,14 @@ function buildJasaNoteGroups(items: ResumeItem[], maxRows: number): JasaNoteGrou
 function JasaSlot({
   group,
   project,
+  totalAmount,
 }: {
   group: JasaNoteGroup;
   project: MultiStageTemplateProps["project"];
+  totalAmount: number;
 }) {
   const rows = padRows(group.items, JASA_ROWS);
-  const visibleTotal = group.isFinalGroupChunk ? group.total : 0;
+  const visibleTotal = group.isFinalGroupChunk ? totalAmount : 0;
 
   return (
     <section className="multi-note jasa-slot" data-overlap-container data-overlap-label="Jasa Electric nota">
@@ -141,9 +143,26 @@ function JasaSlot({
 
 export function JasaElectricTemplate({ doc, project, zoom, debug = false }: MultiStageTemplateProps) {
   const groups = buildJasaNoteGroups(doc.items, JASA_ROWS);
-  const printableGroups = groups.length > 0
+  const groupedNotes = groups.length > 0
     ? groups
     : [{ key: "blank", date: project.projectDate, category: "", items: [], isFinalGroupChunk: true, total: 0 }];
+  const calculatedTotal = doc.items.reduce((sum, item) => sum + itemAmount(item), 0);
+  // The document total is the source used by the document card and resume.
+  // Keep the item calculation as a fallback for older/generated documents that
+  // do not have totalAmount persisted yet.
+  const overallTotal = Number(doc.totalAmount) > 0 ? doc.totalAmount : calculatedTotal;
+  // Keep each date/category as its own detail note, but print the document total
+  // once on the note with the fewest detail rows. This keeps the total visible
+  // in the less crowded (left) note for the two-note Jasa Electric layout.
+  const totalGroupIndex = groupedNotes.reduce(
+    (shortestIndex, group, index) => group.items.length < groupedNotes[shortestIndex].items.length ? index : shortestIndex,
+    0,
+  );
+  const printableGroups = groupedNotes.map((group, index) => ({
+    ...group,
+    isFinalGroupChunk: index === totalGroupIndex,
+    total: index === totalGroupIndex ? overallTotal : 0,
+  }));
   const pages = chunk(printableGroups, 2);
 
   return (
@@ -159,7 +178,7 @@ export function JasaElectricTemplate({ doc, project, zoom, debug = false }: Mult
                 className="multi-slot-position"
                 style={{ left: slot.x, top: slot.y, width: slot.width, height: slot.height } as CSSProperties}
               >
-                <JasaSlot group={group} project={project} />
+                <JasaSlot group={group} project={project} totalAmount={overallTotal} />
               </div>
               );
             })}

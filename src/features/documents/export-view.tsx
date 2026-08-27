@@ -23,12 +23,13 @@ function docsForStage(docs: GeneratedNota[], stageCode: StageCode) {
 }
 
 function stageLabel(stageCode: StageCode) {
-  return stageCode === "RESUME_ALL" ? "DI LUAR PEKERJAAN INTI" : getStageLabel(stageCode);
+  return getStageLabel(stageCode);
 }
 
 function docSortRank(doc: GeneratedNota) {
   const stageIndex = STAGES.findIndex((stage) => stage.code === doc.stageCode);
-  if (doc.vendorId === "vendor-pln" && doc.stageCode === "TAHAP_IV") return 390 + (doc.printOrder ?? 0) / 100;
+  if (doc.vendorId === "vendor-pln" && doc.stageCode === "TAHAP_V") return 490 + (doc.printOrder ?? 0) / 100;
+  if (doc.vendorId === "vendor-pln" && doc.stageCode === "TAHAP_VI") return 590 + (doc.printOrder ?? 0) / 100;
   return (stageIndex === -1 ? 99 : stageIndex) * 100 + (doc.printOrder ?? 0) / 100;
 }
 
@@ -212,7 +213,7 @@ export function ExportView() {
                     })}
                   >
                     <Download className="h-4 w-4" />
-                    {stage.code === "RESUME_ALL" ? "Di Luar Pekerjaan Inti" : stage.shortLabel}
+                    {stage.shortLabel}
                     <Badge className="ml-auto">{stageDocs.length}</Badge>
                   </Button>
                 );

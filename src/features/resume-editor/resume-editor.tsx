@@ -18,7 +18,6 @@ import { MotionPage } from "@/components/ui/motion-page";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
 import { STAGES, getStageLabel } from "@/constants/stages";
 import { buildProjectSummary, buildResumeValidationReport, getComputedAmount, getResumeItemAmount, ResumeValidationReport, validateProjectResume } from "@/lib/resume-calculations";
-import { shiftResumeItemsFromDefault } from "@/lib/project-date-shift";
 import { findPriceSyncSiblingItems } from "@/lib/resume-price-sync";
 import { compareResumeItems, mergeResumeItems, ParsedResume, ResumeImportDiff } from "@/lib/resume-import/parser";
 import {
@@ -50,12 +49,20 @@ type ProjectMetadataDraft = {
   invoiceRecipientAddress?: string;
 };
 
+function categoryDisplayName(item: Pick<ResumeItem, "category" | "categoryCode" | "categoryName">) {
+  const code = item.categoryCode?.trim() ?? "";
+  const name = (item.categoryName ?? item.category ?? "Tanpa kategori").trim();
+  if (!code || name.toUpperCase().startsWith(`${code.toUpperCase()} `) || name.toUpperCase().startsWith(`${code.toUpperCase()}.`)) return name;
+  return `${code} ${name}`;
+}
+
 export function ResumeEditor() {
   const params = useParams<{ id: string }>();
   const projectId = params.id;
   const {
     projects,
     vendors,
+    masterItems,
     templateAssignments,
     loading,
     syncError,
@@ -72,6 +79,15 @@ export function ResumeEditor() {
     generatedNotas,
   } = useKdkmpStore();
   const project = projects.find((entry) => entry.id === projectId);
+  const isLegacyProjectResume = useMemo(
+    () => Boolean(
+      project && masterItems.length > 0 && project.items.some((item) => {
+        const code = item.categoryCode?.trim() ?? "";
+        return code.length === 1 && /^[A-I]$/i.test(code);
+      }),
+    ),
+    [masterItems.length, project],
+  );
   const latestProjectRef = useRef(project);
   const pendingProjectDateCommitRef = useRef<Promise<Project | null> | null>(null);
   const [stage, setStage] = useState<StageCode>("TAHAP_I");
@@ -87,6 +103,11 @@ export function ResumeEditor() {
   const [savingProjectDate, setSavingProjectDate] = useState(false);
   const [importPreview, setImportPreview] = useState<{ parsed: ParsedResume; diff: ResumeImportDiff } | null>(null);
   const resumeFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    setCategoryFilter("all");
+    setCollapsed(new Set());
+  }, [stage]);
 
   useLayoutEffect(() => {
     latestProjectRef.current = project;
@@ -111,16 +132,16 @@ export function ResumeEditor() {
     if (!project) return [];
     return project.items
       .filter((item) => item.stageCode === stage)
-      .filter((item) => item.itemName.toLowerCase().includes(query.toLowerCase()) || item.category.toLowerCase().includes(query.toLowerCase()))
+      .filter((item) => item.itemName.toLowerCase().includes(query.toLowerCase()) || categoryDisplayName(item).toLowerCase().includes(query.toLowerCase()))
       .filter((item) => {
         if (vendorFilter === "all") return true;
-        if (vendorFilter === "missing") return !item.vendorId && (item.vendorName ?? "").trim() !== "-";
+         if (vendorFilter === "missing") return !item.vendorId && !["", "-", "nota kosong", "internal / non vendor"].includes((item.vendorName ?? "").trim().toLowerCase());
         if (vendorFilter === "dash") return (item.vendorName ?? "").trim() === "-";
         if (vendorFilter === "not-generated") return !(generatedItemIds.has(item.id) || item.isGeneratedToNote);
         return item.vendorId === vendorFilter;
       })
-      .filter((item) => categoryFilter === "all" || item.category === categoryFilter)
-      .filter((item) => !collapsed.has(item.category))
+      .filter((item) => categoryFilter === "all" || categoryDisplayName(item) === categoryFilter)
+      .filter((item) => !collapsed.has(categoryDisplayName(item)))
       .sort((a, b) => a.sortOrder - b.sortOrder);
   }, [categoryFilter, collapsed, generatedItemIds, project, query, stage, vendorFilter]);
 
@@ -128,7 +149,8 @@ export function ResumeEditor() {
     if (!project) return [];
     const map = new Map<string, number>();
     for (const item of project.items.filter((entry) => entry.stageCode === stage)) {
-      map.set(item.category, (map.get(item.category) ?? 0) + getResumeItemAmount(item));
+       const category = categoryDisplayName(item);
+       map.set(category, (map.get(category) ?? 0) + getResumeItemAmount(item));
     }
     return [...map.entries()];
   }, [project, stage]);
@@ -179,7 +201,7 @@ export function ResumeEditor() {
   const reimportResume = useCallback(async () => {
     if (!project) return;
     const confirmed = window.confirm(
-      "Reset master akan mengganti seluruh baris resume project ini dengan master resume terbaru dan menghapus generated notes otomatis lama. Lanjutkan?",
+      `Data resume project ini akan diganti dengan ${masterItems.length} baris dari G.xlsx, termasuk struktur kategori I.01 sampai VII.01. Generated nota otomatis lama akan dihapus dan perlu dibuat ulang. Lanjutkan?`,
     );
     if (!confirmed) return;
 
@@ -191,7 +213,7 @@ export function ResumeEditor() {
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Gagal import ulang resume.");
     }
-  }, [project, resetProjectResumeFromMaster]);
+  }, [masterItems.length, project, resetProjectResumeFromMaster]);
 
   const handleResumeUpload = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -206,10 +228,9 @@ export function ResumeEditor() {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "Gagal parsing resume.");
       const parsed = result as ParsedResume;
-      const parsedForProject = {
-        ...parsed,
-        items: shiftResumeItemsFromDefault(parsed.items, project.projectDate),
-      };
+      // Upload adalah sumber resmi resume; tanggal dan susunan item harus tetap
+      // mengikuti PDF, bukan digeser mengikuti tanggal project lama.
+      const parsedForProject = parsed;
       const diff = compareResumeItems(project.items, parsedForProject.items);
       setImportPreview({ parsed: parsedForProject, diff });
       toast.success(`${parsedForProject.items.length} item resume berhasil dibaca dari file.`);
@@ -492,7 +513,7 @@ export function ResumeEditor() {
     {
       header: "Kategori",
       accessorKey: "category",
-      cell: ({ row }) => <EditableInput value={row.original.category} className="min-w-72 text-xs" onCommit={(value) => patch(row.original, { category: value })} />,
+      cell: ({ row }) => <EditableInput value={categoryDisplayName(row.original)} className="min-w-72 text-xs" onCommit={(value) => patch(row.original, { category: value })} />,
     },
     {
       header: "Ket.",
@@ -549,7 +570,7 @@ export function ResumeEditor() {
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={undo} disabled={past.length === 0}><Undo2 className="h-4 w-4" />Undo</Button>
             <Button variant="outline" onClick={redo} disabled={future.length === 0}><Redo2 className="h-4 w-4" />Redo</Button>
-            <Button variant="outline" onClick={reimportResume}><RefreshCcw className="h-4 w-4" />Reset Master</Button>
+            <Button variant="outline" onClick={reimportResume}><RefreshCcw className="h-4 w-4" />Terapkan Base Excel</Button>
             <Button variant="outline" onClick={() => resumeFileInputRef.current?.click()} disabled={importingResume}>
               <Upload className="h-4 w-4" />{importingResume ? "Membaca..." : "Upload/Update Resume"}
             </Button>
@@ -566,6 +587,15 @@ export function ResumeEditor() {
         {syncError || !supabaseReady ? (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
             {syncError ?? "Supabase belum dikonfigurasi. Perubahan hanya disimpan sebagai cache sementara sampai env Supabase diisi."}
+          </div>
+        ) : null}
+
+        {isLegacyProjectResume ? (
+          <div className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100 md:flex-row md:items-center md:justify-between">
+            <p>Project ini masih memakai kategori resume lama (A/B/C). Terapkan Base Excel agar tahap dan jenis pekerjaan berubah ke struktur I.01 sampai VII.01 sebelum export resume atau membuat nota.</p>
+            <Button variant="outline" onClick={reimportResume} className="shrink-0 border-amber-300 bg-white/70 hover:bg-white dark:border-amber-800 dark:bg-transparent dark:hover:bg-amber-950">
+              <RefreshCcw className="h-4 w-4" />Terapkan Sekarang
+            </Button>
           </div>
         ) : null}
 

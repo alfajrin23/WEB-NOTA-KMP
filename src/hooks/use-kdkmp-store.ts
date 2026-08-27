@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { initialProjects, masterTemplateItems, vendors } from "@/constants/seed-data";
 import { ALL_TEMPLATE_ASSIGNMENTS } from "@/constants/template-mapping";
-import { getStageLabel } from "@/constants/stages";
+import { getStageLabel, normalizeLegacyStageCode } from "@/constants/stages";
 import { generateKwitansiDocuments, generateNotaDocuments } from "@/lib/nota-generator";
 import { getAutofillKwitansiReceiver, kwitansiSyncKeyForDoc } from "@/lib/kwitansi-rules";
 import type { KwitansiSyncKey } from "@/lib/kwitansi-rules";
@@ -61,7 +61,7 @@ import {
   WilayahType,
 } from "@/types/domain";
 
-const MASTER_KEY = "kdkmp.master-template.v1";
+const MASTER_KEY = "kdkmp.master-template.v2-excel";
 const TEMPLATE_ASSIGNMENTS_KEY = "kdkmp.template-assignments.v1";
 
 type VendorItemUpdate = {
@@ -111,7 +111,7 @@ function normalizePlnResumeItem(item: ResumeItem): ResumeItem {
     item.id.endsWith("project-haurwangi-t4-003") ||
     item.itemName.trim().toLowerCase() === "daya pln 16,500 va";
 
-  if (item.stageCode === "TAHAP_IV" && item.vendorId === "vendor-pln" && isInitialPlnInstall) {
+  if ((item.stageCode === "TAHAP_IV" || item.stageCode === "TAHAP_V") && item.vendorId === "vendor-pln" && isInitialPlnInstall) {
     return {
       ...item,
       itemName: "Pemasangan Listrik Daya 5500 VA. Dan Pemasangan Panel Listrik 3 Phase",
@@ -131,7 +131,42 @@ function normalizePlnResumeItem(item: ResumeItem): ResumeItem {
 
 function normalizePlnResumeItems(items: ResumeItem[]) {
   return items.map((item) => {
-    const normalized = normalizePlnResumeItem(item);
+    const legacyCategoryCode = item.categoryCode ?? item.category.match(/^([A-Z])\./i)?.[1];
+    const itemName = item.itemName.trim().toLowerCase();
+    const stageBeforeElectricalFix = normalizeLegacyStageCode(item.stageCode, item.itemName, item.category);
+    const stageCode = stageBeforeElectricalFix === "TAHAP_IV" && (
+      legacyCategoryCode === "B" ||
+      legacyCategoryCode === "C" ||
+      itemName.includes("sumuran grounding") ||
+      itemName.includes("tukang listrik")
+    ) ? "TAHAP_V" : stageBeforeElectricalFix;
+    const isPartisiKwitansi = stageCode === "TAHAP_III" && (
+      legacyCategoryCode === "D" ||
+      itemName.includes("pintu besi") ||
+      itemName.includes("dinding partisi kaca") ||
+      itemName.includes("pintu kaca frameless")
+    );
+    const rawVendorName = (item.vendorName ?? "").trim();
+    const inferredVendorName = rawVendorName === "-" || rawVendorName.toLowerCase() === "nota kosong"
+      ? "NOTA KOSONG"
+      : rawVendorName || (isPartisiKwitansi ? "KWITANSI" : stageCode === "TAHAP_I" && legacyCategoryCode === "A" ? (itemName.includes("sirtu") ? "AMANAH" : "MURAH MAJU") : "");
+    const inferredVendorId = inferredVendorName === "NOTA KOSONG"
+      ? "vendor-internal"
+      : inferredVendorName === "KWITANSI"
+        ? "vendor-kwitansi"
+        : inferredVendorName === "AMANAH"
+          ? "vendor-amanah"
+          : inferredVendorName === "MURAH MAJU"
+            ? "vendor-murah-maju"
+            : item.vendorId;
+    const normalized = normalizePlnResumeItem({
+      ...item,
+      stageCode,
+      stageName: getStageLabel(stageCode),
+      vendorId: item.vendorId || inferredVendorId,
+      vendorName: inferredVendorName,
+      kwitansiCount: item.kwitansiCount ?? (isPartisiKwitansi ? 5 : undefined),
+    });
     const vendor = vendors.find((entry) => entry.id === normalized.vendorId);
     return {
       ...normalized,
@@ -187,6 +222,24 @@ function normalizeProjects(projects: Project[]) {
   });
 }
 
+function normalizeGeneratedNotaStages(docs: GeneratedNota[]) {
+  return docs.map((doc) => {
+    const itemText = doc.items.map((item) => `${item.itemName} ${item.category}`).join(" ");
+    const stageCode = normalizeLegacyStageCode(doc.stageCode, itemText, doc.stageName);
+    const items = doc.items.map((item) => {
+      const itemStageCode = normalizeLegacyStageCode(item.stageCode, item.itemName, item.category);
+      return { ...item, stageCode: itemStageCode, stageName: getStageLabel(itemStageCode) };
+    });
+    return {
+      ...doc,
+      stageCode,
+      stageId: stageCode,
+      stageName: getStageLabel(stageCode),
+      items,
+    };
+  });
+}
+
 function createLocalProject(
   input: Pick<Project, "projectName" | "wilayahType" | "villageName" | "districtName" | "regencyName" | "regionName" | "responsibleName" | "projectDate">,
   sourceItems: ResumeItem[],
@@ -224,7 +277,7 @@ function createLocalProject(
 function applyBundle(bundle: ProjectBundle) {
   return {
     projects: normalizeProjects(bundle.projects),
-    generatedNotas: bundle.generatedNotas,
+    generatedNotas: normalizeGeneratedNotaStages(bundle.generatedNotas),
     kwitansiEdits: bundle.kwitansiEdits,
     customNotes: bundle.customNotes,
     history: bundle.history,
@@ -279,7 +332,15 @@ export function useKdkmpStore() {
     setLoading(true);
     setSyncError(null);
     try {
-      const bundle = await fetchProjectBundle();
+      // Project screens only need one project's resume rows. Dashboard,
+      // history, and vendor screens continue to request the complete bundle.
+      const projectRouteMatch = typeof window === "undefined"
+        ? null
+        : /^\/projects\/([^/]+)/.exec(window.location.pathname);
+      const activeProjectId = projectRouteMatch?.[1] && projectRouteMatch[1] !== "new"
+        ? decodeURIComponent(projectRouteMatch[1])
+        : undefined;
+      const bundle = await fetchProjectBundle(activeProjectId);
       const next = applyBundle(bundle);
       setProjects(next.projects);
       setGeneratedNotas(next.generatedNotas);
@@ -732,7 +793,7 @@ export function useKdkmpStore() {
       setProjects((current) => current.map((entry) => (entry.id === projectId ? normalizedProject : entry)));
       setGeneratedNotas((current) => current.filter((doc) => doc.projectId !== projectId || doc.source === "custom"));
       setKwitansiEdits((current) => current.filter((edit) => !generatedNotas.some((doc) => doc.projectId === projectId && doc.id === edit.noteId && doc.source !== "custom")));
-      toast.success("Resume project diimport ulang dari PDF terbaru.");
+      toast.success("Resume project diimport ulang dari master Excel terbaru.");
       return nextProject;
     }
 

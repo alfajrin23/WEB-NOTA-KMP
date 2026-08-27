@@ -5,6 +5,7 @@ const CORE_NOTA_STAGES = new Set<StageCode>([
   "TAHAP_II",
   "TAHAP_III",
   "TAHAP_IV",
+  "TAHAP_V",
 ]);
 
 const SPECIAL_VENDOR_IDS = new Set([
@@ -72,7 +73,7 @@ export function isSpecialPaperNota(doc: NotaOutputOrderCandidate) {
 }
 
 /**
- * Stable-partition only nota positions inside each Tahap I-IV bucket.
+ * Stable-partition only nota positions inside each Tahap I-V bucket.
  * Kwitansi and non-core-stage entries keep their exact array positions, while
  * both regular and special nota preserve their original relative order.
  */

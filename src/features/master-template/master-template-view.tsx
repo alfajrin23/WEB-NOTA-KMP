@@ -13,12 +13,19 @@ import { STAGES } from "@/constants/stages";
 import { TEMPLATE_DEFINITIONS, findTemplateDefinition } from "@/constants/template-mapping";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
 import { formatRupiah } from "@/utils/format";
-import { StageCode } from "@/types/domain";
+import { ResumeItem, StageCode } from "@/types/domain";
 
 const stages: { code: StageCode | "all"; label: string }[] = [
   { code: "all", label: "Semua" },
   ...STAGES.map((stage) => ({ code: stage.code, label: stage.label })),
 ];
+
+function categoryDisplayName(item: Pick<ResumeItem, "category" | "categoryCode" | "categoryName">) {
+  const code = item.categoryCode?.trim() ?? "";
+  const name = (item.categoryName ?? item.category ?? "Tanpa kategori").trim();
+  if (!code || name.toUpperCase().startsWith(`${code.toUpperCase()} `) || name.toUpperCase().startsWith(`${code.toUpperCase()}.`)) return name;
+  return `${code} ${name}`;
+}
 
 export function MasterTemplateView() {
   const { masterItems, vendors, templateAssignments, updateMasterItem, updateTemplateAssignment } = useKdkmpStore();
@@ -27,7 +34,7 @@ export function MasterTemplateView() {
 
   const rows = useMemo(() => masterItems
     .filter((item) => stage === "all" || item.stageCode === stage)
-    .filter((item) => `${item.itemName} ${item.category}`.toLowerCase().includes(query.toLowerCase()))
+    .filter((item) => `${item.itemName} ${categoryDisplayName(item)}`.toLowerCase().includes(query.toLowerCase()))
     .sort((a, b) => a.sortOrder - b.sortOrder), [masterItems, query, stage]);
 
   const mappingRows = useMemo(() => {
@@ -148,7 +155,7 @@ export function MasterTemplateView() {
               </div>
               <div>
                 <CardTitle>Template Resume Utama</CardTitle>
-                <CardDescription>Tahap 1, 2, 3, 4, dan Resume All dapat diubah.</CardDescription>
+              <CardDescription>Master resume memakai rincian Excel dan mencakup Tahap 1 sampai Tahap 7.</CardDescription>
               </div>
             </div>
           </CardHeader>
@@ -183,7 +190,7 @@ export function MasterTemplateView() {
                   {rows.map((item) => (
                     <tr key={item.id}>
                       <td className="px-3 py-2 text-xs text-slate-500">{item.stageName}</td>
-                      <td className="px-3 py-2"><Input value={item.category} onChange={(event) => updateMasterItem(item.id, { category: event.target.value })} /></td>
+                      <td className="px-3 py-2"><Input value={categoryDisplayName(item)} onChange={(event) => updateMasterItem(item.id, { category: event.target.value })} /></td>
                       <td className="px-3 py-2"><Input value={item.itemName} onChange={(event) => updateMasterItem(item.id, { itemName: event.target.value })} /></td>
                       <td className="px-3 py-2"><Input className="w-24 text-right" type="number" value={item.volume} onChange={(event) => updateMasterItem(item.id, { volume: Number(event.target.value) })} /></td>
                       <td className="px-3 py-2"><Input className="w-24" value={item.unit} onChange={(event) => updateMasterItem(item.id, { unit: event.target.value })} /></td>

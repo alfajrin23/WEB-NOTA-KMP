@@ -1,4 +1,5 @@
 import { GeneratedNota, Project, ResumeItem, StageCode } from "@/types/domain";
+import { isOutsideCoreStage } from "@/constants/stages";
 import { formatDateIndonesia, formatProjectKdkmpWilayah, parseDateInputToIso, terbilangRupiah } from "@/utils/format";
 import { getResumeItemAmount } from "./resume-calculations";
 
@@ -67,7 +68,10 @@ function stageRoman(stageCode: StageCode) {
   if (stageCode === "TAHAP_II") return "II";
   if (stageCode === "TAHAP_III") return "III";
   if (stageCode === "TAHAP_IV") return "IV";
-  return "IV";
+  if (stageCode === "TAHAP_V") return "V";
+  if (stageCode === "TAHAP_VI") return "VI";
+  if (stageCode === "TAHAP_VII") return "VII";
+  return "VI";
 }
 
 export function getKwitansiStageText(stageCode: StageCode) {
@@ -102,7 +106,7 @@ function isLemburDoc(doc: GeneratedNota) {
 }
 
 function isOutsideCoreWork(doc: GeneratedNota) {
-  return doc.stageCode === "RESUME_ALL" || doc.kwitansiGroupCode === "LUAR_INTI" || doc.items.some((item) => item.stageCode === "RESUME_ALL");
+  return isOutsideCoreStage(doc.stageCode) || doc.kwitansiGroupCode === "LUAR_INTI" || doc.items.some((item) => isOutsideCoreStage(item.stageCode));
 }
 
 function isPpmServiceDoc(doc: GeneratedNota) {
@@ -137,9 +141,12 @@ function outsideCoreWorkName(doc: GeneratedNota, fallbackRole: string) {
       : "Proses Pengukuran Lahan";
   }
   if (text.includes("pematangan lahan")) return "Pematangan Lahan";
+  if (text.includes("penyiapan lahan")) return "Penyiapan Lahan";
   if (text.includes("pembersihan lahan")) return "Pembersihan Lahan";
   if (/\bcut\s+(?:n|and)?\s*fill\b/.test(text)) return "Cut n Fill";
   if (text.includes("sumur bor")) return "Sumur Bor";
+  if (text.includes("trafo") || text.includes("tiang listrik")) return "Pemasangan Trafo dan Tiang Listrik";
+  if (text.includes("operasional")) return "Dukungan Operasional Gerai";
 
   return raw;
 }

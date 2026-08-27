@@ -291,7 +291,7 @@ export function DocumentPreviewModal({
     }
 
     if (hasSpecialPlnNota) {
-      toast.info("Dialog cetak dibuka. Pilih Save as PDF agar halaman Kwitansi Pembayaran PLN tetap tergabung dua slip dalam satu A4.");
+      toast.info("Dialog cetak dibuka. Pilih Save as PDF agar halaman Nota PLN tetap tergabung dua slip dalam satu A4.");
       window.print();
       return;
     }

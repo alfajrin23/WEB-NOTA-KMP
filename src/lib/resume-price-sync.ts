@@ -1,6 +1,6 @@
 import { ResumeItem, StageCode } from "@/types/domain";
 
-const PRICE_SYNC_STAGE_CODES = new Set<StageCode>(["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV"]);
+const PRICE_SYNC_STAGE_CODES = new Set<StageCode>(["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "TAHAP_V"]);
 
 function normalizeKey(value: string | undefined | null) {
   return (value ?? "").trim().replace(/\s+/g, " ").toLowerCase();

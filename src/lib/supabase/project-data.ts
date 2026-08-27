@@ -2,8 +2,9 @@
 
 import { SupabaseClient } from "@supabase/supabase-js";
 import { ALL_TEMPLATE_ASSIGNMENTS, findTemplateDefinition, resolveTemplateAssignment } from "@/constants/template-mapping";
-import { getStageLabel } from "@/constants/stages";
+import { getStageLabel, normalizeLegacyStageCode } from "@/constants/stages";
 import { initialProjects, masterTemplateItems, vendors } from "@/constants/seed-data";
+import { EXCEL_BASE_ROWS } from "@/constants/excel-base-data";
 import { generateKwitansiDocuments, generateNotaDocuments } from "@/lib/nota-generator";
 import { getAutofillKwitansiReceiver } from "@/lib/kwitansi-rules";
 import type { KwitansiSyncKey } from "@/lib/kwitansi-rules";
@@ -32,10 +33,21 @@ import {
   terbilangRupiah,
 } from "@/utils/format";
 
-const CACHE_KEY = "kdkmp.supabase.bundle.v1";
+const CACHE_KEY = "kdkmp.supabase.bundle.v2-excel";
 const TEMPLATE_ID = "master-template-kdkmp-v1";
-const RESUME_ITEMS_PAGE_SIZE = 500;
+// Supabase returns at most 1,000 rows by default. Matching that page size and
+// fetching pages concurrently avoids dozens of sequential round trips for the
+// 84-project resume bundle.
+const RESUME_ITEMS_PAGE_SIZE = 1000;
+const RESUME_ITEMS_PAGE_CONCURRENCY = 6;
 const MAX_LOCAL_CACHE_CHARS = 4_000_000;
+
+const PROJECT_SELECT = "id,nama_desa,jenis_wilayah,kecamatan,kabupaten,nama_project,wilayah,kodim,tanggal_laporan,project_date,metadata_json,status,created_at,updated_at";
+const RESUME_ITEM_SELECT = "id,project_id,tahap,stage_id,stage_name,category_code,category_name,item_no,kategori,tanggal,uraian,qty,satuan,harga_satuan,jumlah,jumlah_override,is_jumlah_manual,vendor,vendor_id,source_file,source_page,source_row,is_manual_added,is_included_in_resume_total,is_generated_to_note,note_id,category_total,stage_total,source_type,validation_status,notes,urutan,created_at,updated_at";
+const GENERATED_NOTE_SELECT = "id,project_id,tahap,vendor,vendor_id,template_id,document_type,source_resume_item_ids,data_json,total,status,auto_key,created_at,updated_at";
+const KWITANSI_EDIT_SELECT = "id,project_id,note_id,nama_penerima,warna_template,custom_data_json,created_at,updated_at";
+const CUSTOM_NOTE_SELECT = "id,project_id,tahap,vendor,vendor_id,template_id,document_type,data_json,total,alasan,created_at,updated_at";
+const HISTORY_SELECT = "id,project_id,action,description,created_at";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -267,11 +279,13 @@ function identityOnlyKwitansiEdit(edit: KwitansiEditRow): KwitansiEditRow {
   return { ...edit, custom_data_json: identityData };
 }
 
-function asStageCode(value: string | undefined | null): StageCode {
-  if (value === "TAHAP_I" || value === "TAHAP_II" || value === "TAHAP_III" || value === "TAHAP_IV" || value === "RESUME_ALL") {
+function asStageCode(value: string | undefined | null, itemName = "", category = ""): StageCode {
+  if (value === "TAHAP_I" || value === "TAHAP_II" || value === "TAHAP_III" || value === "TAHAP_IV" || value === "TAHAP_V" || value === "TAHAP_VI" || value === "TAHAP_VII") {
     return value;
   }
-  if (value === "LUAR_INTI" || value === "DI_LUAR_PEKERJAAN_INTI") return "RESUME_ALL";
+  if (value === "RESUME_ALL" || value === "LUAR_INTI" || value === "DI_LUAR_PEKERJAAN_INTI") {
+    return normalizeLegacyStageCode("RESUME_ALL", itemName, category);
+  }
   return "TAHAP_I";
 }
 
@@ -286,6 +300,9 @@ function kwitansiGroupForStage(stageCode: StageCode): NonNullable<GeneratedNota[
   if (stageCode === "TAHAP_II") return "TAHAP_2";
   if (stageCode === "TAHAP_III") return "TAHAP_3";
   if (stageCode === "TAHAP_IV") return "TAHAP_4";
+  if (stageCode === "TAHAP_V") return "TAHAP_5";
+  if (stageCode === "TAHAP_VI") return "TAHAP_6";
+  if (stageCode === "TAHAP_VII") return "TAHAP_7";
   return "LUAR_INTI";
 }
 
@@ -295,10 +312,38 @@ function vendorById(vendorId: string | undefined | null) {
 
 function vendorIdByName(name: string | undefined | null) {
   const normalized = (name ?? "").trim().toLowerCase();
+  if (normalized === "-" || normalized === "nota kosong" || normalized === "internal / non vendor") return "vendor-internal";
   return vendors.find((vendor) => {
     const names = [vendor.name, ...(vendor.aliases ?? [])].map((entry) => entry.toLowerCase());
     return names.includes(normalized);
   })?.id;
+}
+
+function normalizeStoredStageCode(stageCode: StageCode, categoryCode: string | null | undefined, itemName: string) {
+  const name = itemName.trim().toLowerCase();
+  if (stageCode === "TAHAP_IV" && (categoryCode === "B" || categoryCode === "C" || name.includes("sumuran grounding") || name.includes("tukang listrik"))) {
+    return "TAHAP_V" as const;
+  }
+  return stageCode;
+}
+
+function isPartisiKwitansiItem(stageCode: StageCode, categoryCode: string | null | undefined, itemName: string) {
+  const name = itemName.trim().toLowerCase();
+  return stageCode === "TAHAP_III" && (
+    categoryCode === "D" ||
+    name.includes("pintu besi") ||
+    name.includes("dinding partisi kaca") ||
+    name.includes("pintu kaca frameless")
+  );
+}
+
+function inferredStoredVendorName(stageCode: StageCode, categoryCode: string | null | undefined, itemName: string, vendorName: string) {
+  const raw = vendorName.trim();
+  if (raw === "-" || raw.toLowerCase() === "nota kosong") return "NOTA KOSONG";
+  if (raw) return raw;
+  if (isPartisiKwitansiItem(stageCode, categoryCode, itemName)) return "KWITANSI";
+  if (stageCode === "TAHAP_I" && categoryCode === "A") return itemName.toLowerCase().includes("sirtu") ? "AMANAH" : "MURAH MAJU";
+  return raw;
 }
 
 function projectMeta(project: Project): ProjectMeta {
@@ -319,13 +364,18 @@ function projectMeta(project: Project): ProjectMeta {
 }
 
 function rowToResumeItem(row: ResumeItemRow): ResumeItem {
-  const stageCode = asStageCode(row.tahap);
-  const vendorId = row.vendor_id ?? vendorIdByName(row.vendor) ?? "";
+  const excelSource = row.source_file === "G.xlsx" && row.source_row
+    ? EXCEL_BASE_ROWS.find((entry) => entry.excelRow === row.source_row)
+    : undefined;
+  const rawStageCode = asStageCode(row.tahap, row.uraian, row.kategori);
+  const stageCode = normalizeStoredStageCode(rawStageCode, row.category_code, row.uraian);
+  const vendorName = inferredStoredVendorName(stageCode, row.category_code, row.uraian, row.vendor || excelSource?.vendorName || "");
+  const vendorId = row.vendor_id || vendorIdByName(vendorName) || "";
 
   return {
     id: row.id,
     stageCode,
-    stageName: row.stage_name ?? getStageLabel(stageCode),
+    stageName: getStageLabel(stageCode),
     category: row.kategori || row.category_name || "",
     categoryCode: row.category_code ?? undefined,
     categoryName: row.category_name ?? row.kategori,
@@ -337,13 +387,14 @@ function rowToResumeItem(row: ResumeItemRow): ResumeItem {
     unitPrice: toNumber(row.harga_satuan),
     amountOverride: row.is_jumlah_manual ? toNumber(row.jumlah_override ?? row.jumlah) : null,
     vendorId,
-    vendorName: row.vendor ?? "",
+    vendorName,
     notes: row.notes ?? "",
     sortOrder: row.urutan,
     sourceFile: row.source_file,
     sourcePage: row.source_page,
     sourceRow: row.source_row,
     sourceType: row.source_type ?? "seed",
+    kwitansiCount: excelSource?.kwitansiCount ?? (isPartisiKwitansiItem(stageCode, row.category_code, row.uraian) ? 5 : undefined),
     isManualAdded: row.is_manual_added ?? false,
     isIncludedInResumeTotal: row.is_included_in_resume_total ?? true,
     isGeneratedToNote: row.is_generated_to_note ?? false,
@@ -479,14 +530,14 @@ function summarizeProject(project: Project): ResumeSummaryTotals {
     totalTahap2: byStage.get("TAHAP_II") ?? 0,
     totalTahap3: byStage.get("TAHAP_III") ?? 0,
     totalTahap4: byStage.get("TAHAP_IV") ?? 0,
-    totalDiluarKonstruksi: byStage.get("RESUME_ALL") ?? 0,
+    totalDiluarKonstruksi: (byStage.get("TAHAP_VI") ?? 0) + (byStage.get("TAHAP_VII") ?? 0) + (byStage.get("RESUME_ALL") ?? 0),
     totalKeseluruhan: summary.grandTotal,
     terbilang: terbilangRupiah(summary.grandTotal),
   };
 }
 
 function stageSortOrder(stageCode: StageCode) {
-  const order: StageCode[] = ["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "RESUME_ALL"];
+  const order: StageCode[] = ["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "TAHAP_V", "TAHAP_VI", "TAHAP_VII", "RESUME_ALL"];
   const index = order.indexOf(stageCode);
   return index === -1 ? 99 : index + 1;
 }
@@ -618,7 +669,7 @@ function rowsToGeneratedNotas(rows: GeneratedNoteRow[], editRows: KwitansiEditRo
     .map((row) => {
       const parsed = parseGeneratedNota(row.data_json);
       if (!parsed) return null;
-      const stageCode = asStageCode(row.tahap);
+      const stageCode = asStageCode(row.tahap, parsed.items.map((item) => item.itemName).join(" "), parsed.stageName);
       const doc: GeneratedNota = {
         ...parsed,
         id: row.id,
@@ -644,7 +695,7 @@ function rowToCustomNote(row: CustomNoteRow): CustomNote | null {
   const parsed = parseGeneratedNota(row.data_json);
   if (!parsed) return null;
   const vendor = vendorById(row.vendor_id) ?? vendors.find((entry) => entry.name === row.vendor) ?? vendors[0];
-  const stageCode = asStageCode(row.tahap);
+  const stageCode = asStageCode(row.tahap, parsed.items.map((item) => item.itemName).join(" "), parsed.stageName);
   const doc: GeneratedNota = {
     ...parsed,
     id: row.id,
@@ -800,41 +851,56 @@ async function logHistory(client: SupabaseClient, projectId: string, action: str
 async function fetchAllResumeItemRows(client: SupabaseClient, projectIds: string[]) {
   const allRows: ResumeItemRow[] = [];
   let page = 0;
-  let hasMore = true;
 
-  while (hasMore) {
-    const from = page * RESUME_ITEMS_PAGE_SIZE;
+  const fetchPage = async (pageIndex: number) => {
+    const from = pageIndex * RESUME_ITEMS_PAGE_SIZE;
     const { data, error } = await client
       .from("resume_items")
-      .select("*")
+      .select(RESUME_ITEM_SELECT)
       .in("project_id", projectIds)
       .order("project_id", { ascending: true })
       .order("urutan", { ascending: true })
       .order("id", { ascending: true })
       .range(from, from + RESUME_ITEMS_PAGE_SIZE - 1);
+    return { rows: (data ?? []) as ResumeItemRow[], error };
+  };
 
-    if (error) return { data: allRows, error };
+  const firstPage = await fetchPage(0);
+  if (firstPage.error) return { data: allRows, error: firstPage.error };
+  allRows.push(...firstPage.rows);
+  if (firstPage.rows.length < RESUME_ITEMS_PAGE_SIZE) return { data: allRows, error: null };
 
-    const rows = (data ?? []) as ResumeItemRow[];
-    allRows.push(...rows);
-    hasMore = rows.length === RESUME_ITEMS_PAGE_SIZE;
-    page += 1;
+  page = 1;
+  while (true) {
+    // The pages are independent ranges, so a small batch of parallel requests
+    // is substantially faster than waiting for every page one after another.
+    const pageIndexes = Array.from({ length: RESUME_ITEMS_PAGE_CONCURRENCY }, (_, index) => page + index);
+    const results = await Promise.all(pageIndexes.map(fetchPage));
+    const failed = results.find((result) => result.error);
+    if (failed?.error) return { data: allRows, error: failed.error };
+
+    for (const result of results) allRows.push(...result.rows);
+    const lastPageIsShort = results.some((result) => result.rows.length < RESUME_ITEMS_PAGE_SIZE);
+    page += RESUME_ITEMS_PAGE_CONCURRENCY;
+    if (lastPageIsShort) break;
   }
 
   return { data: allRows, error: null };
 }
 
-export async function fetchProjectBundle(): Promise<ProjectBundle> {
+const inFlightProjectBundles = new Map<string, Promise<ProjectBundle>>();
+
+async function fetchProjectBundleUncached(projectId?: string): Promise<ProjectBundle> {
   const client = supabase();
   if (!client) {
     const cached = readCachedProjectBundle();
     return { ...cached, source: cached.source === "seed" ? "seed" : "cache" };
   }
 
-  const { data: projectRows, error: projectError } = await client
-    .from("projects")
-    .select("*")
-    .order("updated_at", { ascending: false });
+  const projectQuery = client.from("projects").select(PROJECT_SELECT);
+  const { data: projectRows, error: projectError } = await (projectId
+    ? projectQuery.eq("id", projectId).order("updated_at", { ascending: false })
+    : projectQuery.order("updated_at", { ascending: false }));
 
   if (projectError) throwDatabaseError(projectError, "Gagal menyimpan project.");
 
@@ -848,10 +914,10 @@ export async function fetchProjectBundle(): Promise<ProjectBundle> {
   const projectIds = projectsData.map((project) => project.id);
   const [itemsResult, notesResult, editsResult, customResult, historyResult] = await Promise.all([
     fetchAllResumeItemRows(client, projectIds),
-    client.from("generated_notes").select("*").in("project_id", projectIds).order("created_at", { ascending: false }),
-    client.from("kwitansi_edits").select("*").in("project_id", projectIds),
-    client.from("custom_notes").select("*").in("project_id", projectIds).order("created_at", { ascending: false }),
-    client.from("note_history").select("*").in("project_id", projectIds).order("created_at", { ascending: false }).limit(500),
+    client.from("generated_notes").select(GENERATED_NOTE_SELECT).in("project_id", projectIds).order("created_at", { ascending: false }),
+    client.from("kwitansi_edits").select(KWITANSI_EDIT_SELECT).in("project_id", projectIds),
+    client.from("custom_notes").select(CUSTOM_NOTE_SELECT).in("project_id", projectIds).order("created_at", { ascending: false }),
+    client.from("note_history").select(HISTORY_SELECT).in("project_id", projectIds).order("created_at", { ascending: false }).limit(500),
   ]);
 
   if (itemsResult.error) throw itemsResult.error;
@@ -876,6 +942,19 @@ export async function fetchProjectBundle(): Promise<ProjectBundle> {
 
   writeCache(bundle);
   return bundle;
+}
+
+/** Deduplicate simultaneous page/component refreshes into one Supabase load. */
+export function fetchProjectBundle(projectId?: string): Promise<ProjectBundle> {
+  const requestKey = projectId ?? "__all__";
+  const existingRequest = inFlightProjectBundles.get(requestKey);
+  if (existingRequest) return existingRequest;
+
+  const request = fetchProjectBundleUncached(projectId).finally(() => {
+    inFlightProjectBundles.delete(requestKey);
+  });
+  inFlightProjectBundles.set(requestKey, request);
+  return request;
 }
 
 export async function createSupabaseProject(

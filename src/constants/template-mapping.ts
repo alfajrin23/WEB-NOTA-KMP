@@ -8,7 +8,10 @@ export const STAGE_TEMPLATE_FOLDERS: Partial<Record<StageCode, string>> = {
   TAHAP_II: "TAHAP 2",
   TAHAP_III: "TAHAP 3",
   TAHAP_IV: "TAHAP 4",
-  RESUME_ALL: "TAHAP 4",
+  TAHAP_V: "TAHAP 5",
+  TAHAP_VI: "TAHAP 6",
+  TAHAP_VII: "TAHAP 7",
+  RESUME_ALL: "TAHAP 6",
 };
 
 export const TEMPLATE_DEFINITIONS: TemplateDefinition[] = [
@@ -45,6 +48,30 @@ export const TEMPLATE_DEFINITIONS: TemplateDefinition[] = [
     aliases: ["KWITANSI TAHAP 4"],
   },
   {
+    id: "kwitansi-tahap-5",
+    label: "KWITANSI TAHAP 5",
+    documentType: "kwitansi",
+    stageCodes: ["TAHAP_V"],
+    vendorIds: ["vendor-kwitansi", "vendor-ppm"],
+    aliases: ["KWITANSI TAHAP 5"],
+  },
+  {
+    id: "kwitansi-tahap-6",
+    label: "KWITANSI TAHAP 6",
+    documentType: "kwitansi",
+    stageCodes: ["TAHAP_VI"],
+    vendorIds: ["vendor-kwitansi", "vendor-ppm"],
+    aliases: ["KWITANSI TAHAP 6"],
+  },
+  {
+    id: "kwitansi-tahap-7",
+    label: "KWITANSI TAHAP 7",
+    documentType: "kwitansi",
+    stageCodes: ["TAHAP_VII"],
+    vendorIds: ["vendor-kwitansi", "vendor-ppm"],
+    aliases: ["KWITANSI TAHAP 7"],
+  },
+  {
     id: "kwitansi-luar-inti",
     label: "KWITANSI DI LUAR PEKERJAAN INTI",
     documentType: "kwitansi",
@@ -74,7 +101,7 @@ export const TEMPLATE_DEFINITIONS: TemplateDefinition[] = [
     id: "template-murah-maju",
     label: "Template Murah Maju",
     documentType: "nota",
-    stageCodes: ["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV"],
+    stageCodes: ["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "TAHAP_V", "TAHAP_VI", "TAHAP_VII"],
     vendorIds: ["vendor-murah-maju"],
     canonicalFileName: "Template Murah Maju.xlsx",
     aliases: ["Template Murah Maju.xlsx"],
@@ -83,7 +110,7 @@ export const TEMPLATE_DEFINITIONS: TemplateDefinition[] = [
     id: "template-nota-kosong",
     label: "Template Nota Kosong",
     documentType: "nota",
-    stageCodes: ["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV"],
+    stageCodes: ["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "TAHAP_V", "TAHAP_VI", "TAHAP_VII"],
     canonicalFileName: "Template Nota Kosong.xlsx",
     aliases: ["Template Nota Kosong.xlsx"],
     fallback: true,
@@ -92,7 +119,7 @@ export const TEMPLATE_DEFINITIONS: TemplateDefinition[] = [
     id: "template-nota-internal-non-vendor",
     label: "Nota Kosong Internal / Non Vendor",
     documentType: "nota",
-    stageCodes: ["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "RESUME_ALL"],
+    stageCodes: ["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "TAHAP_V", "TAHAP_VI", "TAHAP_VII", "RESUME_ALL"],
     vendorIds: ["vendor-internal"],
     canonicalFileName: "Template Nota Kosong.xlsx",
     aliases: ["Template Nota Kosong.xlsx", "Nota Kosong Internal / Non Vendor"],
@@ -135,11 +162,11 @@ export const TEMPLATE_DEFINITIONS: TemplateDefinition[] = [
   },
   {
     id: "template-pln",
-    label: "Kwitansi Pembayaran PLN",
+    label: "Nota PLN",
     // PLN tetap dicetak sebagai kwitansi pembayaran khusus, tetapi secara alur
     // dokumen ini merupakan keluaran Generate Nota Tahap IV.
     documentType: "nota",
-    stageCodes: ["TAHAP_IV", "RESUME_ALL"],
+    stageCodes: ["TAHAP_V", "TAHAP_VI", "TAHAP_VII", "RESUME_ALL"],
     vendorIds: ["vendor-pln"],
     canonicalFileName: "Template PLN.xlsx",
     aliases: ["Tamplate PLN.xlsx", "Template PLN.xlsx"],
@@ -148,7 +175,7 @@ export const TEMPLATE_DEFINITIONS: TemplateDefinition[] = [
     id: "template-jasa-electric",
     label: "Template Jasa Electric",
     documentType: "nota",
-    stageCodes: ["TAHAP_IV"],
+    stageCodes: ["TAHAP_V"],
     vendorIds: ["vendor-jasa-elektrik"],
     canonicalFileName: "Template Jasa Electric.xlsx",
     aliases: ["Template Jasa Electric.xlsx"],
@@ -181,18 +208,27 @@ export const DEFAULT_TEMPLATE_ASSIGNMENTS: TemplateAssignment[] = [
   assignment("TAHAP_II", "vendor-kwitansi", "kwitansi-tahap-2", undefined, ["KWITANSI TAHAP 2"]),
   assignment("TAHAP_III", "vendor-kwitansi", "kwitansi-tahap-3", undefined, ["KWITANSI TAHAP 3"]),
   assignment("TAHAP_IV", "vendor-kwitansi", "kwitansi-tahap-4", undefined, ["KWITANSI TAHAP 4"]),
+  assignment("TAHAP_V", "vendor-kwitansi", "kwitansi-tahap-5", undefined, ["KWITANSI TAHAP 5"]),
+  assignment("TAHAP_VI", "vendor-kwitansi", "kwitansi-tahap-6", undefined, ["KWITANSI TAHAP 6"]),
+  assignment("TAHAP_VII", "vendor-kwitansi", "kwitansi-tahap-7", undefined, ["KWITANSI TAHAP 7"]),
   assignment("RESUME_ALL", "vendor-kwitansi", "kwitansi-luar-inti", undefined, ["KWITANSI DI LUAR PEKERJAAN INTI", "KWITANSI DILUAR PEKERJAAN INTI"]),
 
   assignment("TAHAP_I", "vendor-internal", "template-nota-internal-non-vendor", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx", "Nota Kosong Internal / Non Vendor"]),
   assignment("TAHAP_II", "vendor-internal", "template-nota-internal-non-vendor", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx", "Nota Kosong Internal / Non Vendor"]),
   assignment("TAHAP_III", "vendor-internal", "template-nota-internal-non-vendor", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx", "Nota Kosong Internal / Non Vendor"]),
   assignment("TAHAP_IV", "vendor-internal", "template-nota-internal-non-vendor", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx", "Nota Kosong Internal / Non Vendor"]),
+  assignment("TAHAP_V", "vendor-internal", "template-nota-internal-non-vendor", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx", "Nota Kosong Internal / Non Vendor"]),
+  assignment("TAHAP_VI", "vendor-internal", "template-nota-internal-non-vendor", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx", "Nota Kosong Internal / Non Vendor"]),
+  assignment("TAHAP_VII", "vendor-internal", "template-nota-internal-non-vendor", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx", "Nota Kosong Internal / Non Vendor"]),
   assignment("RESUME_ALL", "vendor-internal", "template-nota-internal-non-vendor", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx", "Nota Kosong Internal / Non Vendor"]),
 
   assignment("TAHAP_I", "vendor-ppm", "kwitansi-tahap-1", undefined, ["KWITANSI TAHAP 1"]),
   assignment("TAHAP_II", "vendor-ppm", "kwitansi-tahap-2", undefined, ["KWITANSI TAHAP 2"]),
   assignment("TAHAP_III", "vendor-ppm", "kwitansi-tahap-3", undefined, ["KWITANSI TAHAP 3"]),
   assignment("TAHAP_IV", "vendor-ppm", "kwitansi-tahap-4", undefined, ["KWITANSI TAHAP 4"]),
+  assignment("TAHAP_V", "vendor-ppm", "kwitansi-tahap-5", undefined, ["KWITANSI TAHAP 5"]),
+  assignment("TAHAP_VI", "vendor-ppm", "kwitansi-tahap-6", undefined, ["KWITANSI TAHAP 6"]),
+  assignment("TAHAP_VII", "vendor-ppm", "kwitansi-tahap-7", undefined, ["KWITANSI TAHAP 7"]),
 
   assignment("TAHAP_I", "vendor-amanah", "template-amanah", "Template Amanah.xlsx", ["Template Amanah.xlsx"]),
   assignment("TAHAP_II", "vendor-amanah", "template-amanah", "Template Amanah 2.xlsx", ["Template Amanah 2.xlsx", "Template Amanah.xlsx"]),
@@ -206,6 +242,7 @@ export const DEFAULT_TEMPLATE_ASSIGNMENTS: TemplateAssignment[] = [
   assignment("TAHAP_II", "vendor-murah-maju", "template-murah-maju", "Template Murah Maju.xlsx", ["Template Murah Maju.xlsx"]),
   assignment("TAHAP_III", "vendor-murah-maju", "template-murah-maju", "Template Murah Maju.xlsx", ["Template Murah Maju.xlsx"]),
   assignment("TAHAP_IV", "vendor-murah-maju", "template-murah-maju", "Template Murah Maju.xlsx", ["Template Murah Maju.xlsx"]),
+  assignment("TAHAP_V", "vendor-murah-maju", "template-murah-maju", "Template Murah Maju.xlsx", ["Template Murah Maju.xlsx"]),
 
   assignment("TAHAP_I", "vendor-mandau", "template-tb-mandau", "Template TB Mandau.xlsx", ["Template TB Mandau.xlsx"]),
   assignment("TAHAP_II", "vendor-mandau", "template-tb-mandau", "Template TB Mandau.xlsx", ["Template TB Mandau.xlsx"]),
@@ -220,9 +257,11 @@ export const DEFAULT_TEMPLATE_ASSIGNMENTS: TemplateAssignment[] = [
   assignment("TAHAP_III", "vendor-cahaya-timur", "template-cahaya-timur-keramik", "CAHAYA TIMUR KERAMIK.xlsx", ["CAHAYA TIMUR KERAMIK.xlsx"]),
   assignment("TAHAP_IV", "vendor-cahaya-timur", "template-cahaya-timur-keramik", "CAHAYA TIMUR KERAMIK.xlsx", ["CAHAYA TIMUR KERAMIK.xlsx"]),
 
-  assignment("TAHAP_IV", "vendor-pln", "template-pln", "Tamplate PLN.xlsx", ["Tamplate PLN.xlsx", "Template PLN.xlsx"]),
+  assignment("TAHAP_V", "vendor-pln", "template-pln", "Tamplate PLN.xlsx", ["Tamplate PLN.xlsx", "Template PLN.xlsx"]),
+  assignment("TAHAP_VI", "vendor-pln", "template-pln", "Tamplate PLN.xlsx", ["Tamplate PLN.xlsx", "Template PLN.xlsx"]),
+  assignment("TAHAP_VII", "vendor-pln", "template-pln", "Tamplate PLN.xlsx", ["Tamplate PLN.xlsx", "Template PLN.xlsx"]),
   assignment("RESUME_ALL", "vendor-pln", "template-pln", "Tamplate PLN.xlsx", ["Tamplate PLN.xlsx", "Template PLN.xlsx"]),
-  assignment("TAHAP_IV", "vendor-jasa-elektrik", "template-jasa-electric", "Template Jasa Electric.xlsx", ["Template Jasa Electric.xlsx"]),
+  assignment("TAHAP_V", "vendor-jasa-elektrik", "template-jasa-electric", "Template Jasa Electric.xlsx", ["Template Jasa Electric.xlsx"]),
 ];
 
 export const DEFAULT_FALLBACK_TEMPLATE_ASSIGNMENTS: TemplateAssignment[] = [
@@ -230,6 +269,9 @@ export const DEFAULT_FALLBACK_TEMPLATE_ASSIGNMENTS: TemplateAssignment[] = [
   assignment("TAHAP_II", "__fallback__", "template-nota-kosong", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx"], true),
   assignment("TAHAP_III", "__fallback__", "template-nota-kosong", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx"], true),
   assignment("TAHAP_IV", "__fallback__", "template-nota-kosong", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx"], true),
+  assignment("TAHAP_V", "__fallback__", "template-nota-kosong", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx"], true),
+  assignment("TAHAP_VI", "__fallback__", "template-nota-kosong", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx"], true),
+  assignment("TAHAP_VII", "__fallback__", "template-nota-kosong", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx"], true),
   assignment("RESUME_ALL", "__fallback__", "template-nota-kosong", "Template Nota Kosong.xlsx", ["Template Nota Kosong.xlsx"], true),
 ];
 

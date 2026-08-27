@@ -24,8 +24,8 @@ type StageFilter = StageCode | "all";
 
 function docSortRank(doc: { stageCode: StageCode; vendorId: string }) {
   const stageIndex = STAGES.findIndex((stage) => stage.code === doc.stageCode);
-  if (doc.vendorId === "vendor-pln" && doc.stageCode === "TAHAP_IV") return 390;
-  if (doc.vendorId === "vendor-pln" && doc.stageCode === "RESUME_ALL") return 391;
+  if (doc.vendorId === "vendor-pln" && doc.stageCode === "TAHAP_V") return 490;
+  if (doc.vendorId === "vendor-pln" && doc.stageCode === "TAHAP_VI") return 590;
   return (stageIndex === -1 ? 99 : stageIndex) * 100;
 }
 
