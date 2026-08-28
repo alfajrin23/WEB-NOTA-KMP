@@ -201,7 +201,7 @@ export function ResumeEditor() {
   const reimportResume = useCallback(async () => {
     if (!project) return;
     const confirmed = window.confirm(
-      `Data resume project ini akan diganti dengan ${masterItems.length} baris dari G.xlsx, termasuk struktur kategori I.01 sampai VII.01. Generated nota otomatis lama akan dihapus dan perlu dibuat ulang. Lanjutkan?`,
+      `Struktur resume project ini akan diperbarui dari ${masterItems.length} baris G.xlsx. Qty, harga satuan, dan jumlah manual item yang cocok akan dipertahankan. Generated nota otomatis lama akan dihapus dan perlu dibuat ulang. Lanjutkan?`,
     );
     if (!confirmed) return;
 

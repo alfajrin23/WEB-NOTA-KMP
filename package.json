@@ -8,7 +8,9 @@
     "start": "next start",
     "lint": "eslint",
     "test:nota-order": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/nota-output-order.test.mjs",
-    "test:kwitansi-sync": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/kwitansi-sync.test.mjs"
+    "test:kwitansi-sync": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/kwitansi-sync.test.mjs",
+    "test:print-layout": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/print-layout.test.mjs",
+    "test:acceptance": "npm run test:nota-order && npm run test:kwitansi-sync && npm run test:print-layout"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",

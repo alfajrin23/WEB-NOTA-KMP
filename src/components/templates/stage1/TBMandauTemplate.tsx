@@ -83,7 +83,7 @@ function TBMandauSlot({ group, project }: { group: NotaGroup | null; project: St
 export function TBMandauTemplate(props: Stage1TemplateProps) {
   const groups = groupNotaItems(props.doc.items);
   return (
-    <LandscapeNotaPages groups={groups} zoom={props.zoom} layoutKey="tbMandau" debug={props.debug}>
+    <LandscapeNotaPages groups={groups} vendorKey={props.doc.vendorId} zoom={props.zoom} layoutKey="tbMandau" debug={props.debug}>
       {(group) => <TBMandauSlot group={group} project={props.project} />}
     </LandscapeNotaPages>
   );

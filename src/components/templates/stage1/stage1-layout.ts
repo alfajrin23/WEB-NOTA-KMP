@@ -42,7 +42,7 @@ export const kwitansiTemplateLayout = {
     number: { x: "42.8mm", y: "6.6mm", width: "25mm", height: "5mm" },
     payer: { x: "67.7mm", y: "12.7mm", width: "94mm", height: "5mm" },
     amountWords: { x: "67.7mm", y: "20.1mm", width: "94mm", height: "5.5mm" },
-    payment: { x: "67.7mm", y: "27.8mm", width: "94mm", height: "13mm" },
+    payment: { x: "67.7mm", y: "27.8mm", width: "101.5mm", height: "8.3mm" },
     project: { x: "108.2mm", y: "36.1mm", width: "54mm", height: "4mm" },
     role: { x: "108.2mm", y: "41mm", width: "54mm", height: "4mm" },
     amount: { x: "47.8mm", y: "56.1mm", width: "36mm", height: "6mm" },

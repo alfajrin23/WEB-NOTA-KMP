@@ -791,8 +791,7 @@ function generateDocuments(
       if (!assignment || assignment.documentType !== "kwitansi") continue;
     }
 
-    const dateKey = item.expenseDate || "no-date";
-    const key = `${documentKind}-${item.stageCode}-${vendor.id}-${assignment.templateId}-${documentKind === "nota" ? dateKey : "all"}`;
+    const key = `${documentKind}-${item.stageCode}-${vendor.id}-${assignment.templateId}`;
     const current = grouped.get(key);
     if (current) {
       current.items.push(item);

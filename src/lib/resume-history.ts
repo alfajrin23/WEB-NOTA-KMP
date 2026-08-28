@@ -16,8 +16,12 @@ function categoryKey(item: Pick<ResumeItem, "categoryCode" | "categoryName" | "c
 }
 
 export function getResumeHistoryItemKey(
-  item: Pick<ResumeItem, "stageCode" | "vendorId" | "vendorName" | "itemName" | "unit" | "categoryCode" | "categoryName" | "category">,
+  item: Pick<ResumeItem, "stageCode" | "vendorId" | "vendorName" | "itemName" | "unit" | "categoryCode" | "categoryName" | "category" | "sourceFile" | "sourceRow">,
 ) {
+  if (normalizeKey(item.sourceFile) === "g.xlsx" && item.sourceRow != null) {
+    return `source:g.xlsx:${item.sourceRow}`;
+  }
+
   return [
     normalizeKey(item.stageCode),
     vendorKey(item),
@@ -47,8 +51,8 @@ export function applyResumeItemHistory(templateItems: ResumeItem[], historyItems
       ...item,
       volume: history.volume,
       unitPrice: history.unitPrice,
-      amountOverride: null,
-      validationStatus: "valid" as const,
+      amountOverride: history.amountOverride ?? null,
+      validationStatus: history.validationStatus ?? "valid" as const,
     };
   });
 }

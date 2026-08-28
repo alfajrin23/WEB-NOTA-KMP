@@ -5,23 +5,19 @@
 import { CSSProperties } from "react";
 import { PrintPage } from "@/components/print/print-page";
 import { Stage1DebugBox } from "@/components/templates/stage1/Stage1Debug";
+import { buildJasaElectricNotaGroups, JasaElectricNotaGroup } from "@/lib/jasa-electric-groups";
+import { paginateNotasByVendor } from "@/lib/nota-pagination";
 import { ResumeItem } from "@/types/domain";
 import {
-  chunk,
   formatDateLong,
   formatPlainNumber,
   itemAmount,
   MultiStageTemplateProps,
-  NotaGroup,
   padRows,
   projectKdkmpRecipient,
 } from "./shared";
 
 const JASA_ROWS = 14;
-type JasaNoteGroup = NotaGroup & {
-  isFinalGroupChunk: boolean;
-  total: number;
-};
 
 const jasaSlots = [
   { x: "3mm", y: "3mm", width: "100mm", height: "160mm" },
@@ -29,58 +25,26 @@ const jasaSlots = [
 ];
 const jasaTableBox = { x: "0mm", y: "32.5mm", width: "100mm", height: "87mm" };
 
-function buildJasaNoteGroups(items: ResumeItem[], maxRows: number): JasaNoteGroup[] {
-  const grouped = new Map<string, NotaGroup & { firstSortOrder: number }>();
-
-  for (const item of [...items].sort((a, b) => a.sortOrder - b.sortOrder)) {
-    const key = `${item.expenseDate}-${item.category}`;
-    const current = grouped.get(key);
-    if (current) {
-      current.items.push(item);
-    } else {
-      grouped.set(key, {
-        key,
-        date: item.expenseDate,
-        category: item.category,
-        items: [item],
-        firstSortOrder: item.sortOrder,
-      });
-    }
-  }
-
-  return [...grouped.values()]
-    .sort((a, b) => a.firstSortOrder - b.firstSortOrder)
-    .flatMap((group) => {
-      const total = group.items.reduce((sum, item) => sum + itemAmount(item), 0);
-      const chunks: JasaNoteGroup[] = [];
-      for (let index = 0; index < group.items.length; index += maxRows) {
-        chunks.push({
-          key: `${group.key}-${Math.floor(index / maxRows) + 1}`,
-          date: group.date,
-          category: group.category,
-          items: group.items.slice(index, index + maxRows),
-          isFinalGroupChunk: index + maxRows >= group.items.length,
-          total,
-        });
-      }
-      return chunks;
-    });
-}
-
 function JasaSlot({
   group,
   project,
-  totalAmount,
 }: {
-  group: JasaNoteGroup;
+  group: JasaElectricNotaGroup<ResumeItem>;
   project: MultiStageTemplateProps["project"];
-  totalAmount: number;
 }) {
   const rows = padRows(group.items, JASA_ROWS);
-  const visibleTotal = group.isFinalGroupChunk ? totalAmount : 0;
+  const isSplitTransaction = group.splitCount > 1;
+  const showGrandTotal = isSplitTransaction && group.isLastSplitNota;
 
   return (
-    <section className="multi-note jasa-slot" data-overlap-container data-overlap-label="Jasa Electric nota">
+    <section
+      className={`multi-note jasa-slot${showGrandTotal ? " jasa-slot-with-grand-total" : ""}`}
+      data-jasa-transaction={group.transactionKey}
+      data-jasa-split={group.splitNumber}
+      data-jasa-split-count={group.splitCount}
+      data-overlap-container
+      data-overlap-label="Jasa Electric nota"
+    >
       <header className="jasa-header">
         <img src="/template-assets/multi-stage/jasa-electric-header.png" alt="Jasa Electric" className="jasa-logo" />
         <div className="jasa-recipient">
@@ -122,8 +86,14 @@ function JasaSlot({
       </table>
 
       <div className="jasa-total" data-overlap-role="total">
-        <span>Jumlah RP.</span>
-        <strong>{visibleTotal ? formatPlainNumber(visibleTotal) : ""}</strong>
+        <span>{isSplitTransaction ? "Subtotal" : "Jumlah RP."}</span>
+        <strong>{group.chunkSubtotal ? formatPlainNumber(group.chunkSubtotal) : ""}</strong>
+        {showGrandTotal ? (
+          <>
+            <span className="jasa-grand-total-label">TOTAL KESELURUHAN</span>
+            <strong>{group.transactionTotal ? formatPlainNumber(group.transactionTotal) : ""}</strong>
+          </>
+        ) : null}
       </div>
 
       <footer className="jasa-footer" data-overlap-role="signature">
@@ -142,59 +112,57 @@ function JasaSlot({
 }
 
 export function JasaElectricTemplate({ doc, project, zoom, debug = false }: MultiStageTemplateProps) {
-  const groups = buildJasaNoteGroups(doc.items, JASA_ROWS);
-  const groupedNotes = groups.length > 0
+  const groups = buildJasaElectricNotaGroups(doc.items, JASA_ROWS, itemAmount);
+  const printableGroups: JasaElectricNotaGroup<ResumeItem>[] = groups.length > 0
     ? groups
-    : [{ key: "blank", date: project.projectDate, category: "", items: [], isFinalGroupChunk: true, total: 0 }];
-  const calculatedTotal = doc.items.reduce((sum, item) => sum + itemAmount(item), 0);
-  // The document total is the source used by the document card and resume.
-  // Keep the item calculation as a fallback for older/generated documents that
-  // do not have totalAmount persisted yet.
-  const overallTotal = Number(doc.totalAmount) > 0 ? doc.totalAmount : calculatedTotal;
-  // Keep each date/category as its own detail note, but print the document total
-  // once on the note with the fewest detail rows. This keeps the total visible
-  // in the less crowded (left) note for the two-note Jasa Electric layout.
-  const totalGroupIndex = groupedNotes.reduce(
-    (shortestIndex, group, index) => group.items.length < groupedNotes[shortestIndex].items.length ? index : shortestIndex,
-    0,
-  );
-  const printableGroups = groupedNotes.map((group, index) => ({
-    ...group,
-    isFinalGroupChunk: index === totalGroupIndex,
-    total: index === totalGroupIndex ? overallTotal : 0,
-  }));
-  const pages = chunk(printableGroups, 2);
+    : [{
+      key: "blank",
+      transactionKey: "intentional-blank-template",
+      date: project.projectDate,
+      category: "",
+      items: [],
+      chunkSubtotal: 0,
+      transactionTotal: 0,
+      splitNumber: 1,
+      splitCount: 1,
+      isLastSplitNota: true,
+    }];
+  const pages = paginateNotasByVendor(printableGroups, () => doc.vendorId, 2);
 
   return (
     <>
-      {pages.map((pageGroups, pageIndex) => (
-        <PrintPage key={pageIndex} zoom={zoom} orientation="landscape" className="multi-jasa-page" debug={debug}>
-          <div className="multi-absolute-sheet">
-            {pageGroups.map((group, slotIndex) => {
+      {pages.map((page, pageIndex) => (
+        <PrintPage key={`${page.vendorKey}-${pageIndex}`} zoom={zoom} orientation="landscape" className="multi-jasa-page" debug={debug}>
+          <div className="multi-absolute-sheet" data-nota-vendor={page.vendorKey} data-nota-count={page.notas.length}>
+            {page.notas.map((group, slotIndex) => {
               const slot = jasaSlots[slotIndex];
               return (
-              <div
-                key={group.key}
-                className="multi-slot-position"
-                style={{ left: slot.x, top: slot.y, width: slot.width, height: slot.height } as CSSProperties}
-              >
-                <JasaSlot group={group} project={project} totalAmount={overallTotal} />
-              </div>
+                <div
+                  key={group.key}
+                  className="multi-slot-position"
+                  style={{ left: slot.x, top: slot.y, width: slot.width, height: slot.height } as CSSProperties}
+                >
+                  <JasaSlot group={group} project={project} />
+                </div>
               );
             })}
             {debug && (
               <>
-                {jasaSlots.map((slot, slotIndex) => (
-                  <Stage1DebugBox key={`jasa-slot-${slotIndex}`} box={slot} label={`Jasa ${slot.width} x ${slot.height}`} />
-                ))}
-                {jasaSlots.map((slot, slotIndex) => (
-                  <Stage1DebugBox
-                    key={`jasa-table-${slotIndex}`}
-                    box={{ ...jasaTableBox, x: `calc(${slot.x} + ${jasaTableBox.x})`, y: `calc(${slot.y} + ${jasaTableBox.y})` }}
-                    label={`Tabel Jasa ${JASA_ROWS} baris`}
-                    tone="table"
-                  />
-                ))}
+                {page.notas.map((group, slotIndex) => {
+                  const slot = jasaSlots[slotIndex];
+                  return <Stage1DebugBox key={`jasa-slot-${group.key}`} box={slot} label={`Jasa ${slot.width} x ${slot.height}`} />;
+                })}
+                {page.notas.map((group, slotIndex) => {
+                  const slot = jasaSlots[slotIndex];
+                  return (
+                    <Stage1DebugBox
+                      key={`jasa-table-${group.key}`}
+                      box={{ ...jasaTableBox, x: `calc(${slot.x} + ${jasaTableBox.x})`, y: `calc(${slot.y} + ${jasaTableBox.y})` }}
+                      label={`Tabel Jasa ${JASA_ROWS} baris`}
+                      tone="table"
+                    />
+                  );
+                })}
               </>
             )}
           </div>

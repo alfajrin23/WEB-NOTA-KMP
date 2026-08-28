@@ -18,6 +18,7 @@ import {
   getKwitansiPaymentLines,
   getKwitansiProjectLines,
 } from "@/lib/kwitansi-fields";
+import { layoutKwitansiPurposeLines } from "@/lib/kwitansi-purpose-layout";
 import { GeneratedNota, Project } from "@/types/domain";
 import { chunk, formatPlainNumber } from "../stage1/stage1-shared";
 
@@ -68,36 +69,6 @@ function fieldStyle(box: Stage1Box): CSSProperties {
   return { left: box.x, top: box.y, width: box.width, height: box.height };
 }
 
-function visiblePurposeLines(doc: GeneratedNota, purposeLines: string[]) {
-  if (doc.stageCode !== "TAHAP_VI" && doc.stageCode !== "TAHAP_VII" && doc.stageCode !== "RESUME_ALL") return purposeLines;
-  const [first, second, ...rest] = purposeLines;
-  if (
-    first &&
-    second &&
-    /^Pembayaran\b/i.test(first) &&
-    /^(?:Pembangunan\s+)?KDKMP\s+(?:Ds|Kel)\./i.test(second)
-  ) {
-    return [`${first} ${second}`.replace(/\s+/g, " ").trim(), ...rest];
-  }
-  return purposeLines;
-}
-
-function wrapPurposeLines(lines: string[]) {
-  const wrapped: string[] = [];
-  for (const line of lines) {
-    const dateIndex = line.search(/\s+Tanggal\s+/i);
-    // Baris honor borongan sering terlalu panjang untuk lebar kolom template.
-    // Pisahkan bagian pekerjaan dan tanggal supaya baris berikutnya tidak
-    // terdorong ke area project/role di sisi kanan kwitansi.
-    if (dateIndex > 36) {
-      wrapped.push(line.slice(0, dateIndex).trim(), line.slice(dateIndex + 1).trim());
-    } else {
-      wrapped.push(line);
-    }
-  }
-  return wrapped;
-}
-
 function KwitansiSlip({
   doc,
   project,
@@ -117,7 +88,7 @@ function KwitansiSlip({
   const number = doc.kwitansiNumber?.trim() ?? "";
   const color = templateColor(doc, index);
   const fields = kwitansiTemplateLayout.fields;
-  const renderedPurposeLines = wrapPurposeLines(visiblePurposeLines(doc, purposeLines));
+  const renderedPurposeLines = layoutKwitansiPurposeLines(purposeLines);
 
   return (
     <div className="stage1-kwitansi-slip" data-kwitansi-id={doc.id} data-stage-code={doc.stageCode} data-template-color={color} data-overlap-container data-overlap-label="Kwitansi">
@@ -125,8 +96,13 @@ function KwitansiSlip({
       {number ? <div className="kwitansi-text kwitansi-number-value" style={fieldStyle(fields.number)}>{number}</div> : null}
       <div className="kwitansi-text kwitansi-from" style={fieldStyle(fields.payer)}>{payer}</div>
       <div className="kwitansi-text kwitansi-words" style={fieldStyle(fields.amountWords)}>{getKwitansiAmountWords(doc)}</div>
-      <div className="kwitansi-text kwitansi-purpose" style={fieldStyle(fields.payment)} data-overlap-role="table">
-        {renderedPurposeLines.slice(0, 3).map((line, lineIndex) => <div key={lineIndex}>{line}</div>)}
+      <div
+        className="kwitansi-text kwitansi-purpose"
+        style={fieldStyle(fields.payment)}
+        data-purpose-line-count={renderedPurposeLines.length}
+        data-overlap-role="table"
+      >
+        {renderedPurposeLines.map((line, lineIndex) => <div className="kwitansi-purpose-line" key={lineIndex}>{line}</div>)}
       </div>
       <div className="kwitansi-text kwitansi-project" style={fieldStyle(fields.project)}>{projectLines[0] ?? ""}</div>
       <div className="kwitansi-text kwitansi-role" style={fieldStyle(fields.role)}>{projectLines[1] ?? ""}</div>

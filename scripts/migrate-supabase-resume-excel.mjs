@@ -4,6 +4,8 @@ import { EXCEL_BASE_ROWS } from "../src/constants/excel-base-data.ts";
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/, "");
 const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 const APPLY = process.argv.includes("--apply");
+const OVERWRITE_FINANCIALS = process.argv.includes("--overwrite-financials");
+const DELETE_STALE_ITEMS = process.argv.includes("--delete-stale-items");
 const PROJECT_FILTER = process.argv.find((arg) => arg.startsWith("--project-id="))?.slice("--project-id=".length) ?? null;
 const DEFAULT_PROJECT_START_DATE = "2025-11-03";
 const PAGE_SIZE = 1000;
@@ -113,6 +115,73 @@ function vendorId(name) {
   return VENDOR_IDS[String(name ?? "").trim()] ?? null;
 }
 
+function toFiniteNumber(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function toNullableNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function normalizeKey(value) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function stableItemKey({ stageCode, categoryCode, vendorName, itemName, unit }) {
+  return [
+    normalizeKey(stageCode),
+    normalizeKey(categoryCode),
+    normalizeKey(vendorId(vendorName) ?? vendorName),
+    normalizeKey(itemName),
+    normalizeKey(unit),
+  ].join("::");
+}
+
+function existingItemStableKey(item) {
+  return [
+    normalizeKey(item.stage_id || item.tahap),
+    normalizeKey(item.category_code || item.kategori),
+    normalizeKey(item.vendor_id || item.vendor),
+    normalizeKey(item.uraian),
+    normalizeKey(item.satuan),
+  ].join("::");
+}
+
+function pushMap(map, key, item) {
+  if (!key.trim()) return;
+  map.set(key, [...(map.get(key) ?? []), item]);
+}
+
+function takeMap(map, key) {
+  const queue = map.get(key);
+  if (!queue?.length) return null;
+  return queue.shift() ?? null;
+}
+
+function buildExistingItemMatchers(oldItems) {
+  const byExcelRow = new Map();
+  const byStableKey = new Map();
+
+  for (const item of [...oldItems].sort((a, b) => Number(a.urutan ?? 0) - Number(b.urutan ?? 0))) {
+    if (item.source_file === "G.xlsx" && item.source_row != null) {
+      pushMap(byExcelRow, String(item.source_row), item);
+    }
+    pushMap(byStableKey, existingItemStableKey(item), item);
+  }
+
+  return { byExcelRow, byStableKey };
+}
+
+function takeExistingItemForSource(source, matchers) {
+  return (
+    takeMap(matchers.byExcelRow, String(source.excelRow)) ??
+    takeMap(matchers.byStableKey, stableItemKey(source))
+  );
+}
+
 const NUMBER_WORDS = ["", "Satu", "Dua", "Tiga", "Empat", "Lima", "Enam", "Tujuh", "Delapan", "Sembilan", "Sepuluh", "Sebelas"];
 
 function spellUnderThousand(value) {
@@ -146,9 +215,18 @@ function terbilangRupiah(value) {
   return `${parts.join(" ").replace(/\s+/g, " ").trim()} Rupiah`;
 }
 
-function makeItem(project, source, index) {
-  const amount = Math.round(source.volume * source.unitPrice);
-  const amountOverride = amount === source.amount ? null : source.amount;
+function makeItem(project, source, index, existingItem = null) {
+  const shouldPreserveFinancials = Boolean(existingItem) && !OVERWRITE_FINANCIALS;
+  const qty = shouldPreserveFinancials ? toFiniteNumber(existingItem.qty, source.volume) : source.volume;
+  const unitPrice = shouldPreserveFinancials ? toFiniteNumber(existingItem.harga_satuan, source.unitPrice) : source.unitPrice;
+  const computedAmount = Math.round(qty * unitPrice);
+  const templateComputedAmount = Math.round(source.volume * source.unitPrice);
+  const existingManualOverride = shouldPreserveFinancials ? toNullableNumber(existingItem.jumlah_override) : null;
+  const isManualAmount = shouldPreserveFinancials
+    ? Boolean(existingItem.is_jumlah_manual && existingManualOverride !== null)
+    : templateComputedAmount !== source.amount;
+  const amount = isManualAmount ? existingManualOverride ?? source.amount : shouldPreserveFinancials ? computedAmount : source.amount;
+  const amountOverride = isManualAmount ? amount : null;
   const category = `${source.categoryCode} ${source.categoryName}`;
   return {
     id: uuidFor(project.id, source.excelRow),
@@ -162,12 +240,12 @@ function makeItem(project, source, index) {
     kategori: category,
     tanggal: shiftDate(source.date, project.project_date),
     uraian: source.itemName,
-    qty: source.volume,
+    qty,
     satuan: source.unit,
-    harga_satuan: source.unitPrice,
-    jumlah: source.amount,
+    harga_satuan: unitPrice,
+    jumlah: amount,
     jumlah_override: amountOverride,
-    is_jumlah_manual: amountOverride !== null,
+    is_jumlah_manual: isManualAmount,
     vendor: source.vendorName,
     vendor_id: vendorId(source.vendorName),
     source_file: "G.xlsx",
@@ -180,7 +258,7 @@ function makeItem(project, source, index) {
     category_total: null,
     stage_total: null,
     source_type: "excel",
-    validation_status: amountOverride === null ? "valid" : "warning",
+    validation_status: isManualAmount ? "warning" : "valid",
     notes: "",
     urutan: index + 1,
   };
@@ -239,13 +317,19 @@ async function deleteByIds(table, ids) {
 }
 
 async function migrateProject(project, oldItems) {
-  const newItems = EXCEL_BASE_ROWS.map((source, index) => makeItem(project, source, index));
+  const matchers = buildExistingItemMatchers(oldItems);
+  let preservedFinancials = 0;
+  const newItems = EXCEL_BASE_ROWS.map((source, index) => {
+    const existingItem = OVERWRITE_FINANCIALS ? null : takeExistingItemForSource(source, matchers);
+    if (existingItem) preservedFinancials += 1;
+    return makeItem(project, source, index, existingItem);
+  });
   const newIds = new Set(newItems.map((item) => item.id));
   const staleItemIds = oldItems.filter((item) => !newIds.has(item.id)).map((item) => item.id);
   const { stages, categories } = makeStructure(project, newItems);
 
   if (!APPLY) {
-    return { village: project.nama_desa, oldItems: oldItems.length, newItems: newItems.length, staleItems: staleItemIds.length };
+    return { village: project.nama_desa, oldItems: oldItems.length, newItems: newItems.length, staleItems: staleItemIds.length, preservedFinancials };
   }
 
   // Insert/upsert new deterministic IDs before removing legacy rows so a
@@ -256,7 +340,9 @@ async function migrateProject(project, oldItems) {
     body: newItems,
     extraHeaders: { Prefer: "resolution=merge-duplicates,return=minimal" },
   });
-  await deleteByIds("resume_items", staleItemIds);
+  if (DELETE_STALE_ITEMS) {
+    await deleteByIds("resume_items", staleItemIds);
+  }
 
   // Nota otomatis lama menunjuk ke ID item resume lama. Hapus hanya dokumen
   // otomatis; nota manual/custom tetap dipertahankan untuk pemeriksaan user.
@@ -292,19 +378,29 @@ async function migrateProject(project, oldItems) {
     extraHeaders: { Prefer: "return=minimal" },
   });
 
-  return { village: project.nama_desa, oldItems: oldItems.length, newItems: newItems.length, staleItems: staleItemIds.length };
+  return { village: project.nama_desa, oldItems: oldItems.length, newItems: newItems.length, staleItems: staleItemIds.length, preservedFinancials };
 }
 
-const projects = await fetchAll("projects", "id,nama_desa,nama_project,project_date,created_at", PROJECT_FILTER ? { id: `eq.${PROJECT_FILTER}` } : {});
+const projects = await fetchAll(
+  "projects",
+  "id,nama_desa,nama_project,project_date,created_at",
+  PROJECT_FILTER ? { id: `eq.${PROJECT_FILTER}`, order: "id.asc" } : { order: "id.asc" },
+);
 const projectIds = projects.map((project) => project.id);
 const allItems = projectIds.length === 0
   ? []
-  : await fetchAll("resume_items", "id,project_id,category_code,source_file", { project_id: `in.(${projectIds.join(",")})` });
+  : await fetchAll(
+    "resume_items",
+    "id,project_id,tahap,stage_id,category_code,category_name,kategori,uraian,qty,satuan,harga_satuan,jumlah,jumlah_override,is_jumlah_manual,vendor,vendor_id,source_file,source_row,urutan",
+    { project_id: `in.(${projectIds.join(",")})`, order: "project_id.asc,urutan.asc,id.asc" },
+  );
 const itemsByProject = new Map(projectIds.map((id) => [id, []]));
 for (const item of allItems) itemsByProject.get(item.project_id)?.push(item);
 
 console.log(`${APPLY ? "MENJALANKAN" : "DRY-RUN"} migrasi ${projects.length} project ke ${EXCEL_BASE_ROWS.length} baris G.xlsx.`);
 if (!APPLY) console.log("Tidak ada perubahan database. Jalankan ulang dengan --apply untuk menerapkan migrasi.");
+if (!OVERWRITE_FINANCIALS) console.log("Mode aman aktif: qty, harga_satuan, dan jumlah lama dipertahankan untuk item yang bisa dicocokkan. Gunakan --overwrite-financials hanya jika user eksplisit meminta angka template menimpa data desa.");
+if (!DELETE_STALE_ITEMS) console.log("Mode aman aktif: item lama yang tidak ada di template baru tidak dihapus. Gunakan --delete-stale-items hanya setelah preview stale item disetujui.");
 
 const results = [];
 for (const project of projects) {
@@ -312,6 +408,6 @@ for (const project of projects) {
 }
 
 for (const result of results) {
-  console.log(`${result.village}: ${result.oldItems} -> ${result.newItems} item, ${result.staleItems} item lama diganti.`);
+  console.log(`${result.village}: ${result.oldItems} -> ${result.newItems} item template, ${result.staleItems} item lama di luar template, ${result.preservedFinancials} item mempertahankan qty/harga.`);
 }
 console.log(`Selesai: ${results.length} project diproses.`);

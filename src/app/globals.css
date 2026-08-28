@@ -684,25 +684,26 @@ textarea {
 }
 
 .kwitansi-purpose {
-  font-size: 7pt;
-  line-height: 1.08;
+  display: grid;
+  align-content: start;
+  grid-auto-rows: min-content;
+  row-gap: 0;
+  font-size: 6.7pt;
+  line-height: 1.1;
   white-space: normal;
   overflow: hidden;
-}
-
-.stage1-kwitansi-slip[data-stage-code="TAHAP_VI"] .kwitansi-purpose,
-.stage1-kwitansi-slip[data-stage-code="TAHAP_VII"] .kwitansi-purpose,
-.stage1-kwitansi-slip[data-stage-code="RESUME_ALL"] .kwitansi-purpose {
-  line-height: 1.42;
-}
-
-.kwitansi-purpose div + div {
-  margin-top: 0.65mm;
-}
-
-.kwitansi-purpose div {
-  max-width: 100%;
   overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.kwitansi-purpose[data-purpose-line-count="3"] {
+  font-size: 6.4pt;
+  line-height: 1.06;
+}
+
+.kwitansi-purpose-line {
+  margin: 0;
+  max-width: 100%;
 }
 
 .kwitansi-project,
@@ -2538,9 +2539,8 @@ textarea {
   right: 0;
   top: 119.3mm;
   display: grid;
-  grid-template-columns: 16.5mm 23.5mm;
-  width: 40mm;
-  height: 6.5mm;
+  grid-template-columns: 28.5mm 23.5mm;
+  width: 52mm;
   align-items: stretch;
   font-size: 6.5pt;
   font-weight: 700;
@@ -2561,6 +2561,12 @@ textarea {
   border: 0.24mm solid #000000;
 }
 
+.jasa-grand-total-label {
+  font-size: 5.8pt;
+  letter-spacing: -0.05mm;
+  white-space: nowrap;
+}
+
 .jasa-footer {
   position: absolute;
   left: 0;
@@ -2570,6 +2576,10 @@ textarea {
   justify-content: space-between;
   width: 100mm;
   font-size: 6.5pt;
+}
+
+.jasa-slot-with-grand-total .jasa-footer {
+  top: 135.2mm;
 }
 
 .jasa-footer div {
@@ -2681,7 +2691,15 @@ textarea {
     padding: 0 !important;
   }
 
-  .print-page-shell,
+  .print-page-shell {
+    position: relative;
+    overflow: hidden;
+    margin: 0 !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    page-break-after: always;
+  }
+
   .nota-preview-shell {
     width: auto !important;
     min-height: auto !important;
@@ -2701,15 +2719,29 @@ textarea {
     transform: none !important;
   }
 
-  .print-page-portrait {
+  .print-page-shell-portrait {
     page: stage1Portrait;
     width: 210mm !important;
     height: 297mm !important;
     min-height: 297mm !important;
   }
 
-  .print-page-landscape {
+  .print-page-shell-landscape {
     page: stage1Landscape;
+    width: 297mm !important;
+    height: 210mm !important;
+    min-height: 210mm !important;
+  }
+
+  .print-page-portrait {
+    page: auto;
+    width: 210mm !important;
+    height: 297mm !important;
+    min-height: 297mm !important;
+  }
+
+  .print-page-landscape {
+    page: auto;
     width: 297mm !important;
     height: 210mm !important;
     min-height: 210mm !important;

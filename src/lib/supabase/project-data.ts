@@ -9,7 +9,6 @@ import { generateKwitansiDocuments, generateNotaDocuments } from "@/lib/nota-gen
 import { getAutofillKwitansiReceiver } from "@/lib/kwitansi-rules";
 import type { KwitansiSyncKey } from "@/lib/kwitansi-rules";
 import { isSpecialPLNKwitansi } from "@/lib/pln-document-groups";
-import { shiftResumeItemsFromDefault } from "@/lib/project-date-shift";
 import { buildResumeItemsForNewProject } from "@/lib/resume-history";
 import { buildProjectSummary, getResumeItemAmount } from "@/lib/resume-calculations";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -1439,7 +1438,7 @@ export async function replaceSupabaseProjectResume(
 export async function reimportSupabaseProjectResume(project: Project) {
   return replaceSupabaseProjectResume(
     project,
-    shiftResumeItemsFromDefault(masterTemplateItems, project.projectDate),
+    buildResumeItemsForNewProject(masterTemplateItems, project.projectDate, project.items),
     "Resume project diimport ulang dari master resume terbaru.",
   );
 }

@@ -81,7 +81,7 @@ function NotaKosongSlot({ group, project }: { group: NotaGroup | null; project: 
 export function NotaKosongTemplate(props: Stage1TemplateProps) {
   const groups = groupNotaItems(props.doc.items);
   return (
-    <LandscapeNotaPages groups={groups} zoom={props.zoom} layoutKey="notaKosong" debug={props.debug}>
+    <LandscapeNotaPages groups={groups} vendorKey={props.doc.vendorId} zoom={props.zoom} layoutKey="notaKosong" debug={props.debug}>
       {(group) => <NotaKosongSlot group={group} project={props.project} />}
     </LandscapeNotaPages>
   );
