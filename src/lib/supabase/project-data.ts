@@ -33,7 +33,8 @@ import {
   terbilangRupiah,
 } from "@/utils/format";
 
-const CACHE_KEY = "kdkmp.supabase.bundle.v2-excel";
+const LEGACY_CACHE_KEY = "kdkmp.supabase.bundle.v2-excel";
+const CACHE_KEY = "kdkmp.supabase.bundle.v3";
 const TEMPLATE_ID = "master-template-kdkmp-v1";
 // Supabase returns at most 1,000 rows by default. Matching that page size and
 // fetching pages concurrently avoids dozens of sequential round trips for the
@@ -48,6 +49,10 @@ const GENERATED_NOTE_SELECT = "id,project_id,tahap,vendor,vendor_id,template_id,
 const KWITANSI_EDIT_SELECT = "id,project_id,note_id,nama_penerima,warna_template,custom_data_json,created_at,updated_at";
 const CUSTOM_NOTE_SELECT = "id,project_id,tahap,vendor,vendor_id,template_id,document_type,data_json,total,alasan,created_at,updated_at";
 const HISTORY_SELECT = "id,project_id,action,description,created_at";
+const DASHBOARD_SUMMARY_SELECT = "project_id,total_tahap_1,total_tahap_2,total_tahap_3,total_tahap_4,total_diluar_konstruksi,total_keseluruhan";
+const DASHBOARD_OUTSIDE_ITEM_SELECT = "project_id,tahap,category_code,kategori,uraian,qty,harga_satuan,jumlah,jumlah_override,is_jumlah_manual,is_included_in_resume_total";
+const DASHBOARD_NOTE_SELECT = "id,project_id,tahap,vendor,vendor_id,document_type,total";
+const DASHBOARD_CUSTOM_NOTE_SELECT = "id,project_id,tahap,vendor,vendor_id,document_type,total";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -156,6 +161,57 @@ type NoteHistoryRow = {
   created_at: string;
 };
 
+type DashboardSummaryRow = {
+  project_id: string;
+  total_tahap_1: number | string;
+  total_tahap_2: number | string;
+  total_tahap_3: number | string;
+  total_tahap_4: number | string;
+  total_diluar_konstruksi: number | string;
+  total_keseluruhan: number | string;
+};
+
+type DashboardAmountRow = {
+  project_id: string;
+  tahap: string;
+  category_code: string | null;
+  kategori: string;
+  uraian: string;
+  qty: number | string;
+  harga_satuan: number | string;
+  jumlah: number | string;
+  jumlah_override: number | string | null;
+  is_jumlah_manual: boolean;
+  is_included_in_resume_total: boolean | null;
+};
+
+type DashboardNoteRow = {
+  id: string;
+  project_id: string;
+  tahap: string;
+  vendor: string;
+  vendor_id: string | null;
+  document_type: GeneratedNota["documentType"];
+  total: number | string;
+};
+
+export type DashboardProjectStats = {
+  projectId: string;
+  stageTotals: Partial<Record<StageCode, number>>;
+  grandTotal: number;
+  notaCount: number;
+};
+
+export type DashboardNotaStats = {
+  projectId: string;
+  stageCode: StageCode;
+  stageName: string;
+  vendorId: string;
+  vendorName: string;
+  count: number;
+  total: number;
+};
+
 export type ProjectBundle = {
   projects: Project[];
   generatedNotas: GeneratedNota[];
@@ -163,6 +219,9 @@ export type ProjectBundle = {
   customNotes: CustomNote[];
   history: NoteHistoryEntry[];
   source: "supabase" | "cache" | "seed";
+  dashboardProjectStats?: DashboardProjectStats[];
+  dashboardNotaStats?: DashboardNotaStats[];
+  dashboardSummaryOnly?: boolean;
 };
 
 export type CustomNoteInput = {
@@ -740,21 +799,29 @@ function rowsToHistory(rows: NoteHistoryRow[]): NoteHistoryEntry[] {
   }));
 }
 
-function readCache(): ProjectBundle | null {
+type CacheScope = "all" | "dashboard" | `project:${string}`;
+
+function cacheStorageKey(scope: CacheScope) {
+  return `${CACHE_KEY}.${scope}`;
+}
+
+function readCache(scope: CacheScope = "all"): ProjectBundle | null {
   if (typeof window === "undefined") return null;
   try {
-    const value = window.localStorage.getItem(CACHE_KEY);
+    const value = window.localStorage.getItem(cacheStorageKey(scope))
+      ?? (scope === "all" ? window.localStorage.getItem(LEGACY_CACHE_KEY) : null);
     return value ? (JSON.parse(value) as ProjectBundle) : null;
   } catch {
-    clearCache();
+    clearCache(scope);
     return null;
   }
 }
 
-function clearCache() {
+function clearCache(scope: CacheScope = "all") {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.removeItem(CACHE_KEY);
+    window.localStorage.removeItem(cacheStorageKey(scope));
+    if (scope === "all") window.localStorage.removeItem(LEGACY_CACHE_KEY);
   } catch {
     // Ignore unavailable browser storage.
   }
@@ -768,6 +835,9 @@ function compactCacheBundle(bundle: ProjectBundle): ProjectBundle {
     customNotes: [],
     history: bundle.history.slice(0, 100),
     source: "cache",
+    dashboardProjectStats: bundle.dashboardProjectStats,
+    dashboardNotaStats: bundle.dashboardNotaStats,
+    dashboardSummaryOnly: bundle.dashboardSummaryOnly,
   };
 }
 
@@ -779,29 +849,31 @@ function serializeCacheBundle(bundle: ProjectBundle): string | null {
   return compactSerialized.length <= MAX_LOCAL_CACHE_CHARS ? compactSerialized : null;
 }
 
-function writeCache(bundle: ProjectBundle) {
+function writeCache(bundle: ProjectBundle, scope: CacheScope = "all") {
   if (typeof window === "undefined") return;
 
-  if (bundle.source === "supabase") {
-    clearCache();
-    return;
-  }
-
   try {
-    const serialized = serializeCacheBundle(bundle);
+    const serialized = serializeCacheBundle({ ...bundle, source: "cache" });
     if (!serialized) {
-      clearCache();
+      // Keep an older valid cache when a complete multi-project bundle is too
+      // large for localStorage. Dashboard and single-project caches are scoped
+      // separately and remain available.
       return;
     }
-    window.localStorage.setItem(CACHE_KEY, serialized);
+    window.localStorage.setItem(cacheStorageKey(scope), serialized);
   } catch (error) {
-    clearCache();
     console.warn("Cache lokal project terlalu besar atau tidak tersedia, data tetap disimpan di Supabase.", error);
   }
 }
 
-export function readCachedProjectBundle(): ProjectBundle {
-  return readCache() ?? {
+export function readCachedProjectBundleOrNull(projectId?: string, dashboardOnly = false): ProjectBundle | null {
+  const scope: CacheScope = dashboardOnly ? "dashboard" : projectId ? `project:${projectId}` : "all";
+  const cached = readCache(scope);
+  return cached ? { ...cached, source: "cache" } : null;
+}
+
+export function readCachedProjectBundle(projectId?: string, dashboardOnly = false): ProjectBundle {
+  return readCachedProjectBundleOrNull(projectId, dashboardOnly) ?? {
     projects: initialProjects,
     generatedNotas: [],
     kwitansiEdits: [],
@@ -888,12 +960,223 @@ async function fetchAllResumeItemRows(client: SupabaseClient, projectIds: string
   return { data: allRows, error: null };
 }
 
+async function fetchDashboardAmountRows(client: SupabaseClient, projectIds: string[], outsideOnly: boolean) {
+  if (projectIds.length === 0) return { data: [] as DashboardAmountRow[], error: null };
+
+  const allRows: DashboardAmountRow[] = [];
+  let page = 0;
+  while (true) {
+    const from = page * RESUME_ITEMS_PAGE_SIZE;
+    let query = client
+      .from("resume_items")
+      .select(DASHBOARD_OUTSIDE_ITEM_SELECT)
+      .in("project_id", projectIds);
+    if (outsideOnly) {
+      query = query.in("tahap", ["TAHAP_VI", "TAHAP_VII", "RESUME_ALL", "LUAR_INTI", "DI_LUAR_PEKERJAAN_INTI"]);
+    }
+    const { data, error } = await query
+      .order("project_id", { ascending: true })
+      .range(from, from + RESUME_ITEMS_PAGE_SIZE - 1);
+    if (error) return { data: allRows, error };
+    const rows = (data ?? []) as DashboardAmountRow[];
+    allRows.push(...rows);
+    if (rows.length < RESUME_ITEMS_PAGE_SIZE) break;
+    page += 1;
+  }
+  return { data: allRows, error: null };
+}
+
+function dashboardRowAmount(row: DashboardAmountRow) {
+  if (row.is_jumlah_manual) return toNumber(row.jumlah_override ?? row.jumlah);
+  return Math.round(toNumber(row.qty) * toNumber(row.harga_satuan));
+}
+
+function dashboardRowStage(row: DashboardAmountRow) {
+  const rawStage = asStageCode(row.tahap, row.uraian, row.kategori);
+  return normalizeStoredStageCode(rawStage, row.category_code, row.uraian);
+}
+
+function buildDashboardNotaStats(rows: DashboardNoteRow[]): DashboardNotaStats[] {
+  const grouped = new Map<string, {
+    projectId: string;
+    stageCode: StageCode;
+    stageName: string;
+    vendorId: string;
+    vendorName: string;
+    notaCount: number;
+    kwitansiCount: number;
+    notaTotal: number;
+    kwitansiTotal: number;
+  }>();
+
+  for (const row of rows) {
+    const stageCode = asStageCode(row.tahap);
+    const vendorId = row.vendor_id ?? vendorIdByName(row.vendor) ?? (row.vendor || "vendor-tanpa-id");
+    const key = `${row.project_id}:${stageCode}:${vendorId}`;
+    const current = grouped.get(key) ?? {
+      projectId: row.project_id,
+      stageCode,
+      stageName: getStageLabel(stageCode),
+      vendorId,
+      vendorName: row.vendor || vendorById(vendorId)?.name || "Tanpa vendor",
+      notaCount: 0,
+      kwitansiCount: 0,
+      notaTotal: 0,
+      kwitansiTotal: 0,
+    };
+    if (row.document_type === "nota") {
+      current.notaCount += 1;
+      current.notaTotal += toNumber(row.total);
+    } else {
+      current.kwitansiCount += 1;
+      current.kwitansiTotal += toNumber(row.total);
+    }
+    grouped.set(key, current);
+  }
+
+  return [...grouped.values()].map((row) => ({
+    projectId: row.projectId,
+    stageCode: row.stageCode,
+    stageName: row.stageName,
+    vendorId: row.vendorId,
+    vendorName: row.vendorName,
+    count: Math.max(row.notaCount, row.kwitansiCount),
+    total: row.notaCount > 0 ? row.notaTotal : row.kwitansiTotal,
+  }));
+}
+
+function withReadTimeout<T>(request: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const timeoutRequest = new Promise<never>((_, reject) => {
+    timeout = setTimeout(() => reject(new Error(`${label} melewati batas ${Math.round(timeoutMs / 1000)} detik. Periksa koneksi atau konfigurasi Supabase Vercel.`)), timeoutMs);
+  });
+  return Promise.race([request, timeoutRequest]).finally(() => {
+    if (timeout) clearTimeout(timeout);
+  });
+}
+
+async function fetchDashboardBundleUncached(): Promise<ProjectBundle> {
+  const client = supabase();
+  if (!client) {
+    const cached = readCachedProjectBundle(undefined, true);
+    return { ...cached, source: cached.source === "seed" ? "seed" : "cache" };
+  }
+
+  const { data: projectRows, error: projectError } = await client
+    .from("projects")
+    .select(PROJECT_SELECT)
+    .order("updated_at", { ascending: false });
+  if (projectError) throwDatabaseError(projectError, "Gagal memuat daftar project.");
+
+  const projectsData = (projectRows ?? []) as ProjectRow[];
+  if (projectsData.length === 0) {
+    const bundle = { ...emptySupabaseBundle(), dashboardProjectStats: [], dashboardNotaStats: [], dashboardSummaryOnly: true };
+    writeCache(bundle, "dashboard");
+    return bundle;
+  }
+
+  const projectIds = projectsData.map((project) => project.id);
+  const [summariesResult, outsideResult, notesResult, customNotesResult] = await Promise.all([
+    client.from("resume_summaries").select(DASHBOARD_SUMMARY_SELECT).in("project_id", projectIds),
+    fetchDashboardAmountRows(client, projectIds, true),
+    client.from("generated_notes").select(DASHBOARD_NOTE_SELECT).in("project_id", projectIds),
+    client.from("custom_notes").select(DASHBOARD_CUSTOM_NOTE_SELECT).in("project_id", projectIds),
+  ]);
+  if (summariesResult.error) throw summariesResult.error;
+  if (outsideResult.error) throw outsideResult.error;
+  if (notesResult.error) throw notesResult.error;
+  if (customNotesResult.error) throw customNotesResult.error;
+
+  const summaryRows = (summariesResult.data ?? []) as DashboardSummaryRow[];
+  const summaryByProject = new Map(summaryRows.map((row) => [row.project_id, row]));
+  const missingSummaryIds = projectIds.filter((id) => !summaryByProject.has(id));
+  const missingResult = await fetchDashboardAmountRows(client, missingSummaryIds, false);
+  if (missingResult.error) throw missingResult.error;
+
+  const outsideByProject = new Map<string, Partial<Record<StageCode, number>>>();
+  for (const row of outsideResult.data) {
+    if (row.is_included_in_resume_total === false) continue;
+    const stageCode = dashboardRowStage(row);
+    const totals = outsideByProject.get(row.project_id) ?? {};
+    totals[stageCode] = (totals[stageCode] ?? 0) + dashboardRowAmount(row);
+    outsideByProject.set(row.project_id, totals);
+  }
+
+  const missingByProject = new Map<string, Partial<Record<StageCode, number>>>();
+  for (const row of missingResult.data) {
+    if (row.is_included_in_resume_total === false) continue;
+    const stageCode = dashboardRowStage(row);
+    const totals = missingByProject.get(row.project_id) ?? {};
+    totals[stageCode] = (totals[stageCode] ?? 0) + dashboardRowAmount(row);
+    missingByProject.set(row.project_id, totals);
+  }
+
+  const dashboardNotaStats = buildDashboardNotaStats([
+    ...((notesResult.data ?? []) as DashboardNoteRow[]),
+    ...((customNotesResult.data ?? []) as DashboardNoteRow[]),
+  ]);
+  const notaCountByProject = new Map<string, number>();
+  for (const row of dashboardNotaStats) {
+    notaCountByProject.set(row.projectId, (notaCountByProject.get(row.projectId) ?? 0) + row.count);
+  }
+
+  const dashboardProjectStats = projectIds.map((projectId): DashboardProjectStats => {
+    const summary = summaryByProject.get(projectId);
+    if (!summary) {
+      const stageTotals = missingByProject.get(projectId) ?? {};
+      return {
+        projectId,
+        stageTotals,
+        grandTotal: Object.values(stageTotals).reduce((sum, value) => sum + (value ?? 0), 0),
+        notaCount: notaCountByProject.get(projectId) ?? 0,
+      };
+    }
+
+    const outsideTotal = toNumber(summary.total_diluar_konstruksi);
+    const outsideStages = outsideByProject.get(projectId) ?? {};
+    const tahap6 = outsideStages.TAHAP_VI ?? 0;
+    const tahap7 = outsideStages.TAHAP_VII ?? 0;
+    const outsideResidual = outsideTotal - tahap6 - tahap7;
+    const stageTotals: Partial<Record<StageCode, number>> = {
+      TAHAP_I: toNumber(summary.total_tahap_1),
+      TAHAP_II: toNumber(summary.total_tahap_2),
+      TAHAP_III: toNumber(summary.total_tahap_3),
+      TAHAP_IV: toNumber(summary.total_tahap_4),
+      TAHAP_VI: tahap6 + outsideResidual,
+      TAHAP_VII: tahap7,
+    };
+    const grandTotal = toNumber(summary.total_keseluruhan);
+    stageTotals.TAHAP_V = grandTotal
+      - (stageTotals.TAHAP_I ?? 0)
+      - (stageTotals.TAHAP_II ?? 0)
+      - (stageTotals.TAHAP_III ?? 0)
+      - (stageTotals.TAHAP_IV ?? 0)
+      - outsideTotal;
+    return { projectId, stageTotals, grandTotal, notaCount: notaCountByProject.get(projectId) ?? 0 };
+  });
+
+  const bundle: ProjectBundle = {
+    projects: projectsData.map((row) => rowToProject(row, [])),
+    generatedNotas: [],
+    kwitansiEdits: [],
+    customNotes: [],
+    history: [],
+    source: "supabase",
+    dashboardProjectStats,
+    dashboardNotaStats,
+    dashboardSummaryOnly: true,
+  };
+  writeCache(bundle, "dashboard");
+  return bundle;
+}
+
 const inFlightProjectBundles = new Map<string, Promise<ProjectBundle>>();
+let inFlightDashboardBundle: Promise<ProjectBundle> | null = null;
 
 async function fetchProjectBundleUncached(projectId?: string): Promise<ProjectBundle> {
   const client = supabase();
   if (!client) {
-    const cached = readCachedProjectBundle();
+    const cached = readCachedProjectBundle(projectId);
     return { ...cached, source: cached.source === "seed" ? "seed" : "cache" };
   }
 
@@ -907,7 +1190,7 @@ async function fetchProjectBundleUncached(projectId?: string): Promise<ProjectBu
   const projectsData = (projectRows ?? []) as ProjectRow[];
   if (projectsData.length === 0) {
     const bundle = emptySupabaseBundle();
-    writeCache(bundle);
+    writeCache(bundle, projectId ? `project:${projectId}` : "all");
     return bundle;
   }
 
@@ -940,7 +1223,7 @@ async function fetchProjectBundleUncached(projectId?: string): Promise<ProjectBu
     source: "supabase",
   };
 
-  writeCache(bundle);
+  writeCache(bundle, projectId ? `project:${projectId}` : "all");
   return bundle;
 }
 
@@ -950,11 +1233,25 @@ export function fetchProjectBundle(projectId?: string): Promise<ProjectBundle> {
   const existingRequest = inFlightProjectBundles.get(requestKey);
   if (existingRequest) return existingRequest;
 
-  const request = fetchProjectBundleUncached(projectId).finally(() => {
+  const request = withReadTimeout(
+    fetchProjectBundleUncached(projectId),
+    projectId ? 20_000 : 35_000,
+    projectId ? "Pemuatan project" : "Pemuatan seluruh data",
+  ).finally(() => {
     inFlightProjectBundles.delete(requestKey);
   });
   inFlightProjectBundles.set(requestKey, request);
   return request;
+}
+
+/** Lightweight dashboard load: project metadata, exact totals, and note counters. */
+export function fetchDashboardBundle(): Promise<ProjectBundle> {
+  if (inFlightDashboardBundle) return inFlightDashboardBundle;
+  inFlightDashboardBundle = withReadTimeout(fetchDashboardBundleUncached(), 15_000, "Pemuatan dashboard")
+    .finally(() => {
+      inFlightDashboardBundle = null;
+    });
+  return inFlightDashboardBundle;
 }
 
 export async function createSupabaseProject(

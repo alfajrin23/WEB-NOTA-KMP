@@ -31,9 +31,12 @@ import {
   createResumeItem,
   createSupabaseProject,
   CustomNoteInput,
+  DashboardNotaStats,
+  DashboardProjectStats,
   deleteResumeItem as deleteSupabaseResumeItem,
   deleteSupabaseProject,
   duplicateSupabaseProject,
+  fetchDashboardBundle,
   fetchProjectBundle,
   generateAndPersistKwitansi,
   generateAndPersistNotes,
@@ -42,6 +45,7 @@ import {
   mergeBundleWithGenerated,
   ProjectBundle,
   readCachedProjectBundle,
+  readCachedProjectBundleOrNull,
   reimportSupabaseProjectResume,
   replaceSupabaseProjectResume,
   saveProjectMetadata,
@@ -281,7 +285,20 @@ function applyBundle(bundle: ProjectBundle) {
     kwitansiEdits: bundle.kwitansiEdits,
     customNotes: bundle.customNotes,
     history: bundle.history,
+    dashboardProjectStats: bundle.dashboardProjectStats ?? [],
+    dashboardNotaStats: bundle.dashboardNotaStats ?? [],
+    dashboardSummaryOnly: bundle.dashboardSummaryOnly ?? false,
   };
+}
+
+function currentBundleTarget() {
+  if (typeof window === "undefined") return { projectId: undefined, dashboardOnly: false };
+  const pathname = window.location.pathname;
+  const projectRouteMatch = /^\/projects\/([^/]+)/.exec(pathname);
+  const projectId = projectRouteMatch?.[1] && projectRouteMatch[1] !== "new"
+    ? decodeURIComponent(projectRouteMatch[1])
+    : undefined;
+  return { projectId, dashboardOnly: pathname === "/" };
 }
 
 function buildShiftedKwitansiEditInput(doc: GeneratedNota, days: number) {
@@ -314,6 +331,9 @@ export function useKdkmpStore() {
   const [kwitansiEdits, setKwitansiEdits] = useState<KwitansiEdit[]>([]);
   const [customNotes, setCustomNotes] = useState<CustomNote[]>([]);
   const [history, setHistory] = useState<NoteHistoryEntry[]>([]);
+  const [dashboardProjectStats, setDashboardProjectStats] = useState<DashboardProjectStats[]>([]);
+  const [dashboardNotaStats, setDashboardNotaStats] = useState<DashboardNotaStats[]>([]);
+  const [dashboardSummaryOnly, setDashboardSummaryOnly] = useState(false);
   const [masterItems, setMasterItems] = useState<ResumeItem[]>(normalizePlnResumeItems(masterTemplateItems));
   const [templateAssignments, setTemplateAssignments] = useState<TemplateAssignment[]>(ALL_TEMPLATE_ASSIGNMENTS);
   const [hydrated, setHydrated] = useState(false);
@@ -328,25 +348,23 @@ export function useKdkmpStore() {
     generatedNotasRef.current = generatedNotas;
   }, [generatedNotas]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options: { background?: boolean } = {}) => {
     setLoading(true);
-    setSyncError(null);
+    if (!options.background) setSyncError(null);
     try {
-      // Project screens only need one project's resume rows. Dashboard,
-      // history, and vendor screens continue to request the complete bundle.
-      const projectRouteMatch = typeof window === "undefined"
-        ? null
-        : /^\/projects\/([^/]+)/.exec(window.location.pathname);
-      const activeProjectId = projectRouteMatch?.[1] && projectRouteMatch[1] !== "new"
-        ? decodeURIComponent(projectRouteMatch[1])
-        : undefined;
-      const bundle = await fetchProjectBundle(activeProjectId);
+      const { projectId, dashboardOnly } = currentBundleTarget();
+      const bundle = dashboardOnly ? await fetchDashboardBundle() : await fetchProjectBundle(projectId);
       const next = applyBundle(bundle);
       setProjects(next.projects);
       setGeneratedNotas(next.generatedNotas);
+      generatedNotasRef.current = next.generatedNotas;
       setKwitansiEdits(next.kwitansiEdits);
       setCustomNotes(next.customNotes);
       setHistory(next.history);
+      setDashboardProjectStats(next.dashboardProjectStats);
+      setDashboardNotaStats(next.dashboardNotaStats);
+      setDashboardSummaryOnly(next.dashboardSummaryOnly);
+      setSyncError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Gagal memuat data Supabase.";
       setSyncError(message);
@@ -358,17 +376,25 @@ export function useKdkmpStore() {
   }, []);
 
   useEffect(() => {
-    if (!supabaseReady) {
-      const cachedData = applyBundle(readCachedProjectBundle());
+    const { projectId, dashboardOnly } = currentBundleTarget();
+    const routeCache = readCachedProjectBundleOrNull(projectId, dashboardOnly);
+    if (routeCache || !supabaseReady) {
+      const cachedData = applyBundle(routeCache ?? readCachedProjectBundle(projectId, dashboardOnly));
       setProjects(cachedData.projects);
       setGeneratedNotas(cachedData.generatedNotas);
+      generatedNotasRef.current = cachedData.generatedNotas;
       setKwitansiEdits(cachedData.kwitansiEdits);
       setCustomNotes(cachedData.customNotes);
       setHistory(cachedData.history);
+      setDashboardProjectStats(cachedData.dashboardProjectStats);
+      setDashboardNotaStats(cachedData.dashboardNotaStats);
+      setDashboardSummaryOnly(cachedData.dashboardSummaryOnly);
+      setHydrated(true);
+      setLoading(false);
     }
     setMasterItems(normalizePlnResumeItems(readStorage(MASTER_KEY, masterTemplateItems)));
     setTemplateAssignments(mergeTemplateAssignments(readStorage(TEMPLATE_ASSIGNMENTS_KEY, ALL_TEMPLATE_ASSIGNMENTS)));
-    void refresh();
+    void refresh({ background: Boolean(routeCache) });
   }, [refresh, supabaseReady]);
 
   useEffect(() => {
@@ -523,7 +549,15 @@ export function useKdkmpStore() {
     if (!source) return;
 
     if (supabaseReady) {
-      void duplicateSupabaseProject(source)
+      const sourceRequest = source.items.length > 0
+        ? Promise.resolve(source)
+        : fetchProjectBundle(projectId).then((bundle) => {
+          const completeSource = bundle.projects.find((project) => project.id === projectId);
+          if (!completeSource) throw new Error("Detail project yang akan diduplikasi tidak ditemukan.");
+          return completeSource;
+        });
+      void sourceRequest
+        .then((completeSource) => duplicateSupabaseProject(completeSource))
         .then((project) => {
           setProjects((current) => [project, ...current]);
           toast.success("Project berhasil diduplikasi ke Supabase");
@@ -1121,6 +1155,9 @@ export function useKdkmpStore() {
     kwitansiEdits,
     customNotes,
     history,
+    dashboardProjectStats,
+    dashboardNotaStats,
+    dashboardSummaryOnly,
     refresh,
     createProject,
     updateProject,

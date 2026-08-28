@@ -20,18 +20,59 @@ import { formatProjectWilayah, formatRupiah } from "@/utils/format";
 const colors = ["#2563eb", "#10b981", "#0f766e", "#38bdf8", "#64748b"];
 
 export function DashboardView() {
-  const { projects, vendors, templateAssignments, generatedNotas, duplicateProject, deleteProject, hydrated, loading } = useKdkmpStore();
+  const {
+    projects,
+    vendors,
+    templateAssignments,
+    generatedNotas,
+    dashboardProjectStats,
+    dashboardNotaStats,
+    dashboardSummaryOnly,
+    duplicateProject,
+    deleteProject,
+    hydrated,
+    loading,
+    syncError,
+  } = useKdkmpStore();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"newest" | "name" | "total">("newest");
   const documentEntries = useMemo(() => groupDocumentsForPresentation(generatedNotas), [generatedNotas]);
+  const dashboardStatsByProject = useMemo(
+    () => new Map(dashboardProjectStats.map((row) => [row.projectId, row])),
+    [dashboardProjectStats],
+  );
 
   const projectSummaries = useMemo(() => {
-    return projects.map((project) => ({
-      project,
-      summary: buildProjectSummary(project, vendors),
-      issues: validateProjectResume(project, vendors, templateAssignments),
-    }));
-  }, [projects, templateAssignments, vendors]);
+    return projects.map((project) => {
+      const dashboardStats = dashboardStatsByProject.get(project.id);
+      if (!dashboardSummaryOnly || project.items.length > 0 || !dashboardStats) {
+        return {
+          project,
+          summary: buildProjectSummary(project, vendors),
+          issues: validateProjectResume(project, vendors, templateAssignments),
+        };
+      }
+      const stages = STAGES.map((stage) => ({
+        stageCode: stage.code,
+        label: stage.label,
+        total: dashboardStats.stageTotals[stage.code] ?? 0,
+        itemCount: 0,
+        vendorCount: 0,
+      }));
+      return {
+        project,
+        summary: {
+          stages,
+          categories: [],
+          vendors: [],
+          grandTotal: dashboardStats.grandTotal,
+          coreTotal: STAGES.filter((stage) => stage.core).reduce((sum, stage) => sum + (dashboardStats.stageTotals[stage.code] ?? 0), 0),
+          outsideCoreTotal: STAGES.filter((stage) => !stage.core).reduce((sum, stage) => sum + (dashboardStats.stageTotals[stage.code] ?? 0), 0),
+        },
+        issues: [],
+      };
+    });
+  }, [dashboardStatsByProject, dashboardSummaryOnly, projects, templateAssignments, vendors]);
 
   const rows = useMemo(() => {
     return projectSummaries
@@ -39,7 +80,8 @@ export function DashboardView() {
         ...project,
         total: summary.grandTotal,
         warnings: issues.length,
-        notaCount: documentEntries.filter((entry) => entry.primaryDoc.projectId === project.id).length,
+        notaCount: dashboardStatsByProject.get(project.id)?.notaCount
+          ?? documentEntries.filter((entry) => entry.primaryDoc.projectId === project.id).length,
       }))
       .filter((project) => `${project.villageName} ${project.districtName} ${project.regencyName}`.toLowerCase().includes(query.toLowerCase()))
       .sort((a, b) => {
@@ -47,7 +89,7 @@ export function DashboardView() {
         if (sort === "total") return b.total - a.total;
         return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
       });
-  }, [documentEntries, projectSummaries, query, sort]);
+  }, [dashboardStatsByProject, documentEntries, projectSummaries, query, sort]);
 
   const totalNominal = projectSummaries.reduce((sum, row) => sum + row.summary.grandTotal, 0);
   const allIssues = projectSummaries.flatMap(({ project, issues }) => issues.map((issue) => ({ ...issue, project })));
@@ -65,6 +107,16 @@ export function DashboardView() {
 
   const notaStatus = useMemo(() => {
     const map = new Map<string, { stage: string; vendor: string; count: number; total: number }>();
+    if (dashboardSummaryOnly) {
+      for (const row of dashboardNotaStats) {
+        const key = `${row.stageCode}-${row.vendorId}`;
+        const current = map.get(key) ?? { stage: row.stageName, vendor: row.vendorName, count: 0, total: 0 };
+        current.count += row.count;
+        current.total += row.total;
+        map.set(key, current);
+      }
+      return [...map.values()].sort((a, b) => a.stage.localeCompare(b.stage) || a.vendor.localeCompare(b.vendor));
+    }
     for (const entry of documentEntries) {
       const nota = entry.primaryDoc;
       const key = `${nota.stageCode}-${nota.vendorId}`;
@@ -74,22 +126,36 @@ export function DashboardView() {
       map.set(key, current);
     }
     return [...map.values()].sort((a, b) => a.stage.localeCompare(b.stage) || a.vendor.localeCompare(b.vendor));
-  }, [documentEntries]);
+  }, [dashboardNotaStats, dashboardSummaryOnly, documentEntries]);
 
-  if (!hydrated || loading) {
+  if (!hydrated || (loading && projects.length === 0)) {
     return <DashboardSkeleton />;
   }
+
+  const totalNota = dashboardSummaryOnly
+    ? dashboardProjectStats.reduce((sum, row) => sum + row.notaCount, 0)
+    : documentEntries.length;
 
   const cards = [
     { label: "Total Wilayah", value: projects.length.toString(), icon: Users, tone: "text-blue-600" },
     { label: "Total Nominal", value: formatRupiah(totalNominal), icon: FileText, tone: "text-emerald-600" },
-    { label: "Total Nota", value: documentEntries.length.toString(), icon: ReceiptText, tone: "text-sky-600" },
+    { label: "Total Nota", value: totalNota.toString(), icon: ReceiptText, tone: "text-sky-600" },
     { label: "Total Vendor", value: vendors.length.toString(), icon: Users, tone: "text-slate-600" },
   ];
 
   return (
     <MotionPage>
       <div className="space-y-6">
+        {loading && (
+          <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200" role="status">
+            Menampilkan cache terakhir sambil menyegarkan data Supabase…
+          </div>
+        )}
+        {syncError && (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100" role="alert">
+            Data cache tetap ditampilkan. Sinkronisasi terbaru gagal: {syncError}
+          </div>
+        )}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-2xl font-bold tracking-normal">Dashboard</h2>
@@ -217,7 +283,11 @@ export function DashboardView() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {allIssues.length === 0 ? (
+              {dashboardSummaryOnly ? (
+                <p className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm font-medium text-blue-700 dark:border-blue-900 dark:bg-blue-950/30 dark:text-blue-200">
+                  Dashboard memakai ringkasan cepat. Validasi detail dijalankan saat project dibuka agar halaman ini tidak perlu mengunduh seluruh baris resume.
+                </p>
+              ) : allIssues.length === 0 ? (
                 <p className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30">
                   Tidak ada warning aktif.
                 </p>
@@ -262,7 +332,7 @@ export function DashboardView() {
             </div>
           </CardHeader>
           <CardContent>
-            <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
               <table className="w-full min-w-[780px] text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase text-slate-500 dark:bg-slate-900">
                   <tr>
