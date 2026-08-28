@@ -11,6 +11,7 @@ import {
 
 export type MultiStageTemplateProps = {
   doc: GeneratedNota;
+  docs?: GeneratedNota[];
   project: Project;
   zoom: number;
   debug?: boolean;
@@ -58,16 +59,22 @@ export function groupTotal(group: Pick<NotaGroup, "items">) {
 }
 
 export function groupNotaItems(items: ResumeItem[], maxRows: number): NotaGroup[] {
-  const groups = new Map<string, NotaGroup>();
+  const groups = new Map<string, NotaGroup & { firstSortOrder: number }>();
 
   for (const item of [...items].sort((a, b) => a.sortOrder - b.sortOrder)) {
     const key = `${item.expenseDate}-${item.category}`;
     const current = groups.get(key);
     if (current) current.items.push(item);
-    else groups.set(key, { key, date: item.expenseDate, category: item.category, items: [item] });
+    else groups.set(key, {
+      key,
+      date: item.expenseDate,
+      category: item.category,
+      items: [item],
+      firstSortOrder: item.sortOrder,
+    });
   }
 
-  const splitGroups: NotaGroup[] = [];
+  const splitGroups: Array<NotaGroup & { firstSortOrder: number }> = [];
   for (const group of groups.values()) {
     for (let index = 0; index < group.items.length; index += maxRows) {
       splitGroups.push({
@@ -78,7 +85,7 @@ export function groupNotaItems(items: ResumeItem[], maxRows: number): NotaGroup[
     }
   }
 
-  return splitGroups.sort((a, b) => a.date.localeCompare(b.date) || a.category.localeCompare(b.category));
+  return splitGroups.sort((a, b) => a.firstSortOrder - b.firstSortOrder);
 }
 
 export function chunk<T>(items: T[], size: number) {

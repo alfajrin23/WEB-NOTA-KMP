@@ -5,8 +5,11 @@
 import { CSSProperties } from "react";
 import { PrintPage } from "@/components/print/print-page";
 import { Stage1DebugBox } from "@/components/templates/stage1/Stage1Debug";
-import { buildJasaElectricNotaGroups, JasaElectricNotaGroup } from "@/lib/jasa-electric-groups";
-import { paginateNotasByVendor } from "@/lib/nota-pagination";
+import {
+  buildJasaElectricNotaGroups,
+  JasaElectricNotaGroup,
+  paginateJasaElectricNotaGroups,
+} from "@/lib/jasa-electric-groups";
 import { ResumeItem } from "@/types/domain";
 import {
   formatDateLong,
@@ -34,11 +37,12 @@ function JasaSlot({
 }) {
   const rows = padRows(group.items, JASA_ROWS);
   const isSplitTransaction = group.splitCount > 1;
-  const showGrandTotal = isSplitTransaction && group.isLastSplitNota;
+  const showTotalAmount = !isSplitTransaction || group.isLastSplitNota;
+  const totalAmount = isSplitTransaction ? group.transactionTotal : group.chunkSubtotal;
 
   return (
     <section
-      className={`multi-note jasa-slot${showGrandTotal ? " jasa-slot-with-grand-total" : ""}`}
+      className="multi-note jasa-slot"
       data-jasa-transaction={group.transactionKey}
       data-jasa-split={group.splitNumber}
       data-jasa-split-count={group.splitCount}
@@ -86,14 +90,8 @@ function JasaSlot({
       </table>
 
       <div className="jasa-total" data-overlap-role="total">
-        <span>{isSplitTransaction ? "Subtotal" : "Jumlah RP."}</span>
-        <strong>{group.chunkSubtotal ? formatPlainNumber(group.chunkSubtotal) : ""}</strong>
-        {showGrandTotal ? (
-          <>
-            <span className="jasa-grand-total-label">TOTAL KESELURUHAN</span>
-            <strong>{group.transactionTotal ? formatPlainNumber(group.transactionTotal) : ""}</strong>
-          </>
-        ) : null}
+        <span>Jumlah RP.</span>
+        <strong>{showTotalAmount && totalAmount ? formatPlainNumber(totalAmount) : ""}</strong>
       </div>
 
       <footer className="jasa-footer" data-overlap-role="signature">
@@ -111,8 +109,14 @@ function JasaSlot({
   );
 }
 
-export function JasaElectricTemplate({ doc, project, zoom, debug = false }: MultiStageTemplateProps) {
-  const groups = buildJasaElectricNotaGroups(doc.items, JASA_ROWS, itemAmount);
+export function JasaElectricTemplate({ doc, docs, project, zoom, debug = false }: MultiStageTemplateProps) {
+  const groups = (docs ?? [doc]).flatMap((sourceDoc) => (
+    buildJasaElectricNotaGroups(sourceDoc.items, JASA_ROWS, itemAmount).map((group) => ({
+      ...group,
+      key: `${sourceDoc.id}|${group.key}`,
+      transactionKey: `${sourceDoc.id}|${group.transactionKey}`,
+    }))
+  ));
   const printableGroups: JasaElectricNotaGroup<ResumeItem>[] = groups.length > 0
     ? groups
     : [{
@@ -127,7 +131,7 @@ export function JasaElectricTemplate({ doc, project, zoom, debug = false }: Mult
       splitCount: 1,
       isLastSplitNota: true,
     }];
-  const pages = paginateNotasByVendor(printableGroups, () => doc.vendorId, 2);
+  const pages = paginateJasaElectricNotaGroups(printableGroups, doc.vendorId, 2);
 
   return (
     <>

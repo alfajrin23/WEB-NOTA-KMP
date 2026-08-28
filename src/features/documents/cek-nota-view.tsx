@@ -16,6 +16,7 @@ import { isSpecialPLNKwitansi, PLNKwitansiBatchTemplate } from "@/components/tem
 import { hashNotaData } from "@/lib/resume-calculations";
 import { getPLNDocumentGroup, groupDocumentsForPresentation } from "@/lib/pln-document-groups";
 import { moveSpecialNotasToStageEnd } from "@/lib/nota-output-order";
+import { getTwoUpVendorBatchKey, getTwoUpVendorDocumentGroup, isTwoUpVendorNota } from "@/lib/nota-pagination";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
 import { formatProjectWilayah, formatRupiah } from "@/utils/format";
 import { GeneratedNota, StageCode } from "@/types/domain";
@@ -30,14 +31,19 @@ function docSortRank(doc: { stageCode: StageCode; vendorId: string }) {
 }
 
 type PreviewGroup =
-  | { kind: "document"; key: string; docs: [GeneratedNota] }
+  | { kind: "document"; key: string; docs: GeneratedNota[] }
   | { kind: "pln"; key: string; docs: GeneratedNota[] };
 
 function groupPreviewDocuments(source: GeneratedNota[]): PreviewGroup[] {
   const groups: PreviewGroup[] = [];
   for (const doc of source) {
     if (!isSpecialPLNKwitansi(doc)) {
-      groups.push({ kind: "document", key: doc.id, docs: [doc] });
+      const batchKey = getTwoUpVendorBatchKey(doc);
+      const existing = batchKey
+        ? groups.find((group) => group.kind === "document" && group.key === batchKey)
+        : undefined;
+      if (existing?.kind === "document") existing.docs.push(doc);
+      else groups.push({ kind: "document", key: batchKey ?? doc.id, docs: [doc] });
       continue;
     }
     const key = doc.printGroupKey || "pln-electricity";
@@ -80,6 +86,9 @@ export function CekNotaView() {
   const renderedDocs = useMemo(() => {
     if (selected && previewMode === "selected" && isSpecialPLNKwitansi(selected)) {
       return getPLNDocumentGroup(docs, selected);
+    }
+    if (selected && previewMode === "selected" && isTwoUpVendorNota(selected)) {
+      return getTwoUpVendorDocumentGroup(filteredDocs, selected);
     }
     const source = previewMode === "all" ? filteredDocs.slice(0, visibleCount) : selected ? [selected] : [];
     const last = source[source.length - 1];
@@ -210,6 +219,7 @@ export function CekNotaView() {
               <DocumentTemplateRenderer
                 key={`${group.docs[0].id}-${hashNotaData(group.docs[0])}`}
                 doc={group.docs[0]}
+                docs={group.docs}
                 project={project}
                 zoom={0.78}
               />

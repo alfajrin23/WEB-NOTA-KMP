@@ -20,11 +20,13 @@ export function canRenderDocumentTemplate() {
 
 export function DocumentTemplateRenderer({
   doc,
+  docs,
   project,
   zoom,
   debug = false,
 }: {
   doc: GeneratedNota;
+  docs?: GeneratedNota[];
   project: Project;
   zoom: number;
   debug?: boolean;
@@ -39,11 +41,11 @@ export function DocumentTemplateRenderer({
   }
 
   if (doc.vendorId === "vendor-internal" || doc.templateId === "template-nota-internal-non-vendor") {
-    return <NotaKosongTemplate doc={doc} project={project} zoom={zoom} debug={debug} />;
+    return <NotaKosongTemplate doc={doc} docs={docs} project={project} zoom={zoom} debug={debug} />;
   }
 
   if (doc.vendorId === "vendor-cbs" || doc.templateId === "template-cbs") {
-    return <CBSTemplate doc={doc} project={project} zoom={zoom} debug={debug} />;
+    return <CBSTemplate doc={doc} docs={docs} project={project} zoom={zoom} debug={debug} />;
   }
 
   if (doc.vendorId === "vendor-hpm" || doc.templateId === "template-hpm") {
@@ -59,11 +61,11 @@ export function DocumentTemplateRenderer({
   }
 
   if (doc.vendorId === "vendor-jasa-elektrik" || doc.templateId === "template-jasa-electric") {
-    return <JasaElectricTemplate doc={doc} project={project} zoom={zoom} debug={debug} />;
+    return <JasaElectricTemplate doc={doc} docs={docs} project={project} zoom={zoom} debug={debug} />;
   }
 
   if (doc.vendorId === "vendor-amanah" || doc.templateId === "template-amanah") {
-    return <AmanahTemplate doc={doc} project={project} zoom={zoom} debug={debug} />;
+    return <AmanahTemplate doc={doc} docs={docs} project={project} zoom={zoom} debug={debug} />;
   }
 
   if (doc.vendorId === "vendor-cbb" || doc.templateId === "template-invoice-cbb") {
@@ -71,12 +73,12 @@ export function DocumentTemplateRenderer({
   }
 
   if (doc.vendorId === "vendor-murah-maju" || doc.templateId === "template-murah-maju") {
-    return <MurahMajuTemplate doc={doc} project={project} zoom={zoom} debug={debug} />;
+    return <MurahMajuTemplate doc={doc} docs={docs} project={project} zoom={zoom} debug={debug} />;
   }
 
   if (doc.vendorId === "vendor-mandau" || doc.templateId === "template-tb-mandau") {
-    return <TBMandauTemplate doc={doc} project={project} zoom={zoom} debug={debug} />;
+    return <TBMandauTemplate doc={doc} docs={docs} project={project} zoom={zoom} debug={debug} />;
   }
 
-  return <NotaKosongTemplate doc={doc} project={project} zoom={zoom} debug={debug} />;
+  return <NotaKosongTemplate doc={doc} docs={docs} project={project} zoom={zoom} debug={debug} />;
 }

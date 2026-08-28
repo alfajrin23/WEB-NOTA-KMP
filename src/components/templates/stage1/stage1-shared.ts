@@ -10,6 +10,7 @@ import {
 
 export type Stage1TemplateProps = {
   doc: GeneratedNota;
+  docs?: GeneratedNota[];
   project: Project;
   zoom: number;
   debug?: boolean;

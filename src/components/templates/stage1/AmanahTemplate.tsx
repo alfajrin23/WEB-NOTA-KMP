@@ -88,7 +88,9 @@ function AmanahSlot({ group, project }: { group: NotaGroup | null; project: Stag
 }
 
 export function AmanahTemplate(props: Stage1TemplateProps) {
-  const groups = groupNotaItems(props.doc.items);
+  const groups = (props.docs ?? [props.doc]).flatMap((doc) => (
+    groupNotaItems(doc.items).map((group) => ({ ...group, key: `${doc.id}|${group.key}` }))
+  ));
   return (
     <LandscapeNotaPages groups={groups} vendorKey={props.doc.vendorId} zoom={props.zoom} layoutKey="amanah" debug={props.debug}>
       {(group) => <AmanahSlot group={group} project={props.project} />}

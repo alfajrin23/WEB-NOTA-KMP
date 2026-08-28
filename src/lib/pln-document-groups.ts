@@ -1,4 +1,5 @@
 import type { GeneratedNota } from "@/types/domain";
+import { getTwoUpVendorBatchKey } from "@/lib/nota-pagination";
 
 export const DEFAULT_PLN_PRINT_GROUP_KEY = "pln-electricity";
 
@@ -30,18 +31,31 @@ export type DocumentPresentationEntry = {
  */
 export function groupDocumentsForPresentation(source: GeneratedNota[]): DocumentPresentationEntry[] {
   const grouped: Array<{ key: string; docs: GeneratedNota[] }> = [];
-  const plnGroupIndexes = new Map<string, number>();
+  const groupIndexes = new Map<string, number>();
 
   for (const doc of source) {
     if (!isSpecialPLNKwitansi(doc)) {
+      const twoUpKey = getTwoUpVendorBatchKey(doc);
+      if (twoUpKey) {
+        const key = `two-up:${twoUpKey}`;
+        const existingIndex = groupIndexes.get(key);
+        if (existingIndex === undefined) {
+          groupIndexes.set(key, grouped.length);
+          grouped.push({ key, docs: [doc] });
+        } else {
+          grouped[existingIndex].docs.push(doc);
+        }
+        continue;
+      }
+
       grouped.push({ key: `document:${doc.id}`, docs: [doc] });
       continue;
     }
 
     const key = getPLNPresentationKey(doc);
-    const existingIndex = plnGroupIndexes.get(key);
+    const existingIndex = groupIndexes.get(key);
     if (existingIndex === undefined) {
-      plnGroupIndexes.set(key, grouped.length);
+      groupIndexes.set(key, grouped.length);
       grouped.push({ key, docs: [doc] });
     } else {
       grouped[existingIndex].docs.push(doc);

@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element */
 
-import { CSSProperties } from "react";
+import { CSSProperties, useLayoutEffect, useRef } from "react";
 import { PrintPage } from "@/components/print/print-page";
 import { Stage1DebugBox } from "@/components/templates/stage1/Stage1Debug";
 import {
@@ -69,6 +69,65 @@ function fieldStyle(box: Stage1Box): CSSProperties {
   return { left: box.x, top: box.y, width: box.width, height: box.height };
 }
 
+function useAutoFitText(contentKey: string, preferredFontSize: number, minimumFontSize: number) {
+  const textRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const element = textRef.current;
+    if (!element) return undefined;
+
+    const fit = () => {
+      if (element.clientWidth === 0 || element.clientHeight === 0) return;
+      let fontSize = preferredFontSize;
+      element.style.fontSize = `${fontSize}pt`;
+      while (
+        fontSize > minimumFontSize
+        && (element.scrollHeight > element.clientHeight || element.scrollWidth > element.clientWidth)
+      ) {
+        fontSize = Math.max(minimumFontSize, fontSize - 0.1);
+        element.style.fontSize = `${fontSize}pt`;
+      }
+      element.dataset.fitFontSize = fontSize.toFixed(1);
+    };
+
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(element);
+    window.addEventListener("beforeprint", fit);
+    const printMedia = window.matchMedia("print");
+    printMedia.addEventListener("change", fit);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("beforeprint", fit);
+      printMedia.removeEventListener("change", fit);
+    };
+  }, [contentKey, minimumFontSize, preferredFontSize]);
+
+  return textRef;
+}
+
+function KwitansiPurpose({ lines, style }: { lines: string[]; style: CSSProperties }) {
+  const preferredFontSize = lines.length >= 3 ? 6.4 : 6.7;
+  const purposeRef = useAutoFitText(lines.join("\n"), preferredFontSize, 5.4);
+
+  return (
+    <div
+      ref={purposeRef}
+      className="kwitansi-text kwitansi-purpose"
+      style={style}
+      data-purpose-line-count={lines.length}
+      data-overlap-role="table"
+    >
+      {lines.map((line, lineIndex) => <div className="kwitansi-purpose-line" key={lineIndex}>{line}</div>)}
+    </div>
+  );
+}
+
+function KwitansiNote({ note, style }: { note: string; style: CSSProperties }) {
+  const noteRef = useAutoFitText(note, 5.8, 5);
+  return <div ref={noteRef} className="kwitansi-text kwitansi-note" style={style}>{note}</div>;
+}
+
 function KwitansiSlip({
   doc,
   project,
@@ -81,14 +140,13 @@ function KwitansiSlip({
   const amount = getKwitansiAmount(doc);
   const purpose = getKwitansiPaymentLines(doc, project);
   const note = doc.kwitansiNote?.trim();
-  const purposeLines = note ? [...purpose, note] : purpose;
   const projectLines = getKwitansiProjectLines(doc, project);
   const receiver = doc.kwitansiReceiverName?.trim() || "";
   const payer = getKwitansiPayerName(doc, project);
   const number = doc.kwitansiNumber?.trim() ?? "";
   const color = templateColor(doc, index);
   const fields = kwitansiTemplateLayout.fields;
-  const renderedPurposeLines = layoutKwitansiPurposeLines(purposeLines);
+  const renderedPurposeLines = layoutKwitansiPurposeLines(purpose);
 
   return (
     <div className="stage1-kwitansi-slip" data-kwitansi-id={doc.id} data-stage-code={doc.stageCode} data-template-color={color} data-overlap-container data-overlap-label="Kwitansi">
@@ -96,14 +154,8 @@ function KwitansiSlip({
       {number ? <div className="kwitansi-text kwitansi-number-value" style={fieldStyle(fields.number)}>{number}</div> : null}
       <div className="kwitansi-text kwitansi-from" style={fieldStyle(fields.payer)}>{payer}</div>
       <div className="kwitansi-text kwitansi-words" style={fieldStyle(fields.amountWords)}>{getKwitansiAmountWords(doc)}</div>
-      <div
-        className="kwitansi-text kwitansi-purpose"
-        style={fieldStyle(fields.payment)}
-        data-purpose-line-count={renderedPurposeLines.length}
-        data-overlap-role="table"
-      >
-        {renderedPurposeLines.map((line, lineIndex) => <div className="kwitansi-purpose-line" key={lineIndex}>{line}</div>)}
-      </div>
+      <KwitansiPurpose lines={renderedPurposeLines} style={fieldStyle(fields.payment)} />
+      {note ? <KwitansiNote note={note} style={fieldStyle(fields.note)} /> : null}
       <div className="kwitansi-text kwitansi-project" style={fieldStyle(fields.project)}>{projectLines[0] ?? ""}</div>
       <div className="kwitansi-text kwitansi-role" style={fieldStyle(fields.role)}>{projectLines[1] ?? ""}</div>
       <div className="kwitansi-text kwitansi-amount" style={fieldStyle(fields.amount)} data-overlap-role="total">{formatPlainNumber(amount)},-</div>

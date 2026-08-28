@@ -686,10 +686,10 @@ textarea {
 .kwitansi-purpose {
   display: grid;
   align-content: start;
-  grid-auto-rows: min-content;
+  grid-auto-rows: 5.1mm;
   row-gap: 0;
   font-size: 6.7pt;
-  line-height: 1.1;
+  line-height: 1;
   white-space: normal;
   overflow: hidden;
   overflow-wrap: break-word;
@@ -698,20 +698,36 @@ textarea {
 
 .kwitansi-purpose[data-purpose-line-count="3"] {
   font-size: 6.4pt;
-  line-height: 1.06;
+  line-height: 1;
 }
 
 .kwitansi-purpose-line {
+  display: flex;
+  min-height: 5.1mm;
+  align-items: flex-end;
   margin: 0;
   max-width: 100%;
+  padding-bottom: 0.05mm;
+  white-space: nowrap;
+}
+
+.kwitansi-note {
+  overflow: hidden;
+  overflow-wrap: break-word;
+  font-size: 5.8pt;
+  line-height: 1.05;
+  white-space: normal;
 }
 
 .kwitansi-project,
 .kwitansi-role {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
   text-align: center;
   font-size: 7pt;
   line-height: 1;
-  padding: 0.2mm 0.8mm;
+  padding: 0 0.8mm 0.1mm;
 }
 
 .kwitansi-amount {

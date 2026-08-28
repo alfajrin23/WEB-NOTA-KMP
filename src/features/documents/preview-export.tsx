@@ -12,6 +12,7 @@ import { KwitansiBatchTemplate } from "@/components/templates/kwitansi/KwitansiB
 import { isSpecialPLNKwitansi, PLNKwitansiBatchTemplate } from "@/components/templates/multi-stage/PLNTemplate";
 import { buildProjectSummary, hashNotaData } from "@/lib/resume-calculations";
 import { moveSpecialNotasToStageEnd } from "@/lib/nota-output-order";
+import { getTwoUpVendorBatchKey, isTwoUpVendorNota } from "@/lib/nota-pagination";
 import { cn } from "@/lib/utils";
 import { formatDateIndonesia, formatNumber, formatProjectWilayah, formatRupiah } from "@/utils/format";
 import { GeneratedNota, Project, TemplateAssignment } from "@/types/domain";
@@ -28,7 +29,7 @@ export type PreviewPayload = {
 };
 
 type PrintableNoteGroup =
-  | { kind: "document"; key: string; docs: [GeneratedNota] }
+  | { kind: "document"; key: string; docs: GeneratedNota[] }
   | { kind: "pln"; key: string; docs: GeneratedNota[] };
 
 function groupPrintableNotes(docs: GeneratedNota[]): PrintableNoteGroup[] {
@@ -36,7 +37,12 @@ function groupPrintableNotes(docs: GeneratedNota[]): PrintableNoteGroup[] {
 
   for (const doc of moveSpecialNotasToStageEnd(docs)) {
     if (!isSpecialPLNKwitansi(doc)) {
-      groups.push({ kind: "document", key: doc.id, docs: [doc] });
+      const batchKey = getTwoUpVendorBatchKey(doc);
+      const existing = batchKey
+        ? groups.find((group) => group.kind === "document" && group.key === batchKey)
+        : undefined;
+      if (existing?.kind === "document") existing.docs.push(doc);
+      else groups.push({ kind: "document", key: batchKey ?? doc.id, docs: [doc] });
       continue;
     }
 
@@ -60,10 +66,6 @@ function groupKwitansiByStage(docs: GeneratedNota[]) {
     else groups.set(doc.stageCode, [doc]);
   }
   return [...groups.entries()].map(([stageCode, stageDocs]) => ({ stageCode, docs: stageDocs }));
-}
-
-function isJasaElectricNota(doc: GeneratedNota) {
-  return doc.documentType === "nota" && (doc.vendorId === "vendor-jasa-elektrik" || doc.templateId === "template-jasa-electric");
 }
 
 function safeDownloadName(value: string) {
@@ -232,7 +234,7 @@ export function DocumentPreviewModal({
   const hasMultipleProjects = projectEntries.length > 1;
   const isKwitansiPayload = useMemo(() => allPayloadDocs.length > 0 && allPayloadDocs.every((doc) => doc.documentType === "kwitansi"), [allPayloadDocs]);
   const hasSpecialPlnNota = useMemo(() => allPayloadDocs.some((doc) => doc.documentType === "nota" && isSpecialPLNKwitansi(doc)), [allPayloadDocs]);
-  const hasJasaElectricNota = useMemo(() => allPayloadDocs.some(isJasaElectricNota), [allPayloadDocs]);
+  const hasTwoUpNota = useMemo(() => allPayloadDocs.some(isTwoUpVendorNota), [allPayloadDocs]);
   const missingKwitansiReceivers = useMemo(() => allPayloadDocs.filter((doc) => doc.documentType === "kwitansi" && !doc.kwitansiReceiverName?.trim()), [allPayloadDocs]);
   const renderedNoteDocs = useMemo(() => {
     const visible = docs.slice(0, visibleCount);
@@ -296,8 +298,8 @@ export function DocumentPreviewModal({
       return;
     }
 
-    if (hasJasaElectricNota) {
-      toast.info("Dialog cetak dibuka. Pilih Save as PDF agar layout Nota Jasa Electric sama dengan preview.");
+    if (hasTwoUpNota) {
+      toast.info("Dialog cetak dibuka. Pilih Save as PDF agar pagination dua nota per halaman sama dengan preview.");
       window.print();
       return;
     }
@@ -320,7 +322,7 @@ export function DocumentPreviewModal({
     } finally {
       setDownloading(false);
     }
-  }, [hasJasaElectricNota, hasSpecialPlnNota, isKwitansiPayload, missingKwitansiReceivers.length, payload, projectEntries, templateAssignments]);
+  }, [hasSpecialPlnNota, hasTwoUpNota, isKwitansiPayload, missingKwitansiReceivers.length, payload, projectEntries, templateAssignments]);
 
   if (!payload) return null;
 
@@ -410,6 +412,7 @@ export function DocumentPreviewModal({
                       <DocumentTemplateRenderer
                         key={`${group.docs[0].id}-${hashNotaData(group.docs[0])}`}
                         doc={group.docs[0]}
+                        docs={group.docs}
                         project={entry.project}
                         zoom={zoom}
                       />
@@ -426,6 +429,7 @@ export function DocumentPreviewModal({
                       <DocumentTemplateRenderer
                         key={`print-${group.docs[0].id}-${hashNotaData(group.docs[0])}`}
                         doc={group.docs[0]}
+                        docs={group.docs}
                         project={entry.project}
                         zoom={1}
                       />
@@ -443,6 +447,7 @@ export function DocumentPreviewModal({
                   <DocumentTemplateRenderer
                     key={`${group.docs[0].id}-${hashNotaData(group.docs[0])}`}
                     doc={group.docs[0]}
+                    docs={group.docs}
                     project={payload.project}
                     zoom={zoom}
                   />
@@ -466,6 +471,7 @@ export function DocumentPreviewModal({
                     <DocumentTemplateRenderer
                       key={`print-${group.docs[0].id}-${hashNotaData(group.docs[0])}`}
                       doc={group.docs[0]}
+                      docs={group.docs}
                       project={payload.project}
                       zoom={1}
                     />

@@ -94,7 +94,9 @@ function MurahMajuSlot({ group, project }: { group: NotaGroup | null; project: S
 }
 
 export function MurahMajuTemplate(props: Stage1TemplateProps) {
-  const groups = groupNotaItems(props.doc.items);
+  const groups = (props.docs ?? [props.doc]).flatMap((doc) => (
+    groupNotaItems(doc.items).map((group) => ({ ...group, key: `${doc.id}|${group.key}` }))
+  ));
   return (
     <LandscapeNotaPages groups={groups} vendorKey={props.doc.vendorId} zoom={props.zoom} layoutKey="murahMaju" debug={props.debug}>
       {(group) => <MurahMajuSlot group={group} project={props.project} />}

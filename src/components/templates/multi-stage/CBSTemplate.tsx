@@ -159,9 +159,10 @@ function CBSSlot({
   );
 }
 
-export function CBSTemplate({ doc, project, zoom, debug = false }: MultiStageTemplateProps) {
-  const groups = groupNotaItems(doc.items, CBS_ROWS)
-    .sort((a, b) => (a.items[0]?.sortOrder ?? 0) - (b.items[0]?.sortOrder ?? 0));
+export function CBSTemplate({ doc, docs, project, zoom, debug = false }: MultiStageTemplateProps) {
+  const groups = (docs ?? [doc]).flatMap((sourceDoc) => (
+    groupNotaItems(sourceDoc.items, CBS_ROWS).map((group) => ({ ...group, key: `${sourceDoc.id}|${group.key}` }))
+  )).sort((a, b) => (a.items[0]?.sortOrder ?? 0) - (b.items[0]?.sortOrder ?? 0));
   const printableGroups = groups.length > 0
     ? groups
     : [{ key: "blank", date: project.projectDate, category: "", items: [] }];

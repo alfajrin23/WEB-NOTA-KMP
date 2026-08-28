@@ -17,6 +17,7 @@ import { formatRupiah } from "@/utils/format";
 import { hashNotaData } from "@/lib/resume-calculations";
 import { getPLNDocumentGroup, groupDocumentsForPresentation } from "@/lib/pln-document-groups";
 import { moveSpecialNotasToStageEnd } from "@/lib/nota-output-order";
+import { getTwoUpVendorBatchKey, getTwoUpVendorDocumentGroup, isTwoUpVendorNota } from "@/lib/nota-pagination";
 import { DocumentTemplateRenderer } from "@/components/templates/DocumentTemplateRenderer";
 import { isSpecialPLNKwitansi, PLNKwitansiBatchTemplate } from "@/components/templates/multi-stage/PLNTemplate";
 import { getKwitansiPageChunk, KwitansiBatchTemplate } from "@/components/templates/kwitansi/KwitansiBatchTemplate";
@@ -28,16 +29,12 @@ function safeDownloadName(value: string) {
 }
 
 type PreviewGroup =
-  | { kind: "document"; key: string; docs: [GeneratedNota] }
+  | { kind: "document"; key: string; docs: GeneratedNota[] }
   | { kind: "kwitansi"; key: string; docs: GeneratedNota[] }
   | { kind: "pln"; key: string; docs: GeneratedNota[] };
 
 function isRegularKwitansi(doc: GeneratedNota) {
   return doc.documentType === "kwitansi" && !isSpecialPLNKwitansi(doc);
-}
-
-function isJasaElectricNota(doc: GeneratedNota) {
-  return doc.documentType === "nota" && (doc.vendorId === "vendor-jasa-elektrik" || doc.templateId === "template-jasa-electric");
 }
 
 function groupPreviewDocuments(source: GeneratedNota[]): PreviewGroup[] {
@@ -51,7 +48,12 @@ function groupPreviewDocuments(source: GeneratedNota[]): PreviewGroup[] {
       continue;
     }
     if (!isSpecialPLNKwitansi(doc)) {
-      groups.push({ kind: "document", key: doc.id, docs: [doc] });
+      const batchKey = getTwoUpVendorBatchKey(doc);
+      const existing = batchKey
+        ? groups.find((group) => group.kind === "document" && group.key === batchKey)
+        : undefined;
+      if (existing?.kind === "document") existing.docs.push(doc);
+      else groups.push({ kind: "document", key: batchKey ?? doc.id, docs: [doc] });
       continue;
     }
     const key = doc.printGroupKey || "pln-electricity";
@@ -106,6 +108,9 @@ export function GenerateDocumentsView() {
     if (selected && previewMode === "selected" && isSpecialPLNKwitansi(selected)) {
       return getPLNDocumentGroup(docs, selected);
     }
+    if (selected && previewMode === "selected" && isTwoUpVendorNota(selected)) {
+      return getTwoUpVendorDocumentGroup(filteredDocs, selected);
+    }
     const source = previewMode === "all" ? filteredDocs.slice(0, visibleCount) : selected ? [selected] : [];
     const last = source[source.length - 1];
     const next = filteredDocs[visibleCount];
@@ -146,9 +151,9 @@ export function GenerateDocumentsView() {
 
   const downloadPdf = useCallback(async (doc: GeneratedNota | null) => {
     if (!project || !doc || isDownloading) return;
-    if (isSpecialPLNKwitansi(doc) || isRegularKwitansi(doc) || isJasaElectricNota(doc)) {
+    if (isSpecialPLNKwitansi(doc) || isRegularKwitansi(doc) || isTwoUpVendorNota(doc)) {
       // Renderer browser adalah sumber layout untuk PLN dua-slip, kwitansi,
-      // dan Nota Jasa Electric dua-up.
+      // dan semua template nota dua-up.
       window.print();
       return;
     }
@@ -296,6 +301,7 @@ export function GenerateDocumentsView() {
               <DocumentTemplateRenderer
                 key={`${group.docs[0].id}-${hashNotaData(group.docs[0])}`}
                 doc={group.docs[0]}
+                docs={group.docs}
                 project={project}
                 zoom={zoom}
                 debug={debugLayout}
