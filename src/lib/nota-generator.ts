@@ -14,9 +14,9 @@ const PLN_VENDOR_ID = "vendor-pln";
 const PLN_PRINT_GROUP_KEY = "pln-electricity";
 
 export const KWITANSI_TARGET_COUNTS: Partial<Record<StageCode, number>> = {
-  TAHAP_I: 14,
-  TAHAP_II: 15,
-  TAHAP_III: 21,
+  TAHAP_I: 21,
+  TAHAP_II: 22,
+  TAHAP_III: 28,
 };
 
 export type KwitansiGenerationIssue = {
