@@ -2,6 +2,7 @@ import { GeneratedNota, Project, ResumeItem, StageCode } from "@/types/domain";
 import { isOutsideCoreStage } from "@/constants/stages";
 import { formatDateIndonesia, formatProjectKdkmpWilayah, parseDateInputToIso, terbilangRupiah } from "@/utils/format";
 import { getResumeItemAmount } from "./resume-calculations";
+import { isOperationalSupportKwitansiDoc } from "./kwitansi-rules";
 
 function normalized(value: string | undefined | null) {
   return (value ?? "").trim().toLowerCase();
@@ -56,7 +57,8 @@ export function getKwitansiCity(doc: GeneratedNota, project: Project) {
 
 export function getKwitansiPayerName(doc: GeneratedNota, project: Project) {
   const explicit = doc.kwitansiPayerName?.trim();
-  if (explicit) return explicit;
+  if (explicit && !(isOperationalSupportKwitansiDoc(doc) && normalized(explicit).includes("dukungan operasional"))) return explicit;
+  if (isOperationalSupportKwitansiDoc(doc)) return "Babinsa";
   if (canKwitansiPayerBeBlank(doc)) return "";
   return (
     project.responsibleName?.trim() ||

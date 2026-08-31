@@ -1,4 +1,4 @@
-import type { GeneratedNota, KwitansiWorkerSlot } from "@/types/domain";
+import type { GeneratedNota, KwitansiWorkerSlot, StageCode } from "@/types/domain";
 
 type KwitansiSyncGroup = "mandor" | "kepala_tukang" | "tukang" | "kenek";
 
@@ -211,6 +211,29 @@ export function buildKwitansiSyncKeyMap(
   return result;
 }
 
+export function getKwitansiReceiverSyncPlan(
+  docs: GeneratedNota[],
+  sourceDoc: GeneratedNota,
+  syncKeysByDocId: Map<string, KwitansiSyncKey>,
+  options: {
+    roleText?: string;
+    targetStages?: ReadonlySet<StageCode>;
+  } = {},
+) {
+  const syncKey = kwitansiSyncKeyForDoc(sourceDoc, options.roleText)
+    ?? syncKeysByDocId.get(sourceDoc.id)
+    ?? null;
+  const targets = syncKey
+    ? docs.filter((doc) => (
+      doc.id !== sourceDoc.id &&
+      (!options.targetStages || options.targetStages.has(doc.stageCode)) &&
+      syncKeysByDocId.get(doc.id) === syncKey
+    ))
+    : [];
+
+  return { syncKey, targets };
+}
+
 export function kwitansiSyncLabel(key: KwitansiSyncKey) {
   if (key === "mandor") return "Mandor";
   if (key === "kepala_tukang") return "Kepala Tukang";
@@ -218,6 +241,17 @@ export function kwitansiSyncLabel(key: KwitansiSyncKey) {
   if (key.startsWith("kenek_")) return `Kenek ${key.slice(-1)}`;
   if (key.startsWith("terampil_")) return `Pekerja Terampil ${key.slice(-1)}`;
   return `Pekerja Buruh / Laden ${key.slice(-1)}`;
+}
+
+export function isOperationalSupportKwitansiDoc(doc: GeneratedNota) {
+  const text = normalized(joinedDocText(doc));
+  const compact = text.replace(/[^a-z0-9]+/g, "");
+  return (
+    compact.includes("dukunganoperasionalgerai") ||
+    compact.includes("dukunganoperasionalbabinsa") ||
+    text.includes("operasional gerai") ||
+    text.includes("operasional babinsa")
+  );
 }
 
 export function getAutofillKwitansiReceiver(doc: GeneratedNota) {
@@ -235,9 +269,9 @@ export function getAutofillKwitansiReceiver(doc: GeneratedNota) {
     && text.includes("uang jalan")
     && text.includes("pengawalan lapangan");
 
+  if (isOperationalSupportKwitansiDoc(doc)) return responsibleName;
   if (isSnackboxMeeting || isEscortTravel) return responsibleName;
   if (isSurveyFeasibility) return "Mandor";
-  if (text.includes("kenek") || /pembantu\s+(sopir|supir)/.test(text)) return "Dika Nurdiansyah";
   if (text.includes("pratama project mandiri") || text.includes("sumur bor") || text.includes("cut n fill")) return "H. Nana";
   if (text.includes("baja ringan")) return "Dadang Bahtiar";
   if (text.includes("pintu kaca frameless")) return "Sarwoto";

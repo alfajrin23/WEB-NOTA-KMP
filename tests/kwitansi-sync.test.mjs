@@ -3,6 +3,8 @@ import test from "node:test";
 
 import {
   buildKwitansiSyncKeyMap,
+  getAutofillKwitansiReceiver,
+  getKwitansiReceiverSyncPlan,
   kwitansiSyncKeyForDoc,
 } from "../src/lib/kwitansi-rules.ts";
 
@@ -183,4 +185,63 @@ test("Tukang pokok dan lembur memakai slot yang sama saat disinkronkan ke tahap 
       "TAHAP_IV:lembur Tukang",
     ],
   );
+});
+
+test("Sinkron penerima pekerja menyertakan pokok dan lembur pada tahap yang sama", () => {
+  const docs = STAGES.flatMap((stageCode) => ([
+    ...[1, 2, 3, 4].map((slot) => makeDoc({
+      stageCode,
+      role: "lembur Tukang",
+      slot: undefined,
+      personIndex: slot,
+      itemId: `legacy-${stageCode}-lembur-tukang-${slot}`,
+      printOrder: slot,
+    })),
+    ...[1, 2, 3, 4].map((slot) => makeDoc({
+      stageCode,
+      role: "Tukang",
+      slot: undefined,
+      personIndex: slot,
+      itemId: `legacy-${stageCode}-pokok-tukang-${slot}`,
+      printOrder: 10 + slot,
+    })),
+  ]));
+  const keys = buildKwitansiSyncKeyMap(docs, (doc) => doc.kwitansiRoleName);
+  const source = docs.find((doc) => doc.stageCode === "TAHAP_I" && doc.kwitansiRoleName === "lembur Tukang" && doc.printOrder === 2);
+  assert.ok(source);
+
+  const { syncKey, targets } = getKwitansiReceiverSyncPlan(docs, source, keys, {
+    roleText: source.kwitansiRoleName,
+    targetStages: new Set(STAGES),
+  });
+
+  assert.equal(syncKey, "tukang_2");
+  assert.equal(targets.length, 7);
+  assert.ok(targets.some((doc) => doc.stageCode === "TAHAP_I" && doc.kwitansiRoleName === "Tukang"));
+  assert.deepEqual(
+    targets.map((doc) => `${doc.stageCode}:${doc.kwitansiRoleName}`).sort(),
+    [
+      "TAHAP_I:Tukang",
+      "TAHAP_II:Tukang",
+      "TAHAP_II:lembur Tukang",
+      "TAHAP_III:Tukang",
+      "TAHAP_III:lembur Tukang",
+      "TAHAP_IV:Tukang",
+      "TAHAP_IV:lembur Tukang",
+    ],
+  );
+});
+
+test("Nama pekerja awal kosong dan dukungan operasional memakai nama Babinsa", () => {
+  const kenekDoc = makeDoc({ stageCode: "TAHAP_I", role: "Kenek/Kuli", slot: 1 });
+  assert.equal(getAutofillKwitansiReceiver(kenekDoc), "");
+
+  const operasionalDoc = makeDoc({
+    stageCode: "TAHAP_VII",
+    role: "Dukungan Operasional Babinsa",
+    itemId: "operasional-babinsa",
+  });
+  operasionalDoc.projectMeta.responsibleName = "Nama Babinsa Desa";
+
+  assert.equal(getAutofillKwitansiReceiver(operasionalDoc), "Nama Babinsa Desa");
 });

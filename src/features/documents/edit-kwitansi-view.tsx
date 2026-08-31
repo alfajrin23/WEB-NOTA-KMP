@@ -25,7 +25,7 @@ import {
   getKwitansiProjectLines,
   getKwitansiRole,
 } from "@/lib/kwitansi-fields";
-import { buildKwitansiSyncKeyMap, kwitansiSyncKeyForDoc, kwitansiSyncLabel, type KwitansiSyncKey } from "@/lib/kwitansi-rules";
+import { buildKwitansiSyncKeyMap, getKwitansiReceiverSyncPlan, kwitansiSyncLabel, type KwitansiSyncKey } from "@/lib/kwitansi-rules";
 import { getKwitansiGenerationDiagnostics, KWITANSI_TARGET_COUNTS } from "@/lib/nota-generator";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
 import { formatProjectKdkmpWilayah, formatProjectWilayah, formatRupiah, numericInputValue } from "@/utils/format";
@@ -70,7 +70,7 @@ function buildDraft(doc: EditableKwitansiDoc, project: Project): EditDraft {
   const projectLines = getKwitansiProjectLines(doc, project);
   return {
     number: doc.kwitansiNumber ?? "",
-    payer: doc.kwitansiPayerName?.trim() || getKwitansiPayerName(doc, project),
+    payer: getKwitansiPayerName(doc, project),
     amountWords: doc.kwitansiAmountWords?.trim() || getKwitansiAmountWords(doc),
     paymentDescription: savedPaymentDescription || defaultPaymentDescription,
     amount: String(getKwitansiAmount(doc)),
@@ -450,17 +450,13 @@ export function EditKwitansiView() {
         warnaTemplate: draft.templateColor,
       };
       const receiverChanged = receiverName !== (editingDoc.kwitansiReceiverName ?? "").trim();
-      const syncKey = receiverChanged
-        ? kwitansiSyncKeyForDoc(editingDoc, draft.role) ?? syncKeysByDocId.get(editingDoc.id) ?? null
-        : null;
-      const syncTargets = syncKey
-        ? docs.filter((doc) => (
-          doc.id !== editingDoc.id &&
-          doc.stageCode !== editingDoc.stageCode &&
-          CORE_KWITANSI_SYNC_STAGES.has(doc.stageCode) &&
-          syncKeysByDocId.get(doc.id) === syncKey
-        ))
-        : [];
+      const syncPlan = receiverChanged && CORE_KWITANSI_SYNC_STAGES.has(editingDoc.stageCode)
+        ? getKwitansiReceiverSyncPlan(docs, editingDoc, syncKeysByDocId, {
+          roleText: draft.role,
+          targetStages: CORE_KWITANSI_SYNC_STAGES,
+        })
+        : { syncKey: null, targets: [] };
+      const { syncKey, targets: syncTargets } = syncPlan;
       const shouldSync = syncTargets.length > 0;
 
       await updateKwitansiFields(editingDoc.projectId, editingDoc.id, patch, {
