@@ -76,9 +76,9 @@ test("Kepala Tukang tersinkron ke satu kwitansi pada tiga tahap lain", () => {
   assert.ok(docs.every((doc) => kwitansiSyncKeyForDoc(doc, doc.kwitansiRoleName) === "kepala_tukang"));
 });
 
-test("Pekerja Terampil hanya tersinkron ke slot yang sama", () => {
+test("Pekerja Terampil dan Tukang hanya tersinkron ke slot yang sama", () => {
   const docs = STAGES.flatMap((stageCode) => (
-    [1, 2, 3, 4].map((slot) => makeDoc({ stageCode, role: "Pekerja Terampil", slot, personIndex: slot }))
+    [1, 2, 3, 4].map((slot) => makeDoc({ stageCode, role: stageCode === "TAHAP_I" ? "Tukang" : "Pekerja Terampil", slot, personIndex: slot }))
   ));
 
   for (const slot of [1, 2]) {
@@ -91,11 +91,11 @@ test("Pekerja Terampil hanya tersinkron ke slot yang sama", () => {
   }
 });
 
-test("Pekerja Buruh dan Laden berbagi kelompok tetapi tetap terpisah per slot", () => {
+test("Pekerja Buruh, Laden, dan Kenek berbagi kelompok tetapi tetap terpisah per slot", () => {
   const docs = STAGES.flatMap((stageCode, stageIndex) => (
     [1, 2, 3, 4].map((slot) => makeDoc({
       stageCode,
-      role: stageIndex < 2 ? "Pekerja Buruh" : "Laden",
+      role: stageIndex === 0 ? "Kenek/Kuli" : stageIndex < 2 ? "Pekerja Buruh" : "Laden",
       slot,
       personIndex: slot,
     }))
@@ -114,7 +114,7 @@ test("Data lama mengambil slot dari suffix item worker_N", () => {
   const docs = STAGES.flatMap((stageCode) => (
     [1, 2, 3, 4].map((slot) => makeDoc({
       stageCode,
-      role: "Pekerja Terampil",
+      role: "Tukang",
       slot: undefined,
       personIndex: slot,
     }))
@@ -123,7 +123,7 @@ test("Data lama mengambil slot dari suffix item worker_N", () => {
 
   for (const doc of docs) {
     const slot = /worker_(\d)$/.exec(doc.items[0].id)?.[1];
-    assert.equal(keys.get(doc.id), `terampil_${slot}`);
+    assert.equal(keys.get(doc.id), `tukang_${slot}`);
   }
 });
 
@@ -131,7 +131,7 @@ test("Data lama tanpa metadata atau suffix mendapat slot berdasarkan urutan per 
   const docs = STAGES.flatMap((stageCode) => (
     [1, 2, 3, 4].map((position) => makeDoc({
       stageCode,
-      role: "Pekerja Buruh",
+      role: "Kenek/Kuli",
       slot: undefined,
       personIndex: position,
       itemId: `legacy-${stageCode}-${position}`,
@@ -142,6 +142,45 @@ test("Data lama tanpa metadata atau suffix mendapat slot berdasarkan urutan per 
 
   for (const stageCode of STAGES) {
     const stageDocs = docs.filter((doc) => doc.stageCode === stageCode);
-    assert.deepEqual(stageDocs.map((doc) => keys.get(doc.id)), ["buruh_1", "buruh_2", "buruh_3", "buruh_4"]);
+    assert.deepEqual(stageDocs.map((doc) => keys.get(doc.id)), ["kenek_1", "kenek_2", "kenek_3", "kenek_4"]);
   }
+});
+
+test("Tukang pokok dan lembur memakai slot yang sama saat disinkronkan ke tahap lain", () => {
+  const docs = STAGES.flatMap((stageCode) => ([
+    ...[1, 2, 3, 4].map((slot) => makeDoc({
+      stageCode,
+      role: "lembur Tukang",
+      slot: undefined,
+      personIndex: slot,
+      itemId: `legacy-${stageCode}-lembur-tukang-${slot}`,
+      printOrder: slot,
+    })),
+    ...[1, 2, 3, 4].map((slot) => makeDoc({
+      stageCode,
+      role: "Tukang",
+      slot: undefined,
+      personIndex: slot,
+      itemId: `legacy-${stageCode}-pokok-tukang-${slot}`,
+      printOrder: 10 + slot,
+    })),
+  ]));
+  const keys = buildKwitansiSyncKeyMap(docs, (doc) => doc.kwitansiRoleName);
+  const source = docs.find((doc) => doc.stageCode === "TAHAP_I" && doc.kwitansiRoleName === "lembur Tukang" && doc.printOrder === 2);
+  assert.ok(source);
+  const targets = docs.filter((doc) => doc.stageCode !== source.stageCode && keys.get(doc.id) === keys.get(source.id));
+
+  assert.equal(keys.get(source.id), "tukang_2");
+  assert.equal(targets.length, 6);
+  assert.deepEqual(
+    targets.map((doc) => `${doc.stageCode}:${doc.kwitansiRoleName}`).sort(),
+    [
+      "TAHAP_II:Tukang",
+      "TAHAP_II:lembur Tukang",
+      "TAHAP_III:Tukang",
+      "TAHAP_III:lembur Tukang",
+      "TAHAP_IV:Tukang",
+      "TAHAP_IV:lembur Tukang",
+    ],
+  );
 });

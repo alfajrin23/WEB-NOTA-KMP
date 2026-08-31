@@ -55,8 +55,10 @@ export function getKwitansiCity(doc: GeneratedNota, project: Project) {
 }
 
 export function getKwitansiPayerName(doc: GeneratedNota, project: Project) {
+  const explicit = doc.kwitansiPayerName?.trim();
+  if (explicit) return explicit;
+  if (canKwitansiPayerBeBlank(doc)) return "";
   return (
-    doc.kwitansiPayerName?.trim() ||
     project.responsibleName?.trim() ||
     doc.projectMeta.responsibleName?.trim() ||
     ""
@@ -114,7 +116,75 @@ function isPpmServiceDoc(doc: GeneratedNota) {
   return isPpmDoc(doc) || itemName.includes("cut n fill") || itemName.includes("sumur bor");
 }
 
+function docSearchText(doc: GeneratedNota) {
+  return normalized([
+    doc.stageCode,
+    doc.stageName,
+    doc.vendorId,
+    doc.vendorName,
+    doc.kwitansiRoleName,
+    doc.kwitansiPaymentDescription,
+    ...doc.categoryNames,
+    ...doc.items.flatMap((item) => [
+      item.itemName,
+      item.category,
+      item.categoryName,
+      item.vendorName,
+      item.vendorId,
+      item.notes,
+    ]),
+  ].filter(Boolean).join(" "));
+}
+
+function compactText(value: string) {
+  return value.replace(/[^a-z0-9]+/g, "");
+}
+
+function isStageSixDoc(doc: GeneratedNota) {
+  return doc.stageCode === "TAHAP_VI" || doc.items.some((item) => item.stageCode === "TAHAP_VI");
+}
+
+function isStageSixSnackboxMeetingDoc(doc: GeneratedNota) {
+  if (!isStageSixDoc(doc)) return false;
+  const text = docSearchText(doc);
+  return compactText(text).includes("snackboxrapat");
+}
+
+function isStageSixSurveyFeasibilityDoc(doc: GeneratedNota) {
+  if (!isStageSixDoc(doc)) return false;
+  const text = docSearchText(doc);
+  return (
+    (text.includes("pencarian") || text.includes("survei") || text.includes("survey"))
+    && text.includes("kelayakan lahan")
+  );
+}
+
+function isStageSixEscortTravelDoc(doc: GeneratedNota) {
+  if (!isStageSixDoc(doc) || isStageSixSurveyFeasibilityDoc(doc)) return false;
+  const text = docSearchText(doc);
+  return text.includes("uang jalan") && text.includes("pengawalan lapangan");
+}
+
+function isStageSixDrillingWellDoc(doc: GeneratedNota) {
+  if (!isStageSixDoc(doc)) return false;
+  const text = docSearchText(doc);
+  return text.includes("sumur bor") || text.includes("pembuatan sumur");
+}
+
+function isStageSixExcavatorRentalDoc(doc: GeneratedNota) {
+  return isStageSixDoc(doc) && isPpmDoc(doc) && docSearchText(doc).includes("excavator");
+}
+
+export function canKwitansiPayerBeBlank(doc: GeneratedNota) {
+  return isStageSixSnackboxMeetingDoc(doc) || isStageSixEscortTravelDoc(doc);
+}
+
 function outsideWorkRole(doc: GeneratedNota) {
+  if (isStageSixSnackboxMeetingDoc(doc)) return "";
+  if (isStageSixEscortTravelDoc(doc)) return "Babinsa";
+  if (isStageSixSurveyFeasibilityDoc(doc)) return "Mandor";
+  if (isStageSixDrillingWellDoc(doc)) return "Pemilik";
+
   const itemName = normalized(doc.items[0]?.itemName);
   if (itemName.includes("sosialisasi") || itemName.includes("rapat koordinasi")) return "Babinsa";
   if (
@@ -127,6 +197,11 @@ function outsideWorkRole(doc: GeneratedNota) {
 }
 
 function outsideCoreWorkName(doc: GeneratedNota, fallbackRole: string) {
+  if (isStageSixSnackboxMeetingDoc(doc)) return "Snackbox Rapat Koordinasi";
+  if (isStageSixSurveyFeasibilityDoc(doc)) return "Pencarian dan Survei Kelayakan Lahan";
+  if (isStageSixEscortTravelDoc(doc)) return "Uang Jalan Pengawalan Lapangan";
+  if (isStageSixDrillingWellDoc(doc)) return "Pembuatan Sumur Bor";
+
   const raw = cleanRole(doc.items[0]?.itemName || fallbackRole);
   const text = normalized(raw);
 
@@ -159,6 +234,7 @@ function outsideCoreContextLine(workName: string, project: Project, dateText: st
 }
 
 export function getDefaultKwitansiRole(doc: GeneratedNota) {
+  if (isStageSixDrillingWellDoc(doc)) return "Pemilik";
   if (isPpmServiceDoc(doc)) return "Pemilik";
   if (isLemburDoc(doc)) return "Mandor";
   const outsideRole = outsideWorkRole(doc);
@@ -263,6 +339,12 @@ export function getDefaultKwitansiPaymentLines(doc: GeneratedNota, project: Proj
   const endText = formatKwitansiDate(end || start);
   const stageText = getKwitansiStageText(doc.stageCode);
 
+  if (isStageSixExcavatorRentalDoc(doc)) {
+    return [
+      `Pembayaran Sewa Excavator Pembangunan ${formatProjectKdkmpWilayah(project)} Kec. ${project.districtName} Kab. ${project.regencyName}`,
+    ];
+  }
+
   if (isPpmDoc(doc)) {
     return [
       `Pembayaran Sewa Kebutuhan Peralatan dan Kendaraan ${getKwitansiStageShortText(doc.stageCode)}`,
@@ -306,6 +388,7 @@ export function getKwitansiProjectLines(doc: GeneratedNota, project: Project) {
   const role = getKwitansiRole(doc);
   const customLocation = doc.kwitansiCity?.trim();
   if (customLocation) return [customLocation, role];
+  if (isStageSixDrillingWellDoc(doc)) return ["CV. PRATAMA PROJECT MANDIRI", role];
   if (isPpmServiceDoc(doc)) return ["CV. PRATAMA PROJECT MANDIRI", role];
   return [formatProjectKdkmpWilayah(project), role];
 }

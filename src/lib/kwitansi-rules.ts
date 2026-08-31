@@ -1,10 +1,12 @@
 import type { GeneratedNota, KwitansiWorkerSlot } from "@/types/domain";
 
-type KwitansiSyncGroup = "mandor" | "kepala_tukang" | "terampil" | "buruh";
+type KwitansiSyncGroup = "mandor" | "kepala_tukang" | "tukang" | "kenek";
 
 export type KwitansiSyncKey =
   | "mandor"
   | "kepala_tukang"
+  | `tukang_${KwitansiWorkerSlot}`
+  | `kenek_${KwitansiWorkerSlot}`
   | `terampil_${KwitansiWorkerSlot}`
   | `buruh_${KwitansiWorkerSlot}`;
 
@@ -80,9 +82,10 @@ function syncGroupFromText(value: string | undefined | null): KwitansiSyncGroup 
   const text = normalized(value);
   if (!text) return null;
   if (text.includes("kepala tukang")) return "kepala_tukang";
-  if (text.includes("pekerja terampil")) return "terampil";
-  if (text.includes("pekerja buruh") || /\bladen\b/.test(text)) return "buruh";
+  if (text.includes("tukang borongan") || text.includes("jasa borong")) return null;
   if (text.includes("mandor")) return "mandor";
+  if (text.includes("pekerja terampil") || /\btukang\b/.test(text)) return "tukang";
+  if (text.includes("pekerja buruh") || text.includes("kenek") || /\bkuli\b/.test(text) || /\bladen\b/.test(text)) return "kenek";
   return null;
 }
 
@@ -95,7 +98,7 @@ function workerSlotFromText(value: string | undefined | null): KwitansiWorkerSlo
   const text = normalized(value);
   if (!text) return null;
 
-  const role = "(?:pekerja\\s+)?(?:terampil|buruh|laden)";
+  const role = "(?:(?:pekerja\\s+)?(?:terampil|buruh)|tukang|kenek|kuli|laden)";
   const patterns = [
     new RegExp(`\\b${role}\\s+(?:slot|ke)\\s*[-:]?\\s*([1-4])\\b`),
     new RegExp(`\\b${role}\\s*[-#]\\s*([1-4])\\b`),
@@ -140,6 +143,11 @@ function syncKey(group: KwitansiSyncGroup, slot: KwitansiWorkerSlot | null): Kwi
   return slot ? `${group}_${slot}` : null;
 }
 
+function workerModeForDoc(doc: GeneratedNota, roleText: string | undefined) {
+  const text = normalized([roleText, joinedDocText(doc)].filter(Boolean).join(" "));
+  return text.includes("lembur") ? "lembur" : "pokok";
+}
+
 export function kwitansiSyncKeyFromText(value: string | undefined | null): KwitansiSyncKey | null {
   const group = syncGroupFromText(value);
   return group ? syncKey(group, workerSlotFromText(value)) : null;
@@ -157,7 +165,7 @@ export function buildKwitansiSyncKeyMap(
   const result = new Map<string, KwitansiSyncKey>();
   const workerGroups = new Map<string, Array<{
     doc: GeneratedNota;
-    group: "terampil" | "buruh";
+    group: "tukang" | "kenek";
     slot: KwitansiWorkerSlot | null;
   }>>();
 
@@ -170,7 +178,7 @@ export function buildKwitansiSyncKeyMap(
       continue;
     }
 
-    const groupKey = `${doc.projectId}|${doc.stageCode}|${group}`;
+    const groupKey = `${doc.projectId}|${doc.stageCode}|${group}|${workerModeForDoc(doc, roleText)}`;
     const entries = workerGroups.get(groupKey) ?? [];
     entries.push({ doc, group, slot: getKwitansiWorkerSlot(doc, roleText) });
     workerGroups.set(groupKey, entries);
@@ -206,6 +214,8 @@ export function buildKwitansiSyncKeyMap(
 export function kwitansiSyncLabel(key: KwitansiSyncKey) {
   if (key === "mandor") return "Mandor";
   if (key === "kepala_tukang") return "Kepala Tukang";
+  if (key.startsWith("tukang_")) return `Tukang ${key.slice(-1)}`;
+  if (key.startsWith("kenek_")) return `Kenek ${key.slice(-1)}`;
   if (key.startsWith("terampil_")) return `Pekerja Terampil ${key.slice(-1)}`;
   return `Pekerja Buruh / Laden ${key.slice(-1)}`;
 }
@@ -214,6 +224,19 @@ export function getAutofillKwitansiReceiver(doc: GeneratedNota) {
   const text = normalized(joinedDocText(doc));
   if (!text) return "";
 
+  const responsibleName = doc.projectMeta.responsibleName?.trim() || "Babinsa";
+  const isStageSix = doc.stageCode === "TAHAP_VI" || text.includes("tahap_vi") || text.includes("tahap vi");
+  const isSnackboxMeeting = isStageSix && text.replace(/[^a-z0-9]+/g, "").includes("snackboxrapat");
+  const isSurveyFeasibility = isStageSix
+    && (text.includes("pencarian") || text.includes("survei") || text.includes("survey"))
+    && text.includes("kelayakan lahan");
+  const isEscortTravel = isStageSix
+    && !isSurveyFeasibility
+    && text.includes("uang jalan")
+    && text.includes("pengawalan lapangan");
+
+  if (isSnackboxMeeting || isEscortTravel) return responsibleName;
+  if (isSurveyFeasibility) return "Mandor";
   if (text.includes("kenek") || /pembantu\s+(sopir|supir)/.test(text)) return "Dika Nurdiansyah";
   if (text.includes("pratama project mandiri") || text.includes("sumur bor") || text.includes("cut n fill")) return "H. Nana";
   if (text.includes("baja ringan")) return "Dadang Bahtiar";

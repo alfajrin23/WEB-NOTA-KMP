@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { getKwitansiPageChunk, KwitansiBatchTemplate } from "@/components/templates/kwitansi/KwitansiBatchTemplate";
 import { STAGES, getStageLabel } from "@/constants/stages";
 import {
+  canKwitansiPayerBeBlank,
   getDefaultKwitansiPaymentDescription,
   getKwitansiAmount,
   getKwitansiAmountWords,
@@ -24,7 +25,7 @@ import {
   getKwitansiProjectLines,
   getKwitansiRole,
 } from "@/lib/kwitansi-fields";
-import { buildKwitansiSyncKeyMap, kwitansiSyncKeyForDoc, kwitansiSyncLabel } from "@/lib/kwitansi-rules";
+import { buildKwitansiSyncKeyMap, kwitansiSyncKeyForDoc, kwitansiSyncLabel, type KwitansiSyncKey } from "@/lib/kwitansi-rules";
 import { getKwitansiGenerationDiagnostics, KWITANSI_TARGET_COUNTS } from "@/lib/nota-generator";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
 import { formatProjectKdkmpWilayah, formatProjectWilayah, formatRupiah, numericInputValue } from "@/utils/format";
@@ -147,6 +148,10 @@ function isStageFourAllowedDoc(doc: GeneratedNota) {
     text.includes("ppm") ||
     text.includes("listrik")
   );
+}
+
+function isSlottedWorkerSyncKey(value: KwitansiSyncKey | undefined | null): value is Exclude<KwitansiSyncKey, "mandor" | "kepala_tukang"> {
+  return Boolean(value) && value !== "mandor" && value !== "kepala_tukang";
 }
 
 export function EditKwitansiView() {
@@ -411,8 +416,12 @@ export function EditKwitansiView() {
       toast.error("Nominal kwitansi harus berupa angka yang valid.");
       return;
     }
-    if (!draft.payer.trim() || !draft.amountWords.trim() || !draft.paymentDescription.trim() || !draft.date) {
-      toast.error("Telah terima dari, terbilang, pembayaran, dan tanggal wajib diisi.");
+    if ((!canKwitansiPayerBeBlank(editingDoc) && !draft.payer.trim()) || !draft.amountWords.trim() || !draft.paymentDescription.trim() || !draft.date) {
+      toast.error(
+        canKwitansiPayerBeBlank(editingDoc)
+          ? "Terbilang, pembayaran, dan tanggal wajib diisi."
+          : "Telah terima dari, terbilang, pembayaran, dan tanggal wajib diisi.",
+      );
       return;
     }
     if (!draft.receiver.trim()) {
@@ -452,11 +461,7 @@ export function EditKwitansiView() {
           syncKeysByDocId.get(doc.id) === syncKey
         ))
         : [];
-      const shouldSync = syncTargets.length > 0 && window.confirm(
-        `Nama penerima ${kwitansiSyncLabel(syncKey!)} ditemukan di tahap lain. ` +
-        `Apakah ingin menyamakan nama penerima ${kwitansiSyncLabel(syncKey!)} untuk semua tahap?\n\n` +
-        "OK = Ya, samakan semua tahap\nCancel = Tidak, ubah kwitansi ini saja",
-      );
+      const shouldSync = syncTargets.length > 0;
 
       await updateKwitansiFields(editingDoc.projectId, editingDoc.id, patch, {
         receiverSource: "manual",
@@ -474,7 +479,7 @@ export function EditKwitansiView() {
       }
       setEditingId(null);
       setDraft(null);
-      toast.success(shouldSync ? `Nama penerima disamakan ke ${syncTargets.length + 1} kwitansi.` : "Perubahan kwitansi tersimpan ke Supabase.");
+      toast.success(shouldSync ? `Nama penerima ${kwitansiSyncLabel(syncKey!)} disamakan ke ${syncTargets.length + 1} kwitansi.` : "Perubahan kwitansi tersimpan ke Supabase.");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Gagal menyimpan perubahan kwitansi.");
     } finally {
@@ -601,7 +606,7 @@ export function EditKwitansiView() {
                       <dt className="text-slate-500">Wilayah</dt><dd className="font-medium">{formatProjectWilayah(project)}</dd>
                       <dt className="text-slate-500">Nominal</dt><dd className="font-semibold">{formatRupiah(getKwitansiAmount(doc))}</dd>
                       <dt className="text-slate-500">Pemberi</dt><dd className="font-medium">{project ? getKwitansiPayerName(doc, project) || "-" : "-"}</dd>
-                      {syncKey?.startsWith("terampil_") || syncKey?.startsWith("buruh_") ? (
+                      {isSlottedWorkerSyncKey(syncKey) ? (
                         <><dt className="text-slate-500">Slot pekerja</dt><dd className="font-medium">{kwitansiSyncLabel(syncKey)}</dd></>
                       ) : null}
                       <dt className="text-slate-500">Penerima</dt><dd className={doc.kwitansiReceiverName?.trim() ? "font-medium" : "font-medium text-red-600"}>{doc.kwitansiReceiverName?.trim() || "Belum diisi"}</dd>
@@ -657,7 +662,7 @@ export function EditKwitansiView() {
                   >
                   <EditField label="No. kwitansi" value={draft.number} onChange={(value) => setDraft((current) => current ? { ...current, number: value } : current)} />
                   <EditField label="Tanggal kwitansi" type="date" value={draft.date} onChange={updateDraftDate} required />
-                  <EditField label="Telah terima dari" value={draft.payer} onChange={(value) => setDraft((current) => current ? { ...current, payer: value } : current)} required />
+                  <EditField label="Telah terima dari" value={draft.payer} onChange={(value) => setDraft((current) => current ? { ...current, payer: value } : current)} required={!canKwitansiPayerBeBlank(editingDoc)} />
                   <EditField label="Nama penerima" value={draft.receiver} onChange={(value) => setDraft((current) => current ? { ...current, receiver: value } : current)} required />
                   <EditField label="Nominal" type="currency" min="0" step="1" value={draft.amount} onChange={(value) => setDraft((current) => current ? { ...current, amount: value } : current)} required />
                   <EditField label="Nama desa / lokasi pekerjaan" value={draft.location} onChange={(value) => setDraft((current) => current ? { ...current, location: value } : current)} />
