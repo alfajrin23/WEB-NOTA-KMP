@@ -11,7 +11,7 @@ const EXECUTE = process.argv.includes("--execute");
 const VERIFY_ONLY = process.argv.includes("--verify-only");
 const MIN_QTY = Number(getArg("--min-qty") || 1);
 const TEMPLATE_SOURCE_START_DATE = "2025-11-03";
-const SIRNAGALIH_PATTERN_START_DATE = "2026-03-01";
+const SIRNAGALIH_PATTERN_START_DATE = TEMPLATE_SOURCE_START_DATE;
 const PAGE_SIZE = 1000;
 
 const REQUESTED_PROJECTS = [

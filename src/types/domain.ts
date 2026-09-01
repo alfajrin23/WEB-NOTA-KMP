@@ -60,6 +60,8 @@ export type ResumeItem = {
   expenseType?: "material" | "labor" | "equipment";
   /** Jumlah kwitansi yang ditulis pada sumber Excel, bila tersedia. */
   kwitansiCount?: number;
+  /** Durasi kerja eksplisit saat volume memakai satuan gabungan seperti Orang-Hari. */
+  durationDays?: number;
   isManualAdded?: boolean;
   isIncludedInResumeTotal?: boolean;
   isGeneratedToNote?: boolean;

@@ -1,7 +1,7 @@
 import type { GeneratedNota, Project, ResumeItem } from "@/types/domain";
 
 export const TEMPLATE_SOURCE_START_DATE = "2025-11-03";
-export const SIRNAGALIH_PATTERN_START_DATE = "2026-03-01";
+export const SIRNAGALIH_PATTERN_START_DATE = TEMPLATE_SOURCE_START_DATE;
 export const SIRNAGALIH_PATTERN_LABEL = "Sirnagalih";
 export const DEFAULT_PROJECT_START_DATE = TEMPLATE_SOURCE_START_DATE;
 
@@ -59,9 +59,7 @@ export function daysBetweenIsoDates(fromDate: string, toDate: string) {
 }
 
 export function getProjectDateShiftDays(projectDate: string) {
-  if (!parseIsoDate(projectDate)) return 0;
-  return daysBetweenIsoDates(TEMPLATE_SOURCE_START_DATE, SIRNAGALIH_PATTERN_START_DATE)
-    + daysBetweenIsoDates(SIRNAGALIH_PATTERN_START_DATE, projectDate);
+  return daysBetweenIsoDates(TEMPLATE_SOURCE_START_DATE, projectDate);
 }
 
 export function shiftIsoDateByDays(value: string, days: number) {

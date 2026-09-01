@@ -161,6 +161,12 @@ function isStageSixSurveyFeasibilityDoc(doc: GeneratedNota) {
   );
 }
 
+function isStageSixSurveyMappingHonorDoc(doc: GeneratedNota) {
+  if (!isStageSixDoc(doc)) return false;
+  const text = docSearchText(doc);
+  return text.includes("honorarium tim survei") || (text.includes("pengukuran") && text.includes("pemetaan"));
+}
+
 function isStageSixEscortTravelDoc(doc: GeneratedNota) {
   if (!isStageSixDoc(doc) || isStageSixSurveyFeasibilityDoc(doc)) return false;
   const text = docSearchText(doc);
@@ -184,6 +190,7 @@ export function canKwitansiPayerBeBlank(doc: GeneratedNota) {
 function outsideWorkRole(doc: GeneratedNota) {
   if (isStageSixSnackboxMeetingDoc(doc)) return "";
   if (isStageSixEscortTravelDoc(doc)) return "Babinsa";
+  if (isStageSixSurveyMappingHonorDoc(doc)) return "Mandor";
   if (isStageSixSurveyFeasibilityDoc(doc)) return "Mandor";
   if (isStageSixDrillingWellDoc(doc)) return "Pemilik";
 
@@ -200,6 +207,7 @@ function outsideWorkRole(doc: GeneratedNota) {
 
 function outsideCoreWorkName(doc: GeneratedNota, fallbackRole: string) {
   if (isStageSixSnackboxMeetingDoc(doc)) return "Snackbox Rapat Koordinasi";
+  if (isStageSixSurveyMappingHonorDoc(doc)) return "Honorarium Tim Survei (Pengukuran & Pemetaan)";
   if (isStageSixSurveyFeasibilityDoc(doc)) return "Pencarian dan Survei Kelayakan Lahan";
   if (isStageSixEscortTravelDoc(doc)) return "Uang Jalan Pengawalan Lapangan";
   if (isStageSixDrillingWellDoc(doc)) return "Pembuatan Sumur Bor";

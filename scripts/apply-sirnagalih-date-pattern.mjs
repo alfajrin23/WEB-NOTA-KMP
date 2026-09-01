@@ -5,10 +5,14 @@ import path from "node:path";
 const RUN_DATE = "20260831";
 const OUTPUT_DIR = path.resolve("reconstruction-output");
 const EXECUTE = process.argv.includes("--execute");
-const PREFERRED_REFERENCE_VILLAGE = "sirnagalih";
-const PREFERRED_REFERENCE_DISTRICT = "cilaku";
+const PATTERN_SOURCE_FILE = path.resolve("src/constants/excel-base-data.ts");
+const PATTERN_START_DATE = "2025-11-03";
+const PATTERN_LABEL = "Sirnagalih Cilaku / Haurwangi reference";
 const PAGE_SIZE = 1000;
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
+const PROJECT_START_OVERRIDES = [
+  { village: "haurwangi", district: "haurwangi", projectDate: "2025-11-03" },
+];
 
 function envFile(file) {
   if (!fs.existsSync(file)) return {};
@@ -156,8 +160,32 @@ function shiftTextFieldToDesiredStart(value, desiredStartDate, fallbackDelta) {
   return shiftTextDatesByDays(value, delta);
 }
 
-function projectDate(project) {
+function readPatternDateBySourceRow() {
+  const text = fs.readFileSync(PATTERN_SOURCE_FILE, "utf8");
+  const result = new Map();
+  const regex = /\{ excelRow: (\d+),[^\n]*? date: "(\d{4}-\d{2}-\d{2})"/g;
+  let match = regex.exec(text);
+  while (match) {
+    result.set(Number(match[1]), match[2]);
+    match = regex.exec(text);
+  }
+  return result;
+}
+
+function projectStartOverride(project) {
+  const village = normalizeName(project?.nama_desa);
+  const district = normalizeName(project?.kecamatan);
+  return PROJECT_START_OVERRIDES.find((override) =>
+    village === normalizeName(override.village) && district === normalizeName(override.district),
+  ) ?? null;
+}
+
+function storedProjectDate(project) {
   return project?.project_date || project?.tanggal_laporan || "";
+}
+
+function projectDate(project) {
+  return projectStartOverride(project)?.projectDate ?? storedProjectDate(project);
 }
 
 function sameJson(left, right) {
@@ -240,12 +268,6 @@ async function upsertRows(table, rows, conflict) {
     total += updated.length;
   }
   return total;
-}
-
-function findReferenceProject(projects) {
-  const sirnagalih = projects.filter((project) => normalizeName(project.nama_desa) === PREFERRED_REFERENCE_VILLAGE);
-  const preferred = sirnagalih.find((project) => normalizeName(project.kecamatan) === PREFERRED_REFERENCE_DISTRICT);
-  return preferred ?? sirnagalih[0] ?? null;
 }
 
 function noteSourceIds(note) {
@@ -416,41 +438,54 @@ for (const item of resumeItems) {
   itemsByProject.set(item.project_id, [...(itemsByProject.get(item.project_id) ?? []), item]);
 }
 
-const referenceProject = findReferenceProject(projects);
-if (!referenceProject) throw new Error("Project acuan Sirnagalih tidak ditemukan.");
-
-const referenceItems = (itemsByProject.get(referenceProject.id) ?? []).filter((item) => item.source_row != null);
-const referenceDateBySourceRow = new Map();
-const duplicateReferenceRows = [];
-for (const item of referenceItems) {
-  const key = Number(item.source_row);
-  if (referenceDateBySourceRow.has(key) && referenceDateBySourceRow.get(key) !== item.tanggal) {
-    duplicateReferenceRows.push(key);
-  }
-  if (!referenceDateBySourceRow.has(key)) referenceDateBySourceRow.set(key, item.tanggal);
-}
+const patternDateBySourceRow = readPatternDateBySourceRow();
+if (patternDateBySourceRow.size < 273) throw new Error(`Pola tanggal source row tidak lengkap: ${patternDateBySourceRow.size}/273`);
 
 const desiredItemsById = new Map();
 const projectSummary = [];
+const projectUpdates = [];
 const resumeItemUpdates = [];
 const datePlanRows = [];
-const missingReferenceRows = new Set();
+const missingPatternRows = new Set();
 const invalidProjectDates = new Set();
 
 for (const project of projects) {
   const targetDate = projectDate(project);
-  const referenceDate = projectDate(referenceProject);
   const projectItems = itemsByProject.get(project.id) ?? [];
-  const shiftDays = daysBetweenIsoDates(referenceDate, targetDate);
+  const shiftDays = daysBetweenIsoDates(PATTERN_START_DATE, targetDate);
   let mismatches = 0;
+  const override = projectStartOverride(project);
 
   if (!parseIsoDate(targetDate)) invalidProjectDates.add(project.id);
+  if (override && (project.project_date !== override.projectDate || project.tanggal_laporan !== override.projectDate)) {
+    projectUpdates.push({
+      ...project,
+      project_date: override.projectDate,
+      tanggal_laporan: override.projectDate,
+    });
+    datePlanRows.push({
+      change_type: "PROJECT_START_DATE",
+      desa: project.nama_desa,
+      kecamatan: project.kecamatan,
+      project_id: project.id,
+      row_id: project.id,
+      source_row: "",
+      tahap: "",
+      uraian: "tanggal awal proyek",
+      reference_project_date: PATTERN_START_DATE,
+      reference_item_date: "",
+      project_start_date: override.projectDate,
+      shift_days: shiftDays,
+      before: [project.project_date, project.tanggal_laporan].filter(Boolean).join(" | "),
+      after: override.projectDate,
+    });
+  }
 
   for (const item of projectItems) {
     const sourceRow = Number(item.source_row);
-    const patternDate = referenceDateBySourceRow.get(sourceRow);
+    const patternDate = patternDateBySourceRow.get(sourceRow);
     if (!patternDate) {
-      missingReferenceRows.add(sourceRow);
+      missingPatternRows.add(sourceRow);
       continue;
     }
 
@@ -475,7 +510,7 @@ for (const project of projects) {
       source_row: sourceRow,
       tahap: item.tahap,
       uraian: item.uraian,
-      reference_project_date: referenceDate,
+      reference_project_date: PATTERN_START_DATE,
       reference_item_date: patternDate,
       project_start_date: targetDate,
       shift_days: shiftDays,
@@ -489,10 +524,11 @@ for (const project of projects) {
     kecamatan: project.kecamatan,
     project_id: project.id,
     project_start_date: targetDate,
-    reference_project_date: referenceDate,
+    reference_project_date: PATTERN_START_DATE,
     shift_days: shiftDays,
     resume_items: projectItems.length,
     resume_item_date_mismatches: mismatches,
+    project_start_override: override ? override.projectDate : "",
   });
 }
 
@@ -516,7 +552,7 @@ for (const note of generatedNotes) {
     source_row: "",
     tahap: note.tahap,
     uraian: `${note.document_type}:${note.vendor}`,
-    reference_project_date: projectDate(referenceProject),
+    reference_project_date: PATTERN_START_DATE,
     reference_item_date: "",
     project_start_date: projectDate(project),
     shift_days: "",
@@ -541,7 +577,7 @@ for (const note of customNotes) {
     source_row: "",
     tahap: note.tahap,
     uraian: `${note.document_type}:${note.vendor}`,
-    reference_project_date: projectDate(referenceProject),
+    reference_project_date: PATTERN_START_DATE,
     reference_item_date: "",
     project_start_date: projectDate(project),
     shift_days: "",
@@ -571,8 +607,8 @@ for (const edit of kwitansiEdits) {
     row_id: edit.id,
     source_row: "",
     tahap: note.tahap,
-    uraian: `kwitansi_edit:${_note_id}`,
-    reference_project_date: projectDate(referenceProject),
+    uraian: `kwitansi_edit:${note.id}`,
+    reference_project_date: PATTERN_START_DATE,
     reference_item_date: "",
     project_start_date: projectDate(project),
     shift_days: "",
@@ -585,9 +621,13 @@ fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 const timestamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 const backup = {
   created_at: new Date().toISOString(),
-  purpose: "before_sirnagalih_date_pattern_alignment",
+  purpose: "before_resume_start_date_pattern_alignment",
   execute: EXECUTE,
-  reference_project: referenceProject,
+  pattern_start_date: PATTERN_START_DATE,
+  pattern_label: PATTERN_LABEL,
+  pattern_source_file: PATTERN_SOURCE_FILE,
+  project_start_overrides: PROJECT_START_OVERRIDES,
+  projects: projects.filter((project) => projectUpdates.some((update) => update.id === project.id)),
   generated_notes: generatedNotes.filter((note) => generatedNoteUpdates.some((update) => update.id === note.id)),
   custom_notes: customNotes.filter((note) => customNoteUpdates.some((update) => update.id === note.id)),
   kwitansi_edits: kwitansiEdits.filter((edit) => kwitansiEditUpdates.some((update) => update.id === edit.id)),
@@ -622,26 +662,21 @@ const report = {
   generated_at: new Date().toISOString(),
   mode: EXECUTE ? "EXECUTE_REST" : "DRY_RUN",
   status: EXECUTE ? "PENDING_EXECUTION" : "DRY_RUN_READY",
-  reference_requested: {
-    village: "Sirnagalih",
-    preferred_district: "Cilaku",
+  pattern: {
+    label: PATTERN_LABEL,
+    start_date: PATTERN_START_DATE,
+    source_file: path.relative(process.cwd(), PATTERN_SOURCE_FILE),
+    source_rows: patternDateBySourceRow.size,
   },
-  reference_used: {
-    project_id: referenceProject.id,
-    desa: referenceProject.nama_desa,
-    kecamatan: referenceProject.kecamatan,
-    project_date: projectDate(referenceProject),
-    matched_preferred_district: normalizeName(referenceProject.kecamatan) === PREFERRED_REFERENCE_DISTRICT,
-  },
+  project_start_overrides: PROJECT_START_OVERRIDES,
   projects_checked: projects.length,
   resume_items_checked: resumeItems.length,
   generated_notes_checked: generatedNotes.length,
   custom_notes_checked: customNotes.length,
   kwitansi_edits_checked: kwitansiEdits.length,
-  reference_source_rows: referenceDateBySourceRow.size,
-  duplicate_reference_source_rows: [...new Set(duplicateReferenceRows)].sort((a, b) => a - b).slice(0, 50),
-  missing_reference_source_rows: [...missingReferenceRows].sort((a, b) => a - b),
+  missing_pattern_source_rows: [...missingPatternRows].sort((a, b) => a - b),
   invalid_project_date_count: invalidProjectDates.size,
+  projects_to_update: projectUpdates.length,
   resume_items_to_update: resumeItemUpdates.length,
   generated_notes_to_update: generatedNoteUpdates.length,
   custom_notes_to_update: customNoteUpdates.length,
@@ -662,19 +697,25 @@ async function verifyLive() {
   ]);
 
   const freshProjectById = new Map(freshProjects.map((project) => [project.id, project]));
-  const freshReferenceProject = findReferenceProject(freshProjects);
-  const freshItemsByProject = new Map();
-  for (const item of freshItems) freshItemsByProject.set(item.project_id, [...(freshItemsByProject.get(item.project_id) ?? []), item]);
-  const freshReferenceRows = freshItemsByProject.get(freshReferenceProject?.id) ?? [];
-  const freshReferenceDateBySourceRow = new Map(freshReferenceRows.map((item) => [Number(item.source_row), item.tanggal]));
   const freshDesiredById = new Map();
   const errors = [];
 
+  for (const project of freshProjects) {
+    const override = projectStartOverride(project);
+    if (!override) continue;
+    if (project.project_date !== override.projectDate) {
+      errors.push(`project ${project.id} project_date ${project.project_date} != ${override.projectDate}`);
+    }
+    if (project.tanggal_laporan !== override.projectDate) {
+      errors.push(`project ${project.id} tanggal_laporan ${project.tanggal_laporan} != ${override.projectDate}`);
+    }
+  }
+
   for (const item of freshItems) {
     const project = freshProjectById.get(item.project_id);
-    const referenceDate = freshReferenceDateBySourceRow.get(Number(item.source_row));
-    if (!project || !referenceDate || !freshReferenceProject) continue;
-    const desired = shiftIsoDateByDays(referenceDate, daysBetweenIsoDates(projectDate(freshReferenceProject), projectDate(project)));
+    const patternDate = patternDateBySourceRow.get(Number(item.source_row));
+    if (!project || !patternDate) continue;
+    const desired = shiftIsoDateByDays(patternDate, daysBetweenIsoDates(PATTERN_START_DATE, projectDate(project)));
     freshDesiredById.set(item.id, { tanggal: desired });
     if (item.tanggal !== desired) errors.push(`resume_item ${item.id}: ${item.tanggal} != ${desired}`);
   }
@@ -729,6 +770,9 @@ if (!EXECUTE) {
   fs.writeFileSync(path.join(OUTPUT_DIR, `sirnagalih_date_pattern_report_${RUN_DATE}.json`), `${JSON.stringify(report, null, 2)}\n`, "utf8");
   console.log(JSON.stringify(report, null, 2));
 } else {
+  const updatedProjects = projectUpdates.length
+    ? await upsertRows("projects", projectUpdates, "id")
+    : 0;
   const updatedItems = resumeItemUpdates.length
     ? await upsertRows("resume_items", resumeItemUpdates, "id")
     : 0;
@@ -745,6 +789,7 @@ if (!EXECUTE) {
   const verification = await verifyLive();
   report.status = verification.errors.length ? "EXECUTED_WITH_VERIFY_ERRORS" : "EXECUTED_VERIFIED";
   report.execution = {
+    projects_updated: updatedProjects,
     resume_items_updated: updatedItems,
     generated_notes_updated: updatedNotes,
     custom_notes_updated: updatedCustomNotes,

@@ -409,6 +409,7 @@ function itemFromExcelRow(row: ExcelBaseRow, index: number): ResumeItem {
     sourceType: "excel",
     expenseType: row.expenseType,
     kwitansiCount: row.kwitansiCount,
+    durationDays: row.durationDays,
     isManualAdded: false,
     isIncludedInResumeTotal: true,
     isGeneratedToNote: false,

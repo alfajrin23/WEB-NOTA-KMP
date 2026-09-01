@@ -453,6 +453,7 @@ function rowToResumeItem(row: ResumeItemRow): ResumeItem {
     sourceRow: row.source_row,
     sourceType: row.source_type ?? "seed",
     kwitansiCount: excelSource?.kwitansiCount ?? (isPartisiKwitansiItem(stageCode, row.category_code, row.uraian) ? 5 : undefined),
+    durationDays: excelSource?.durationDays,
     isManualAdded: row.is_manual_added ?? false,
     isIncludedInResumeTotal: row.is_included_in_resume_total ?? true,
     isGeneratedToNote: row.is_generated_to_note ?? false,

@@ -17,6 +17,7 @@ export const KWITANSI_TARGET_COUNTS: Partial<Record<StageCode, number>> = {
   TAHAP_I: 21,
   TAHAP_II: 22,
   TAHAP_III: 28,
+  TAHAP_VI: 8,
 };
 
 export type KwitansiGenerationIssue = {
@@ -250,6 +251,7 @@ export const OUTSIDE_CORE_KWITANSI_RULES = [
   { key: "sosialisasi", label: "Sosialisasi Pembangunan" },
   { key: "rapat-koordinasi", label: "Rapat Koordinasi" },
   { key: "pengukuran-lahan", label: "Proses Pengukuran Lahan" },
+  { key: "honorarium-survei", label: "Honorarium Tim Survei (Pengukuran & Pemetaan)" },
   { key: "penyiapan-lahan", label: "Penyiapan Lahan" },
   { key: "pematangan-lahan", label: "Pematangan Lahan" },
   { key: "pembersihan-lahan", label: "Pembersihan Lahan" },
@@ -277,8 +279,15 @@ function resumeItemSearchText(item: ResumeItem) {
     .trim();
 }
 
+function isStageSixSurveyMappingHonorItem(item: ResumeItem) {
+  if (item.stageCode !== "TAHAP_VI") return false;
+  const text = resumeItemSearchText(item);
+  return text.includes("honorarium tim survei") || (text.includes("pengukuran") && text.includes("pemetaan"));
+}
+
 export function getOutsideCoreKwitansiKey(item: ResumeItem): OutsideCoreKwitansiKey | null {
   const text = resumeItemSearchText(item);
+  if (isStageSixSurveyMappingHonorItem(item)) return "honorarium-survei";
   if (text.includes("pencarian") || text.includes("survei kelayakan lahan") || text.includes("survey kelayakan lahan")) return "pencarian";
   if (text.includes("sosialisasi")) return "sosialisasi";
   if (text.includes("rapat koordinasi")) return "rapat-koordinasi";
@@ -329,7 +338,9 @@ function buildExcelDirectedKwitansiReceipts(project: Project, vendors: Vendor[],
 
   const groups = new Map<string, ResumeItem[]>();
   for (const item of stageItems) {
-    const key = `${item.categoryCode ?? item.category}|${item.expenseType ?? ""}|${item.vendorId}|${item.kwitansiCount}`;
+    const key = isStageSixSurveyMappingHonorItem(item)
+      ? `honorarium-survei:${item.id}`
+      : `${item.categoryCode ?? item.category}|${item.expenseType ?? ""}|${item.vendorId}|${item.kwitansiCount}`;
     const current = groups.get(key) ?? [];
     current.push(item);
     groups.set(key, current);
@@ -368,6 +379,7 @@ function makeKwitansiDoc(project: Project, input: KwitansiReceiptInput): Generat
   const total = sortedItems.reduce((sum, item) => sum + getResumeItemAmount(item), 0);
   const tanggal = firstDate(sortedItems, project.projectDate);
   const stageName = `Kwitansi Tahap ${stageRoman(input.stageCode)}`;
+  const roleName = sortedItems.some(isStageSixSurveyMappingHonorItem) ? "Mandor" : undefined;
   const doc: GeneratedNota = {
     id: `kwitansi-${project.id}-${input.stageCode.toLowerCase()}-${input.key}`,
     projectId: project.id,
@@ -390,6 +402,7 @@ function makeKwitansiDoc(project: Project, input: KwitansiReceiptInput): Generat
     itemIds: input.sourceItemIds,
     projectMeta: projectMeta(project),
     kwitansiGroupCode: kwitansiGroupCode(input.stageCode),
+    kwitansiRoleName: roleName,
     kwitansiWorkerSlot: input.workerSlot,
   };
   const receiver = getAutofillKwitansiReceiver(doc);

@@ -8,7 +8,7 @@ const OVERWRITE_FINANCIALS = process.argv.includes("--overwrite-financials");
 const DELETE_STALE_ITEMS = process.argv.includes("--delete-stale-items");
 const PROJECT_FILTER = process.argv.find((arg) => arg.startsWith("--project-id="))?.slice("--project-id=".length) ?? null;
 const TEMPLATE_SOURCE_START_DATE = "2025-11-03";
-const SIRNAGALIH_PATTERN_START_DATE = "2026-03-01";
+const SIRNAGALIH_PATTERN_START_DATE = TEMPLATE_SOURCE_START_DATE;
 const PAGE_SIZE = 1000;
 
 const STAGE_LABELS = {

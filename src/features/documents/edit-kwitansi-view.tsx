@@ -25,7 +25,7 @@ import {
   getKwitansiProjectLines,
   getKwitansiRole,
 } from "@/lib/kwitansi-fields";
-import { buildKwitansiSyncKeyMap, getKwitansiReceiverSyncPlan, kwitansiSyncLabel, type KwitansiSyncKey } from "@/lib/kwitansi-rules";
+import { buildKwitansiSyncKeyMap, getKwitansiReceiverSyncPlan, kwitansiSyncKeyForDoc, kwitansiSyncLabel, type KwitansiSyncKey } from "@/lib/kwitansi-rules";
 import { getKwitansiGenerationDiagnostics, KWITANSI_TARGET_COUNTS } from "@/lib/nota-generator";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
 import { formatProjectKdkmpWilayah, formatProjectWilayah, formatRupiah, numericInputValue } from "@/utils/format";
@@ -36,6 +36,7 @@ type StageFilter = StageCode | "all";
 type EditableKwitansiDoc = GeneratedNota;
 
 const CORE_KWITANSI_SYNC_STAGES = new Set<StageCode>(["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "TAHAP_V"]);
+const MANDOR_KWITANSI_SYNC_STAGES = new Set<StageCode>(["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "TAHAP_V", "TAHAP_VI"]);
 
 type EditDraft = {
   number: string;
@@ -450,10 +451,14 @@ export function EditKwitansiView() {
         warnaTemplate: draft.templateColor,
       };
       const receiverChanged = receiverName !== (editingDoc.kwitansiReceiverName ?? "").trim();
-      const syncPlan = receiverChanged && CORE_KWITANSI_SYNC_STAGES.has(editingDoc.stageCode)
+      const sourceSyncKey = receiverChanged
+        ? syncKeysByDocId.get(editingDoc.id) ?? kwitansiSyncKeyForDoc(editingDoc, draft.role)
+        : null;
+      const receiverSyncStages = sourceSyncKey === "mandor" ? MANDOR_KWITANSI_SYNC_STAGES : CORE_KWITANSI_SYNC_STAGES;
+      const syncPlan = receiverChanged && sourceSyncKey && receiverSyncStages.has(editingDoc.stageCode)
         ? getKwitansiReceiverSyncPlan(docs, editingDoc, syncKeysByDocId, {
           roleText: draft.role,
-          targetStages: CORE_KWITANSI_SYNC_STAGES,
+          targetStages: receiverSyncStages,
         })
         : { syncKey: null, targets: [] };
       const { syncKey, targets: syncTargets } = syncPlan;

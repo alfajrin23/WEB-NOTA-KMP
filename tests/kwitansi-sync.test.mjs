@@ -245,3 +245,36 @@ test("Nama pekerja awal kosong dan dukungan operasional memakai nama Babinsa", (
 
   assert.equal(getAutofillKwitansiReceiver(operasionalDoc), "Nama Babinsa Desa");
 });
+
+test("Honorarium Tim Survei Pengukuran Pemetaan tahap VI memakai penerima Mandor", () => {
+  const surveyDoc = makeDoc({
+    stageCode: "TAHAP_VI",
+    role: "Honorarium Tim Survei (Pengukuran & Pemetaan)",
+    itemId: "honorarium-survei-pengukuran-pemetaan",
+  });
+  surveyDoc.items[0].category = "VI.04 Penyiapan Lahan";
+  surveyDoc.items[0].categoryName = "Penyiapan Lahan";
+
+  assert.equal(getAutofillKwitansiReceiver(surveyDoc), "Mandor");
+});
+
+test("Nama Mandor dari upah pokok atau lembur ikut tersinkron ke honorarium tahap VI", () => {
+  const mandorDoc = makeDoc({ stageCode: "TAHAP_I", role: "Mandor", itemId: "mandor-pokok" });
+  const lemburMandorDoc = makeDoc({ stageCode: "TAHAP_II", role: "lembur Mandor", itemId: "mandor-lembur" });
+  const surveyDoc = makeDoc({
+    stageCode: "TAHAP_VI",
+    role: "Honorarium Tim Survei (Pengukuran & Pemetaan)",
+    itemId: "honorarium-survei-pengukuran-pemetaan",
+  });
+  surveyDoc.items[0].category = "VI.04 Penyiapan Lahan";
+  surveyDoc.items[0].categoryName = "Penyiapan Lahan";
+  surveyDoc.kwitansiRoleName = "Mandor";
+
+  const docs = [mandorDoc, lemburMandorDoc, surveyDoc];
+  const keys = buildKwitansiSyncKeyMap(docs, (doc) => doc.kwitansiRoleName);
+  const targetStages = new Set(["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV", "TAHAP_V", "TAHAP_VI"]);
+
+  assert.equal(keys.get(surveyDoc.id), "mandor");
+  assert.ok(getKwitansiReceiverSyncPlan(docs, mandorDoc, keys, { roleText: "Mandor", targetStages }).targets.includes(surveyDoc));
+  assert.ok(getKwitansiReceiverSyncPlan(docs, lemburMandorDoc, keys, { roleText: "lembur Mandor", targetStages }).targets.includes(surveyDoc));
+});

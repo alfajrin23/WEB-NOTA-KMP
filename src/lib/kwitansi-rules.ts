@@ -264,6 +264,11 @@ export function getAutofillKwitansiReceiver(doc: GeneratedNota) {
   const isSurveyFeasibility = isStageSix
     && (text.includes("pencarian") || text.includes("survei") || text.includes("survey"))
     && text.includes("kelayakan lahan");
+  const isSurveyMappingHonor = isStageSix
+    && (
+      text.includes("honorarium tim survei")
+      || (text.includes("pengukuran") && text.includes("pemetaan"))
+    );
   const isEscortTravel = isStageSix
     && !isSurveyFeasibility
     && text.includes("uang jalan")
@@ -271,7 +276,7 @@ export function getAutofillKwitansiReceiver(doc: GeneratedNota) {
 
   if (isOperationalSupportKwitansiDoc(doc)) return responsibleName;
   if (isSnackboxMeeting || isEscortTravel) return responsibleName;
-  if (isSurveyFeasibility) return "Mandor";
+  if (isSurveyFeasibility || isSurveyMappingHonor) return "Mandor";
   if (text.includes("pratama project mandiri") || text.includes("sumur bor") || text.includes("cut n fill")) return "H. Nana";
   if (text.includes("baja ringan")) return "Dadang Bahtiar";
   if (text.includes("pintu kaca frameless")) return "Sarwoto";
