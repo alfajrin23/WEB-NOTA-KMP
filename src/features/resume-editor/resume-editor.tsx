@@ -4,7 +4,7 @@ import { ChangeEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRef, 
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { ColumnDef, flexRender, getCoreRowModel, useReactTable } from "@tanstack/react-table";
-import { AlertTriangle, ChevronDown, ChevronRight, Download, FileSpreadsheet, Loader2, Plus, Redo2, RefreshCcw, Save, Search, Trash2, Undo2, Upload } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Download, FileSpreadsheet, Loader2, Plus, Redo2, RefreshCcw, Save, Search, Send, Trash2, Undo2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,6 +20,7 @@ import { STAGES, getStageLabel } from "@/constants/stages";
 import { buildProjectSummary, buildResumeValidationReport, getComputedAmount, getResumeItemAmount, ResumeValidationReport, validateProjectResume } from "@/lib/resume-calculations";
 import { findPriceSyncSiblingItems } from "@/lib/resume-price-sync";
 import { compareResumeItems, mergeResumeItems, ParsedResume, ResumeImportDiff } from "@/lib/resume-import/parser";
+import { BelanjaSyncPanel } from "@/features/resume-editor/belanja-sync-panel";
 import {
   formatNumber,
   formatProjectWilayah,
@@ -101,6 +102,7 @@ export function ResumeEditor() {
   const [importingResume, setImportingResume] = useState(false);
   const [exportingExcel, setExportingExcel] = useState(false);
   const [savingProjectDate, setSavingProjectDate] = useState(false);
+  const [showBelanjaSync, setShowBelanjaSync] = useState(false);
   const [importPreview, setImportPreview] = useState<{ parsed: ParsedResume; diff: ResumeImportDiff } | null>(null);
   const resumeFileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -579,6 +581,9 @@ export function ResumeEditor() {
               {exportingExcel ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}
               {exportingExcel ? "Menyiapkan Excel" : savingProjectDate ? "Menyimpan Tanggal" : "Export Excel"}
             </Button>
+            <Button variant="outline" onClick={() => setShowBelanjaSync((value) => !value)}>
+              <Send className="h-4 w-4" />Kirim ke Web Belanja
+            </Button>
             <Button variant="outline" onClick={addResumeRow}><Plus className="h-4 w-4" />Tambah Baris</Button>
             <Button asChild variant="emerald"><Link href={`/projects/${project.id}/generate-nota`}><Download className="h-4 w-4" />Lanjut Buat Nota/Kwitansi Otomatis</Link></Button>
           </div>
@@ -609,6 +614,7 @@ export function ResumeEditor() {
         />
 
         {validationReport ? <ResumeValidationPanel report={validationReport} /> : null}
+        {showBelanjaSync ? <BelanjaSyncPanel project={project} /> : null}
         {importPreview ? (
           <ResumeImportPreview
             preview={importPreview}

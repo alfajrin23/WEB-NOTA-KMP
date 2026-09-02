@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FileText, History, LayoutDashboard, Moon, Plus, ReceiptText, Settings, Sun, TableProperties, Users } from "lucide-react";
+import { FileText, History, LayoutDashboard, Moon, Plus, ReceiptText, Send, Settings, Sun, TableProperties, Users } from "lucide-react";
 import { useAppTheme } from "@/components/providers";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -11,6 +11,7 @@ const navigation = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/tambah-desa", label: "Tambah Wilayah", icon: Plus },
   { href: "/history", label: "History", icon: History },
+  { href: "/belanja-sync", label: "Belanja Sync", icon: Send },
   { href: "/nota-vendor", label: "Nota per Vendor", icon: ReceiptText },
   { href: "/master-template", label: "Template", icon: TableProperties },
   { href: "/vendors", label: "Vendor", icon: Users },

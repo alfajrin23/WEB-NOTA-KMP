@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { CalendarDays, FilePlus2, FileText, ReceiptText, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -12,7 +12,22 @@ import { MotionPage } from "@/components/ui/motion-page";
 import { groupDocumentsForPresentation } from "@/lib/pln-document-groups";
 import { buildProjectSummary } from "@/lib/resume-calculations";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
+import type { BelanjaSyncOverviewProject } from "@/lib/belanja-sync/types";
 import { formatDateIndonesia, formatDateTimeIndonesia, formatProjectWilayah, formatRupiah } from "@/utils/format";
+
+function belanjaStatusLabel(status: BelanjaSyncOverviewProject["status"] | undefined) {
+  if (status === "selesai") return "Selesai";
+  if (status === "sebagian") return "Sebagian";
+  if (status === "ada_error") return "Ada error";
+  return "Belum dikirim";
+}
+
+function belanjaStatusClass(status: BelanjaSyncOverviewProject["status"] | undefined) {
+  if (status === "selesai") return "bg-emerald-50 text-emerald-700";
+  if (status === "sebagian") return "bg-blue-50 text-blue-700";
+  if (status === "ada_error") return "bg-red-50 text-red-700";
+  return "bg-slate-100 text-slate-600";
+}
 
 export function HistoryView() {
   const { projects, vendors, generatedNotas, customNotes, history, loading } = useKdkmpStore();
@@ -20,6 +35,23 @@ export function HistoryView() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [visibleCount, setVisibleCount] = useState(12);
+  const [belanjaOverview, setBelanjaOverview] = useState<Record<string, BelanjaSyncOverviewProject>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/belanja-sync/overview", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload: { projects?: BelanjaSyncOverviewProject[] } | null) => {
+        if (cancelled || !payload?.projects) return;
+        setBelanjaOverview(Object.fromEntries(payload.projects.map((project) => [project.projectId, project])));
+      })
+      .catch(() => {
+        if (!cancelled) setBelanjaOverview({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const rows = useMemo(() => {
     return projects
@@ -91,6 +123,9 @@ export function HistoryView() {
                     <Badge>{project.status}</Badge>
                     <Badge className="bg-blue-50 text-blue-700">{docs.length} nota</Badge>
                     <Badge className="bg-emerald-50 text-emerald-700">{customs.length} custom</Badge>
+                    <Badge className={belanjaStatusClass(belanjaOverview[project.id]?.status)}>
+                      Belanja: {belanjaStatusLabel(belanjaOverview[project.id]?.status)}
+                    </Badge>
                   </div>
                 </div>
               </CardHeader>
