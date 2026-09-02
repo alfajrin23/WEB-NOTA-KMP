@@ -10,7 +10,7 @@ type FailedInput = {
 };
 
 export async function POST(request: Request, context: { params: Promise<{ itemId: string }> }) {
-  const authError = requireRunnerToken(request);
+  const authError = await requireRunnerToken(request);
   if (authError) return authError;
 
   try {

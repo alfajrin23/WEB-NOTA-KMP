@@ -14,7 +14,7 @@ type HeartbeatInput = {
 };
 
 export async function POST(request: Request) {
-  const authError = requireRunnerToken(request);
+  const authError = await requireRunnerToken(request);
   if (authError) return authError;
 
   try {

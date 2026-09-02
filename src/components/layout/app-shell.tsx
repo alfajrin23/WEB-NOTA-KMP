@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { FileText, History, LayoutDashboard, Moon, Plus, ReceiptText, Send, Settings, Sun, TableProperties, Users } from "lucide-react";
+import { FileText, History, KeyRound, LayoutDashboard, Moon, Plus, ReceiptText, Send, Settings, Sun, TableProperties, Users } from "lucide-react";
 import { useAppTheme } from "@/components/providers";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,7 @@ const navigation = [
   { href: "/nota-vendor", label: "Nota per Vendor", icon: ReceiptText },
   { href: "/master-template", label: "Template", icon: TableProperties },
   { href: "/vendors", label: "Vendor", icon: Users },
+  { href: "/settings/runners", label: "Runner Tokens", icon: KeyRound },
   { href: "/settings", label: "Pengaturan", icon: Settings },
 ];
 
@@ -37,7 +38,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <nav className="space-y-1">
           {navigation.map((item) => {
-            const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+            const active = item.href === "/" || item.href === "/settings" ? pathname === item.href : pathname.startsWith(item.href);
             const Icon = item.icon;
             return (
               <Link

@@ -4,9 +4,27 @@ Runner ini berjalan lokal di PC Windows yang terhubung VPN. WEB-NOTA-KMP tetap m
 
 ## Env lokal runner
 
-Isi `.env.belanja.local` dari contoh `.env.belanja.example`. Runner hanya membaca file `.env.belanja.local` / `.env.belanja`, membutuhkan `BELANJA_RUNNER_TOKEN`, dan tidak membutuhkan `SUPABASE_SERVICE_ROLE_KEY`.
+Isi `.env.belanja.local` dari contoh `.env.belanja.example`. Runner membaca file `.env.belanja.local` / `.env.belanja`, membutuhkan `RUNNER_TOKEN`, dan tidak membutuhkan `SUPABASE_SERVICE_ROLE_KEY`.
 
-Env server WEB-NOTA-KMP tetap perlu `SUPABASE_SERVICE_ROLE_KEY` dan `BELANJA_RUNNER_TOKEN` agar API queue bisa menulis tabel sync dengan aman.
+Token runner dibuat dari halaman `Settings -> Playwright Runners`. Server WEB-NOTA-KMP membutuhkan `SUPABASE_SERVICE_ROLE_KEY`, tetapi tidak membutuhkan token runner global lagi. Plaintext token hanya muncul satu kali saat dibuat; database hanya menyimpan SHA-256 token.
+
+```env
+WEB_NOTA_API_URL=https://web-nota-kmp-woad.vercel.app
+RUNNER_TOKEN=kmp_runner_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+`BELANJA_RUNNER_TOKEN` dan `NOTA_KMP_BASE_URL` masih dibaca sebagai alias lama untuk transisi, tetapi runner baru sebaiknya memakai `RUNNER_TOKEN` dan `WEB_NOTA_API_URL`.
+
+## Membuat atau revoke runner
+
+1. Buka `Settings -> Playwright Runners`.
+2. Klik `Create Runner Token`.
+3. Isi nama laptop/device dan expiry jika diperlukan.
+4. Copy token yang muncul sekali.
+5. Simpan token ke `.env.belanja.local` di komputer runner.
+6. Jalankan ulang runner.
+
+Untuk mencabut akses laptop lama, klik `Revoke` pada runner tersebut. Request berikutnya dari token itu akan mendapat `401 Unauthorized`.
 
 ## Perintah
 

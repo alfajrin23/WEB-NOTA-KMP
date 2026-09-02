@@ -34,3 +34,22 @@ You can check out [the Next.js GitHub repository](https://github.com/vercel/next
 The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
 
 Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+
+## Playwright Runner Tokens
+
+Runner Belanja memakai token dinamis di Supabase, bukan token global Vercel.
+
+1. Jalankan migration Supabase sampai `supabase/migrations/20260902_runner_tokens.sql`.
+2. Pastikan Vercel punya `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, dan `SUPABASE_SERVICE_ROLE_KEY`.
+3. Buka `Settings -> Playwright Runners`.
+4. Klik `Create Runner Token`, isi nama device, pilih expiry, lalu copy token yang muncul sekali.
+5. Di PC runner, isi `.env.belanja.local`:
+
+```env
+WEB_NOTA_API_URL=https://web-nota-kmp-woad.vercel.app
+RUNNER_TOKEN=kmp_runner_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+6. Jalankan ulang runner dengan `npm run belanja:runner`.
+
+Untuk mencabut akses device, buka `Settings -> Playwright Runners` lalu klik `Revoke`. Token yang direvoke langsung gagal pada request berikutnya tanpa redeploy Vercel.

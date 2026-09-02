@@ -1,5 +1,5 @@
-import { timingSafeEqual } from "crypto";
 import { NextResponse } from "next/server";
+import { getBearerToken, validateRunnerToken } from "@/lib/runner-tokens";
 
 export function jsonError(error: unknown, fallback = "Request gagal.", status = 500) {
   const message = error instanceof Error ? error.message : fallback;
@@ -14,23 +14,12 @@ export async function readJsonBody<T>(request: Request): Promise<T> {
   }
 }
 
-function secureCompare(left: string, right: string) {
-  const leftBuffer = Buffer.from(left);
-  const rightBuffer = Buffer.from(right);
-  if (leftBuffer.length !== rightBuffer.length) return false;
-  return timingSafeEqual(leftBuffer, rightBuffer);
-}
-
-export function requireRunnerToken(request: Request) {
-  const expected = process.env.BELANJA_RUNNER_TOKEN;
-  if (!expected) {
-    return NextResponse.json({ error: "BELANJA_RUNNER_TOKEN belum dikonfigurasi di server." }, { status: 503 });
+export async function requireRunnerToken(request: Request) {
+  const bearer = getBearerToken(request);
+  const validation = await validateRunnerToken(bearer);
+  if (!validation.ok) {
+    return NextResponse.json({ error: validation.status === 401 ? "Unauthorized runner" : validation.error }, { status: validation.status });
   }
 
-  const header = request.headers.get("authorization") ?? "";
-  const bearer = /^Bearer\s+(.+)$/i.exec(header)?.[1] ?? "";
-  if (!bearer || !secureCompare(bearer, expected)) {
-    return NextResponse.json({ error: "Runner token tidak valid." }, { status: 401 });
-  }
   return null;
 }

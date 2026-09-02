@@ -300,6 +300,17 @@ create table if not exists note_history (
   created_at timestamptz not null default now()
 );
 
+create table if not exists runner_tokens (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  token_hash text not null unique,
+  active boolean not null default true,
+  created_at timestamptz not null default now(),
+  expires_at timestamptz,
+  revoked_at timestamptz,
+  last_used_at timestamptz
+);
+
 create or replace function set_updated_at()
 returns trigger
 language plpgsql
@@ -359,6 +370,9 @@ create index if not exists generated_notes_project_idx on generated_notes(projec
 create index if not exists generated_notes_project_tahap_idx on generated_notes(project_id, tahap);
 create index if not exists custom_notes_project_idx on custom_notes(project_id);
 create index if not exists note_history_project_idx on note_history(project_id, created_at desc);
+create index if not exists runner_tokens_active_idx on runner_tokens(active);
+create index if not exists runner_tokens_expires_at_idx on runner_tokens(expires_at);
+create index if not exists runner_tokens_last_used_at_idx on runner_tokens(last_used_at desc);
 
 -- This app currently has no Supabase Auth flow. Data access is intentionally
 -- driven by the public anon client, so RLS must not block CRUD for these tables.
@@ -372,5 +386,6 @@ alter table generated_notes disable row level security;
 alter table kwitansi_edits disable row level security;
 alter table custom_notes disable row level security;
 alter table note_history disable row level security;
+alter table runner_tokens enable row level security;
 
 notify pgrst, 'reload schema';

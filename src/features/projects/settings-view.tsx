@@ -1,6 +1,7 @@
 "use client";
 
 import { ChangeEvent, useRef } from "react";
+import Link from "next/link";
 import { Download, RotateCcw, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -38,6 +39,9 @@ export function SettingsView() {
           <CardDescription>Konfigurasi lokal, backup JSON, dan utilitas data. Tidak ada login/authentication.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <Link href="/settings/runners">Playwright Runners</Link>
+          </Button>
           <Button variant="outline" onClick={exportJson}>
             <Download className="h-4 w-4" />
             Export JSON

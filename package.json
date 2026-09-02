@@ -11,6 +11,7 @@
     "belanja:inspect": "tsx automation/belanja-runner/index.ts inspect",
     "belanja:runner": "tsx automation/belanja-runner/index.ts run",
     "test:date-shift": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/project-date-shift.test.mjs",
+    "test:runner-tokens": "tsx --test tests/runner-tokens.test.ts",
     "test:nota-order": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/nota-output-order.test.mjs",
     "test:kwitansi-sync": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/kwitansi-sync.test.mjs",
     "test:belanja-sync": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/belanja-sync.test.mjs",

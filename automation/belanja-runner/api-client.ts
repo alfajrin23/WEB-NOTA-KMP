@@ -11,7 +11,7 @@ export class BelanjaSyncApiClient {
     const url = new URL(path, this.config.notaKmpBaseUrl).toString();
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (options.auth !== false) {
-      if (!this.config.runnerToken) throw new Error("BELANJA_RUNNER_TOKEN belum diisi di env lokal runner.");
+      if (!this.config.runnerToken) throw new Error("RUNNER_TOKEN belum diisi di env lokal runner.");
       headers.Authorization = `Bearer ${this.config.runnerToken}`;
     }
 
