@@ -469,7 +469,7 @@ export async function getBelanjaSyncOverview() {
     const [itemsResult, runner] = await Promise.all([
       client
         .from("belanja_sync_items")
-        .select("project_id,status,source_resume_item_id,updated_at,created_at")
+        .select("project_id,status,source_resume_item_id,payload_json,error_message,updated_at,created_at")
         .order("updated_at", { ascending: false }),
       getLatestRunnerHeartbeat(client),
     ]);
@@ -480,6 +480,8 @@ export async function getBelanjaSyncOverview() {
       project_id: string;
       status: BelanjaSyncItemStatus;
       source_resume_item_id: string;
+      payload_json: JsonRecord | null;
+      error_message: string | null;
       updated_at: string;
       created_at: string;
     }>) {
@@ -492,7 +494,7 @@ export async function getBelanjaSyncOverview() {
         status: row.status,
         attemptCount: 0,
         maxAttempts: 0,
-        payload: {
+        payload: row.payload_json as BelanjaSyncItem["payload"] ?? {
           sourceItemId: row.source_resume_item_id,
           projectId: row.project_id,
           tanggal: "",
@@ -502,6 +504,7 @@ export async function getBelanjaSyncOverview() {
           hargaSatuan: 0,
           jumlah: 0,
         },
+        errorMessage: row.error_message,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
       });
@@ -513,6 +516,18 @@ export async function getBelanjaSyncOverview() {
       const successItems = latest.filter((item) => item.status === "success").length;
       const failedItems = latest.filter((item) => item.status === "failed" || item.status === "needs_review").length;
       const pendingItems = latest.filter((item) => item.status === "pending" || item.status === "processing").length;
+      const failedDetails = latest
+        .filter((item): item is BelanjaSyncItem & { status: "failed" | "needs_review" } => item.status === "failed" || item.status === "needs_review")
+        .map((item) => ({
+          sourceResumeItemId: item.sourceResumeItemId,
+          itemName: item.payload?.namaItem ?? "",
+          tanggal: item.payload?.tanggal ?? "",
+          jumlah: item.payload?.jumlah ?? 0,
+          status: item.status,
+          errorMessage: item.errorMessage ?? "Item gagal tanpa pesan error dari runner.",
+          updatedAt: item.updatedAt,
+        }))
+        .slice(0, 5);
       return {
         projectId,
         status: successItems === 0 && failedItems === 0 && pendingItems === 0
@@ -526,6 +541,7 @@ export async function getBelanjaSyncOverview() {
         successItems,
         failedItems,
         pendingItems,
+        failedDetails,
       };
     });
 

@@ -2,14 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Loader2, RefreshCcw, Send } from "lucide-react";
+import { Loader2, RefreshCcw, Search, Send, Terminal } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { MotionPage } from "@/components/ui/motion-page";
 import type { BelanjaRunnerHeartbeat, BelanjaSyncOverviewProject } from "@/lib/belanja-sync/types";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
-import { formatProjectWilayah, formatDateTimeIndonesia } from "@/utils/format";
+import { formatDateIndonesia, formatProjectWilayah, formatDateTimeIndonesia, formatRupiah } from "@/utils/format";
 
 type OverviewPayload = {
   schemaReady: boolean;
@@ -36,6 +37,7 @@ export function BelanjaSyncView() {
   const { projects } = useKdkmpStore();
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [query, setQuery] = useState("");
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -66,13 +68,29 @@ export function BelanjaSyncView() {
   );
 
   const rows = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
     return projects
       .map((project) => ({ project, sync: overviewByProject.get(project.id) }))
+      .filter(({ project, sync }) => {
+        if (!normalizedQuery) return true;
+        const failedText = (sync?.failedDetails ?? [])
+          .map((detail) => `${detail.itemName} ${detail.tanggal} ${detail.errorMessage}`)
+          .join(" ");
+        const haystack = [
+          formatProjectWilayah(project),
+          project.villageName,
+          project.districtName,
+          project.regencyName,
+          statusLabel(sync?.status ?? "belum_dikirim"),
+          failedText,
+        ].join(" ").toLowerCase();
+        return haystack.includes(normalizedQuery);
+      })
       .sort((a, b) => {
         const score = (row: typeof a) => row.sync?.status === "ada_error" ? 0 : row.sync?.status === "sebagian" ? 1 : row.sync?.status === "selesai" ? 3 : 2;
         return score(a) - score(b) || a.project.villageName.localeCompare(b.project.villageName);
       });
-  }, [overviewByProject, projects]);
+  }, [overviewByProject, projects, query]);
 
   return (
     <MotionPage>
@@ -98,6 +116,12 @@ export function BelanjaSyncView() {
             <Metric label="Target" value={overview?.runner?.targetStatus ?? "unknown"} tone={overview?.runner?.targetStatus === "connected" ? "ok" : "warn"} />
             <Metric label="Mode" value={overview?.runner?.dryRun === false ? "LIVE" : "DRY RUN"} tone={overview?.runner?.dryRun === false ? "warn" : "default"} />
             <Metric label="Heartbeat" value={overview?.runner ? formatDateTimeIndonesia(overview.runner.lastSeenAt) : "-"} />
+            <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800 md:col-span-4">
+              <p className="flex items-center gap-2 text-xs font-semibold text-slate-500"><Terminal className="h-3.5 w-3.5" />Runner lokal</p>
+              <code className="mt-1 block w-fit rounded bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                npm run belanja:runner
+              </code>
+            </div>
           </CardContent>
         </Card>
 
@@ -115,8 +139,20 @@ export function BelanjaSyncView() {
             <CardDescription>Buka Resume desa untuk memilih item dan membuat job pengiriman.</CardDescription>
           </CardHeader>
           <CardContent>
+            <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div className="relative w-full md:max-w-md">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  className="pl-9"
+                  placeholder="Cari desa, kecamatan, status, atau error"
+                />
+              </div>
+              <p className="text-xs font-semibold text-slate-500">{rows.length} desa ditampilkan</p>
+            </div>
             <div className="overflow-auto rounded-lg border border-slate-200 dark:border-slate-800">
-              <table className="w-full min-w-[860px] text-left text-sm">
+              <table className="w-full min-w-[1080px] text-left text-sm">
                 <thead className="bg-slate-100 text-xs uppercase text-slate-500 dark:bg-slate-900">
                   <tr>
                     <th className="px-4 py-3">Desa</th>
@@ -124,6 +160,7 @@ export function BelanjaSyncView() {
                     <th className="px-4 py-3 text-right">Success</th>
                     <th className="px-4 py-3 text-right">Gagal</th>
                     <th className="px-4 py-3 text-right">Pending</th>
+                    <th className="px-4 py-3">Info Gagal</th>
                     <th className="px-4 py-3">Aksi</th>
                   </tr>
                 </thead>
@@ -140,6 +177,21 @@ export function BelanjaSyncView() {
                       <td className="px-4 py-3 text-right">{sync?.successItems ?? 0}</td>
                       <td className="px-4 py-3 text-right">{sync?.failedItems ?? 0}</td>
                       <td className="px-4 py-3 text-right">{sync?.pendingItems ?? 0}</td>
+                      <td className="max-w-[360px] px-4 py-3">
+                        {sync?.failedDetails?.length ? (
+                          <div className="space-y-2 text-xs">
+                            {sync.failedDetails.slice(0, 2).map((detail) => (
+                              <div key={`${project.id}-${detail.sourceResumeItemId}`} className="rounded border border-red-100 bg-red-50 p-2 text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
+                                <p className="font-semibold">{detail.itemName || "Item tanpa nama"}</p>
+                                <p>{detail.tanggal ? formatDateIndonesia(detail.tanggal) : "-"} - {formatRupiah(detail.jumlah)}</p>
+                                <p className="line-clamp-2">{detail.errorMessage}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-slate-400">-</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <Button asChild size="sm" variant="outline">
                           <Link href={`/projects/${project.id}/resume`}><Send className="h-4 w-4" />Buka Resume</Link>
@@ -147,6 +199,13 @@ export function BelanjaSyncView() {
                       </td>
                     </tr>
                   ))}
+                  {rows.length === 0 ? (
+                    <tr>
+                      <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={7}>
+                        Tidak ada desa yang cocok dengan pencarian.
+                      </td>
+                    </tr>
+                  ) : null}
                 </tbody>
               </table>
             </div>

@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, RefreshCcw, Send, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCcw, Search, Send, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { buildBelanjaPayload, summarizeBelanjaPayloads, validateBelanjaPayload } from "@/lib/belanja-sync/payload";
@@ -67,6 +68,7 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [filter, setFilter] = useState<StatusFilter>("unsent");
+  const [query, setQuery] = useState("");
   const [dryRun, setDryRun] = useState(true);
   const [forceResend, setForceResend] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -113,7 +115,30 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
     initializedProjectRef.current = project.id;
   }, [project.id, rows, state]);
 
-  const filteredRows = useMemo(() => rows.filter((row) => rowMatchesFilter(row.status, filter)), [filter, rows]);
+  const failedRows = useMemo(
+    () => rows.filter((row) => row.status === "failed" || row.status === "needs_review" || !row.validation.valid),
+    [rows],
+  );
+  const filteredRows = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase();
+    return rows.filter((row) => {
+      if (!rowMatchesFilter(row.status, filter)) return false;
+      if (!normalizedQuery) return true;
+      const haystack = [
+        row.payload.tanggal,
+        row.payload.namaItem,
+        row.payload.satuan,
+        row.payload.tahap,
+        row.payload.kategori,
+        row.payload.vendor,
+        statusLabel(row.status),
+        row.latest?.targetReference,
+        row.latest?.errorMessage,
+        row.validation.errors.join(" "),
+      ].join(" ").toLowerCase();
+      return haystack.includes(normalizedQuery);
+    });
+  }, [filter, query, rows]);
   const selectedRows = useMemo(() => rows.filter((row) => selectedIds.has(row.item.id)), [rows, selectedIds]);
   const selectedSummary = useMemo(() => summarizeBelanjaPayloads(selectedRows.map((row) => row.payload)), [selectedRows]);
   const latestJob = state?.jobs[0] ?? null;
@@ -285,6 +310,31 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
           </div>
         ) : null}
 
+        {failedRows.length > 0 ? (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/30 dark:text-red-100">
+            <div className="mb-2 flex items-center gap-2 font-semibold">
+              <AlertTriangle className="h-4 w-4" />
+              {failedRows.length} item perlu dicek
+            </div>
+            <div className="grid gap-2 lg:grid-cols-2">
+              {failedRows.slice(0, 4).map((row) => (
+                <div key={row.item.id} className="rounded border border-red-100 bg-white/70 p-2 dark:border-red-900 dark:bg-slate-950/50">
+                  <p className="font-semibold">{row.payload.namaItem}</p>
+                  <p className="text-xs">
+                    {formatDateIndonesia(row.payload.tanggal)} - {row.payload.tahap} - {formatRupiah(row.payload.jumlah)}
+                  </p>
+                  <p className="mt-1 text-xs">
+                    {row.validation.valid
+                      ? row.latest?.errorMessage ?? "Runner menandai item gagal tanpa pesan error."
+                      : row.validation.errors.join(" ")}
+                  </p>
+                  {row.latest ? <p className="mt-1 text-xs">Percobaan: {row.latest.attemptCount}</p> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
         <div className="grid gap-3 lg:grid-cols-[220px_1fr]">
           <Select value={filter} onValueChange={(value) => setFilter(value as StatusFilter)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
@@ -296,6 +346,15 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
             </SelectContent>
           </Select>
           <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-[260px] flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <Input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                className="h-8 pl-9 text-sm"
+                placeholder="Cari item, tahap, vendor, ref, atau error"
+              />
+            </div>
             <Button variant="outline" size="sm" onClick={selectFiltered}>Pilih Semua</Button>
             <Button variant="outline" size="sm" onClick={clearFiltered}>Batalkan Semua</Button>
             <label className="inline-flex h-8 items-center gap-2 rounded-lg border border-slate-200 px-3 text-xs font-semibold dark:border-slate-800">
@@ -379,6 +438,13 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
                   </tr>
                 );
               })}
+              {filteredRows.length === 0 ? (
+                <tr>
+                  <td className="px-3 py-8 text-center text-sm text-slate-500" colSpan={9}>
+                    Tidak ada item yang cocok dengan filter atau pencarian.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>

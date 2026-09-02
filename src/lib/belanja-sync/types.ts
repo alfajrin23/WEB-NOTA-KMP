@@ -109,6 +109,15 @@ export type BelanjaSyncOverviewProject = {
   successItems: number;
   failedItems: number;
   pendingItems: number;
+  failedDetails?: Array<{
+    sourceResumeItemId: string;
+    itemName: string;
+    tanggal: string;
+    jumlah: number;
+    status: Extract<BelanjaSyncItemStatus, "failed" | "needs_review">;
+    errorMessage: string;
+    updatedAt: string;
+  }>;
 };
 
 export type CreateBelanjaSyncJobInput = {
