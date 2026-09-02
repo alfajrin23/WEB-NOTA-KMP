@@ -19,9 +19,13 @@ import { formatDateIndonesia, formatRupiah } from "@/utils/format";
 type StatusFilter = "unsent" | "success" | "failed" | "all";
 type RowStatus = "not_sent" | "pending" | "processing" | "success" | "failed" | "skipped" | "needs_review" | "dry_run";
 
+function isDryRunItem(latest: BelanjaSyncItem | undefined) {
+  return latest?.status === "skipped" && latest.errorMessage?.includes("DRY_RUN_OK");
+}
+
 function statusOf(latest: BelanjaSyncItem | undefined): RowStatus {
   if (!latest) return "not_sent";
-  if (latest.status === "skipped" && latest.errorMessage?.includes("DRY_RUN_OK")) return "dry_run";
+  if (isDryRunItem(latest)) return "dry_run";
   return latest.status;
 }
 
@@ -29,7 +33,7 @@ function statusLabel(status: RowStatus) {
   if (status === "not_sent") return "Belum Dikirim";
   if (status === "pending") return "Antrean";
   if (status === "processing") return "Diproses";
-  if (status === "success") return "SUCCESS";
+  if (status === "success") return "Terkirim ke Web";
   if (status === "failed") return "Gagal";
   if (status === "needs_review") return "Needs Review";
   if (status === "dry_run") return "Dry Run OK";
@@ -188,11 +192,17 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
       toast.error(`${invalidRows.length} item belum valid untuk dikirim.`);
       return;
     }
+    if (!dryRun && state?.runner?.dryRun !== false) {
+      toast.error("Runner lokal masih mode DRY RUN. Ubah BELANJA_DRY_RUN=false lalu jalankan ulang runner sebelum kirim LIVE.");
+      return;
+    }
 
     const confirmed = window.confirm(
       resend
         ? `Kirim ulang ${selectedIds.size} item ke Web Belanja? Aksi ini bisa membuat transaksi duplikat jika item sudah pernah sukses.`
-        : `Buat job ${dryRun ? "DRY RUN" : "LIVE"} untuk ${selectedIds.size} item Resume?`,
+        : dryRun
+          ? `Buat DRY RUN untuk ${selectedIds.size} item Resume? Data hanya divalidasi, belum tersimpan ke web target.`
+          : `KIRIM LIVE ${selectedIds.size} item Resume ke Web Belanja? Data akan disubmit ke web target.`,
     );
     if (!confirmed) return;
 
@@ -265,6 +275,9 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
             <Badge className={runnerOnline ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}>
               Runner {runnerOnline ? "Online" : "Offline"}
             </Badge>
+            <Badge className={state?.runner?.dryRun === false ? "bg-amber-50 text-amber-700" : "bg-cyan-50 text-cyan-700"}>
+              Mode Runner {state?.runner?.dryRun === false ? "LIVE" : "DRY RUN"}
+            </Badge>
             <Badge className={state?.runner?.targetStatus === "connected" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}>
               Target {state?.runner?.targetStatus ?? "unknown"}
             </Badge>
@@ -282,9 +295,16 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
           </div>
         ) : null}
 
+        {!dryRun && state?.runner?.dryRun !== false ? (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+            <div className="mb-1 flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />LIVE belum aktif di runner</div>
+            <p>Job LIVE dari UI tetap akan jadi simulasi selama `.env.belanja.local` masih `BELANJA_DRY_RUN=true`.</p>
+          </div>
+        ) : null}
+
         <div className="grid gap-3 md:grid-cols-5">
           <SyncMetric label="Total Resume" value={rows.length.toString()} />
-          <SyncMetric label="SUCCESS" value={successCount.toString()} tone="ok" />
+          <SyncMetric label="Terkirim Web" value={successCount.toString()} tone="ok" />
           <SyncMetric label="Pending" value={pendingCount.toString()} />
           <SyncMetric label="Gagal" value={failedCount.toString()} tone={failedCount > 0 ? "bad" : "default"} />
           <SyncMetric label="Terpilih" value={`${selectedIds.size} / ${formatRupiah(selectedSummary.totalAmount)}`} />
@@ -374,7 +394,7 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
             </label>
             <Button onClick={() => createJob(false)} disabled={submitting || selectedIds.size === 0}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              Kirim {selectedIds.size} Item ke Web Belanja
+              {dryRun ? `Buat Dry Run ${selectedIds.size} Item` : `Kirim LIVE ${selectedIds.size} Item`}
             </Button>
             {forceResend ? (
               <Button variant="destructive" onClick={() => createJob(true)} disabled={submitting || selectedIds.size === 0}>
@@ -430,7 +450,9 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
                       {!row.validation.valid ? (
                         <p className="flex gap-1 text-red-700"><XCircle className="mt-0.5 h-3 w-3 shrink-0" />{row.validation.errors.join(" ")}</p>
                       ) : row.status === "success" ? (
-                        <p className="flex gap-1 text-emerald-700"><CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />Tidak dikirim ulang default.</p>
+                        <p className="flex gap-1 text-emerald-700"><CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />Sudah tersubmit ke Web Belanja. Tidak dikirim ulang default.</p>
+                      ) : row.status === "dry_run" ? (
+                        <p className="flex gap-1 text-cyan-700"><CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />Dry run berhasil. Belum submit ke web target.</p>
                       ) : (
                         <p>{row.latest?.errorMessage ?? "-"}</p>
                       )}

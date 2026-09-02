@@ -50,7 +50,7 @@ function modalStatusLabel(status: ModalRowStatus) {
   if (status === "not_sent") return "Belum Dikirim";
   if (status === "pending") return "Pending";
   if (status === "processing") return "Sedang Dikirim";
-  if (status === "success") return "SUCCESS";
+  if (status === "success") return "Terkirim ke Web";
   if (status === "failed") return "Gagal";
   if (status === "needs_review") return "Needs Review";
   if (status === "dry_run") return "Dry Run OK";
@@ -268,8 +268,16 @@ export function BelanjaSyncView() {
       toast.error(`${invalidRows.length} item belum valid untuk dikirim.`);
       return;
     }
+    if (!modalDryRun && modalState?.runner?.dryRun !== false) {
+      toast.error("Runner lokal masih mode DRY RUN. Ubah BELANJA_DRY_RUN=false lalu jalankan ulang runner sebelum kirim LIVE.");
+      return;
+    }
 
-    const confirmed = window.confirm(`Buat job ${modalDryRun ? "DRY RUN" : "LIVE"} untuk ${selectedItemIds.size} item dari ${formatProjectWilayah(modalProject)}?`);
+    const confirmed = window.confirm(
+      modalDryRun
+        ? `Buat DRY RUN untuk ${selectedItemIds.size} item dari ${formatProjectWilayah(modalProject)}? Data hanya divalidasi, belum tersimpan ke web target.`
+        : `KIRIM LIVE ${selectedItemIds.size} item dari ${formatProjectWilayah(modalProject)} ke Web Belanja? Data akan disubmit ke web target.`,
+    );
     if (!confirmed) return;
 
     setModalSubmitting(true);
@@ -301,11 +309,12 @@ export function BelanjaSyncView() {
     if (!modalLatestJob) return "Pilih item Resume lalu buat job pengiriman.";
     if (!modalState?.runner?.online) return "Pending: runner lokal belum aktif atau heartbeat belum masuk ke Vercel.";
     if (modalState.runner.targetStatus !== "connected") return "Pending: runner hidup, tetapi website target/VPN belum connected.";
+    if (!modalDryRun && modalState.runner.dryRun !== false) return "LIVE belum aktif: runner lokal masih mode DRY RUN.";
     if (processingRow) return `Sedang mengirim: ${processingRow.payload.namaItem}`;
     if (nextPendingRow) return `Menunggu runner mengambil item berikutnya: ${nextPendingRow.payload.namaItem}`;
     if (modalLatestJob.failedItems > 0) return "Selesai dengan item gagal. Lihat detail error di tabel.";
     return "Job selesai.";
-  }, [modalLatestJob, modalState?.runner, nextPendingRow, processingRow]);
+  }, [modalDryRun, modalLatestJob, modalState?.runner, nextPendingRow, processingRow]);
 
   return (
     <MotionPage>
@@ -456,6 +465,13 @@ export function BelanjaSyncView() {
                   <Metric label="Target" value={modalState?.runner?.targetStatus ?? "unknown"} tone={modalState?.runner?.targetStatus === "connected" ? "ok" : "warn"} />
                 </div>
 
+                {!modalDryRun && modalState?.runner?.dryRun !== false ? (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
+                    <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />LIVE belum aktif di runner</div>
+                    <p className="mt-1">Job LIVE dari UI tetap akan jadi simulasi selama `.env.belanja.local` masih `BELANJA_DRY_RUN=true`.</p>
+                  </div>
+                ) : null}
+
                 <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800">
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                     <div>
@@ -494,7 +510,7 @@ export function BelanjaSyncView() {
                     </label>
                     <Button onClick={createModalJob} disabled={modalSubmitting || modalLoading || selectedItemIds.size === 0}>
                       {modalSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                      Kirim Data
+                      {modalDryRun ? "Buat Dry Run" : "Kirim LIVE ke Web"}
                     </Button>
                   </div>
                 </div>
@@ -549,11 +565,13 @@ export function BelanjaSyncView() {
                             </td>
                             <td className="max-w-96 px-3 py-2 text-xs text-slate-600 dark:text-slate-300">
                               {row.status === "success" ? (
-                                <p className="flex gap-1 text-emerald-700"><CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />{row.latest?.targetReference ?? "Berhasil dikirim."}</p>
+                                <p className="flex gap-1 text-emerald-700"><CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />{row.latest?.targetReference ?? "Sudah tersubmit ke Web Belanja."}</p>
                               ) : !row.validation.valid ? (
                                 <p className="flex gap-1 text-red-700"><XCircle className="mt-0.5 h-3 w-3 shrink-0" />{row.validation.errors.join(" ")}</p>
                               ) : row.status === "failed" || row.status === "needs_review" ? (
                                 <p className="flex gap-1 text-red-700"><AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />{row.latest?.errorMessage ?? "Gagal tanpa pesan error."}</p>
+                              ) : row.status === "dry_run" ? (
+                                <p className="flex gap-1 text-cyan-700"><CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0" />Dry run berhasil. Belum submit ke web target.</p>
                               ) : row.status === "processing" ? (
                                 <p className="flex gap-1 text-blue-700"><Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin" />Sedang diproses runner.</p>
                               ) : row.status === "pending" ? (
