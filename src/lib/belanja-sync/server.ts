@@ -4,7 +4,7 @@ import type { Project, ProjectStatus, ResumeItem, StageCode, WilayahType } from 
 import { formatProjectRecipientAddress, formatProjectRecipientName, normalizeWilayahType } from "../../utils/format";
 import { createSupabaseAdminClient } from "../supabase/admin";
 import { buildBelanjaPayload, validateBelanjaPayload } from "./payload";
-import { nextFailedBelanjaStatus, shouldQueueBelanjaItem } from "./status";
+import { isBelanjaItemActive, nextFailedBelanjaStatus, shouldQueueBelanjaItem } from "./status";
 import type {
   BelanjaProjectSyncState,
   BelanjaRunnerHeartbeat,
@@ -167,10 +167,11 @@ function asStageCode(value: string | null | undefined): StageCode {
 }
 
 function isSchemaMissingError(error: { code?: string; message?: string } | null | undefined) {
+  const message = error?.message ?? "";
   return Boolean(
     error?.code === "PGRST205" ||
     error?.code === "42P01" ||
-    /belanja_sync_|belanja_runner_|schema cache|does not exist/i.test(error?.message ?? ""),
+    /schema cache|relation .*(belanja_sync_|belanja_runner_).*does not exist|could not find .*belanja_sync_|could not find .*belanja_runner_/i.test(message),
   );
 }
 
@@ -179,6 +180,10 @@ function throwDatabaseError(error: { code?: string; message?: string } | null | 
     throw new Error(`${error?.message ?? fallback}. Jalankan migration supabase/migrations/20260901_belanja_sync.sql terlebih dahulu.`);
   }
   throw new Error(error?.message ?? fallback);
+}
+
+function isActiveItemUniqueViolation(error: { code?: string; message?: string } | null | undefined) {
+  return error?.code === "23505" && /belanja_sync_items_active_once_idx/i.test(error.message ?? "");
 }
 
 function rowToResumeItem(row: ResumeItemRow): ResumeItem {
@@ -306,10 +311,10 @@ function rowToHeartbeat(row: BelanjaHeartbeatRow | null | undefined): BelanjaRun
 
 function latestBySourceItemId(items: BelanjaSyncItem[]) {
   const score: Record<BelanjaSyncItemStatus, number> = {
+    processing: 60,
+    pending: 55,
+    needs_review: 54,
     success: 50,
-    processing: 40,
-    pending: 30,
-    needs_review: 25,
     failed: 20,
     skipped: 10,
   };
@@ -327,6 +332,22 @@ function latestBySourceItemId(items: BelanjaSyncItem[]) {
   }
 
   return latest;
+}
+
+function activeBySourceItemId(items: BelanjaSyncItem[]) {
+  const active: Record<string, BelanjaSyncItem> = {};
+
+  for (const item of items) {
+    if (!isBelanjaItemActive(item.status)) continue;
+    const current = active[item.sourceResumeItemId];
+    const itemTime = Date.parse(item.updatedAt || item.createdAt);
+    const currentTime = current ? Date.parse(current.updatedAt || current.createdAt) : -1;
+    if (!current || itemTime > currentTime) {
+      active[item.sourceResumeItemId] = item;
+    }
+  }
+
+  return active;
 }
 
 async function getLatestRunnerHeartbeat(client: SupabaseClient) {
@@ -573,15 +594,20 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
     .order("created_at", { ascending: false });
   if (existingError) throwDatabaseError(existingError, "Gagal mengecek status Belanja Sync lama.");
 
-  const existingBySource = latestBySourceItemId(((existingRows ?? []) as BelanjaItemRow[]).map(rowToItem));
+  const existingItems = ((existingRows ?? []) as BelanjaItemRow[]).map(rowToItem);
+  const existingBySource = latestBySourceItemId(existingItems);
+  const activeBySource = activeBySourceItemId(existingItems);
   const timestamp = nowIso();
   const itemRows = project.items.map((item) => {
     const existing = existingBySource[item.id];
+    const activeExisting = activeBySource[item.id];
     const payload = buildBelanjaPayload(project, item);
     const validation = validateBelanjaPayload(payload);
     let status: BelanjaSyncItemStatus = "pending";
     let errorMessage: string | null = null;
-    const queueDecision = shouldQueueBelanjaItem(existing?.status, input.forceResend);
+    const queueDecision = activeExisting
+      ? { queue: false, reason: "Item sudah ada di antrean aktif, tidak dibuat duplikat." }
+      : shouldQueueBelanjaItem(existing?.status, input.forceResend);
 
     if (!queueDecision.queue) {
       status = "skipped";
@@ -639,6 +665,15 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
   const rowsWithJob = itemRows.map((row) => ({ ...row, job_id: job.id }));
   const { error: itemError } = await client.from("belanja_sync_items").insert(rowsWithJob);
   if (itemError) {
+    if (isActiveItemUniqueViolation(itemError)) {
+      await client.from("belanja_sync_jobs").delete().eq("id", job.id);
+      return {
+        job: null,
+        state: await getBelanjaProjectState(input.projectId),
+        message: "Sebagian item sudah punya antrean aktif. Status sudah direfresh; item tersebut tidak dibuat duplikat.",
+      };
+    }
+
     await client
       .from("belanja_sync_jobs")
       .update({ status: "failed", error_message: itemError.message, finished_at: nowIso() })
@@ -663,6 +698,38 @@ export async function getBelanjaSyncJob(jobId: string) {
   return {
     job: rowToJob(jobResult.data as BelanjaJobRow),
     items: ((itemsResult.data ?? []) as BelanjaItemRow[]).map(rowToItem),
+  };
+}
+
+export async function resetBelanjaProjectSyncState(projectId: string) {
+  const client = clientOrThrow();
+  const { data: project, error: projectError } = await client
+    .from("projects")
+    .select("id,nama_desa,kecamatan")
+    .eq("id", projectId)
+    .maybeSingle();
+  if (projectError) throwDatabaseError(projectError, "Gagal memuat project.");
+  if (!project) throw new Error("Project tidak ditemukan.");
+
+  const { data: itemRows, error: itemError } = await client
+    .from("belanja_sync_items")
+    .delete()
+    .eq("project_id", projectId)
+    .select("id");
+  if (itemError) throwDatabaseError(itemError, "Gagal menghapus item Belanja Sync.");
+
+  const { data: jobRows, error: jobError } = await client
+    .from("belanja_sync_jobs")
+    .delete()
+    .eq("project_id", projectId)
+    .select("id");
+  if (jobError) throwDatabaseError(jobError, "Gagal menghapus job Belanja Sync.");
+
+  return {
+    project,
+    deletedItems: itemRows?.length ?? 0,
+    deletedJobs: jobRows?.length ?? 0,
+    state: await getBelanjaProjectState(projectId),
   };
 }
 

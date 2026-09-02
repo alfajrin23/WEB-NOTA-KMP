@@ -14,9 +14,14 @@ RUNNER_TOKEN=kmp_runner_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TARGET_BASE_URL=http://10.21.21.10:9023
 TARGET_HEALTH_PATH=/login
 TARGET_CHECK_TIMEOUT_MS=10000
+TARGET_DASHBOARD_PATH=/home
+TARGET_BELANJA_URL_PATH=/belanja
+TARGET_BELANJA_CREATE_URL_PATH=/belanja/create
 ```
 
 `BELANJA_RUNNER_TOKEN` dan `NOTA_KMP_BASE_URL` masih dibaca sebagai alias lama untuk transisi, tetapi runner baru sebaiknya memakai `RUNNER_TOKEN` dan `WEB_NOTA_API_URL`.
+
+Runner default login fresh memakai `TARGET_EMAIL/TARGET_PASSWORD`. Ini mencegah PC lain memakai session cache lama dari akun/role berbeda. Jika benar-benar ingin memakai cache login lama, set `BELANJA_REUSE_AUTH_STATE=true`.
 
 ## Target disconnected
 
@@ -32,7 +37,9 @@ Output `targetCheck` akan menampilkan URL yang dicek, HTTP status jika server me
 2. `TARGET_BASE_URL` bisa dibuka manual dari browser PC itu.
 3. Port target, misalnya `9023`, tidak diblokir firewall.
 4. Jika halaman health/login berbeda, ubah `TARGET_HEALTH_PATH`, misalnya `/`, `/login`, atau path yang selalu merespons.
-5. Setiap PC memakai token sendiri dari `Settings -> Playwright Runners`.
+5. Jika runner membuka 404 seperti `/belanja`, cek path Belanja yang benar dari menu target lalu isi `TARGET_BELANJA_URL_PATH` atau `TARGET_BELANJA_CREATE_URL_PATH`.
+6. Jika nama user/role di Chrome bukan akun yang diisi di `.env.belanja.local`, hapus `automation/belanja-runner/.auth/belanja.json` atau pastikan `BELANJA_REUSE_AUTH_STATE=false`.
+7. Setiap PC memakai token sendiri dari `Settings -> Playwright Runners`.
 
 ## Membuat atau revoke runner
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, CheckCircle2, Clock3, Loader2, RefreshCcw, Search, Send, Terminal, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock3, Loader2, RefreshCcw, RotateCcw, Search, Send, Terminal, X, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -296,10 +296,30 @@ export function BelanjaSyncView() {
       if (!response.ok) throw new Error(result.error ?? "Gagal membuat job Belanja Sync.");
       setModalState(result.state as BelanjaProjectSyncState);
       setSelectedItemIds(new Set());
-      toast.success("Job masuk antrean Belanja Sync.");
+      toast.success(result.message ?? "Job masuk antrean Belanja Sync.");
       await refresh();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Gagal membuat job Belanja Sync.");
+    } finally {
+      setModalSubmitting(false);
+    }
+  }
+
+  async function resetModalProjectState() {
+    if (!modalProject) return;
+    if (!window.confirm(`Reset status Belanja Sync untuk ${formatProjectWilayah(modalProject)}? Riwayat job dan item sync akan dihapus dari aplikasi Nota, tetapi transaksi yang sudah terkirim di Web Belanja tidak ikut dihapus.`)) return;
+
+    setModalSubmitting(true);
+    try {
+      const response = await fetch(`/api/belanja-sync/projects/${modalProject.id}`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Gagal reset status Belanja Sync.");
+      setModalState(result.state as BelanjaProjectSyncState);
+      setSelectedItemIds(new Set());
+      toast.success("Status Belanja Sync direset.");
+      await refresh();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Gagal reset status Belanja Sync.");
     } finally {
       setModalSubmitting(false);
     }
@@ -504,6 +524,10 @@ export function BelanjaSyncView() {
                   <div className="flex flex-wrap items-center gap-2">
                     <Button variant="outline" size="sm" onClick={selectAllModalRows} disabled={modalLoading}>Pilih Semua</Button>
                     <Button variant="outline" size="sm" onClick={clearModalRows} disabled={modalLoading}>Batalkan Semua</Button>
+                    <Button variant="outline" size="sm" onClick={resetModalProjectState} disabled={modalSubmitting || modalLoading}>
+                      <RotateCcw className="h-4 w-4" />
+                      Reset Status
+                    </Button>
                     <label className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-200 px-3 text-xs font-semibold dark:border-slate-800">
                       <input type="checkbox" checked={modalDryRun} onChange={(event) => setModalDryRun(event.target.checked)} />
                       Dry Run

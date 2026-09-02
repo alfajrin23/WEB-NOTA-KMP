@@ -15,6 +15,7 @@ async function main() {
       dryRun: config.dryRun,
       headed: config.headed,
       fieldMapVerified: config.fieldMapVerified,
+      reuseAuthState: config.reuseAuthState,
       hasRunnerToken: Boolean(config.runnerToken),
       hasTargetCredential: Boolean(config.targetEmail && config.targetPassword),
     }, null, 2));

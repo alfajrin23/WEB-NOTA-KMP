@@ -6,11 +6,15 @@ export type RunnerConfig = {
   targetBaseUrl: string;
   targetHealthPath: string;
   targetCheckTimeoutMs: number;
+  targetDashboardPath: string;
+  targetBelanjaUrlPath: string;
+  targetBelanjaCreateUrlPath: string;
   targetEmail: string;
   targetPassword: string;
   notaKmpBaseUrl: string;
   runnerToken: string;
   runnerId: string;
+  reuseAuthState: boolean;
   dryRun: boolean;
   headed: boolean;
   fieldMapVerified: boolean;
@@ -63,11 +67,15 @@ export function getRunnerConfig(): RunnerConfig {
     targetBaseUrl: process.env.TARGET_BASE_URL || "http://10.21.21.10:9023",
     targetHealthPath: process.env.TARGET_HEALTH_PATH || "/login",
     targetCheckTimeoutMs: numberEnv("TARGET_CHECK_TIMEOUT_MS", 10000),
+    targetDashboardPath: process.env.TARGET_DASHBOARD_PATH || "/home",
+    targetBelanjaUrlPath: process.env.TARGET_BELANJA_URL_PATH || "/belanja",
+    targetBelanjaCreateUrlPath: process.env.TARGET_BELANJA_CREATE_URL_PATH || "/belanja/create",
     targetEmail: process.env.TARGET_EMAIL || "",
     targetPassword: process.env.TARGET_PASSWORD || "",
     notaKmpBaseUrl: process.env.WEB_NOTA_API_URL || process.env.NOTA_KMP_BASE_URL || "http://localhost:3000",
     runnerToken: process.env.RUNNER_TOKEN || process.env.BELANJA_RUNNER_TOKEN || "",
     runnerId: process.env.BELANJA_RUNNER_ID || `belanja-${os.hostname()}`,
+    reuseAuthState: booleanEnv("BELANJA_REUSE_AUTH_STATE", false),
     dryRun: booleanEnv("BELANJA_DRY_RUN", true),
     headed: booleanEnv("BELANJA_RUNNER_HEADED", true),
     fieldMapVerified: booleanEnv("BELANJA_FIELD_MAP_VERIFIED", false),

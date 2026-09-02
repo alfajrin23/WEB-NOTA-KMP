@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, RefreshCcw, Search, Send, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, RefreshCcw, RotateCcw, Search, Send, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -221,7 +221,7 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? "Gagal membuat job.");
       setState(result.state as BelanjaProjectSyncState);
-      toast.success(dryRun ? "Job dry run masuk antrean runner." : "Job live masuk antrean runner.");
+      toast.success(result.message ?? (dryRun ? "Job dry run masuk antrean runner." : "Job live masuk antrean runner."));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Gagal membuat job.");
     } finally {
@@ -261,6 +261,24 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
     }
   }
 
+  async function resetSyncState() {
+    if (!window.confirm("Reset status Belanja Sync untuk project ini? Riwayat job dan item sync akan dihapus dari aplikasi Nota, tetapi transaksi yang sudah terkirim di Web Belanja tidak ikut dihapus.")) return;
+    setSubmitting(true);
+    try {
+      const response = await fetch(`/api/belanja-sync/projects/${project.id}`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error ?? "Gagal reset status Belanja Sync.");
+      setState(result.state as BelanjaProjectSyncState);
+      setSelectedIds(new Set());
+      initializedProjectRef.current = null;
+      toast.success("Status Belanja Sync direset.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Gagal reset status Belanja Sync.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <Card className="border-blue-200 dark:border-blue-900">
       <CardHeader className="gap-4">
@@ -284,6 +302,10 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
             <Button variant="outline" size="sm" onClick={() => refresh()} disabled={loading || submitting}>
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
               Refresh
+            </Button>
+            <Button variant="outline" size="sm" onClick={resetSyncState} disabled={loading || submitting}>
+              <RotateCcw className="h-4 w-4" />
+              Reset Status
             </Button>
           </div>
         </div>

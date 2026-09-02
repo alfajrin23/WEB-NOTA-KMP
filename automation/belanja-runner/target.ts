@@ -15,6 +15,13 @@ import { targetFieldMap, type BelanjaFieldKey } from "./config/target-field-map"
 
 type BelanjaSection = "material" | "labor" | "equipment";
 type FilledValues = Partial<Record<BelanjaFieldKey | "tanggalBayar" | "vendor", string>>;
+type PageSummary = {
+  url: string;
+  title: string;
+  heading: string[];
+  links: Array<{ text: string; href: string }>;
+  buttons: string[];
+};
 type NativeOptionSnapshot = {
   value: string;
   text: string;
@@ -140,6 +147,65 @@ async function clickFirstButton(page: Page, texts: string[]) {
   return false;
 }
 
+async function pageSummary(page: Page): Promise<PageSummary> {
+  return page.evaluate<PageSummary>(`(() => {
+    const textContent = (element) => (element.textContent || "").trim().replace(/\\s+/g, " ");
+    return {
+      url: location.href,
+      title: document.title,
+      heading: Array.from(document.querySelectorAll("h1,h2,h3")).map(textContent).filter(Boolean).slice(0, 5),
+      links: Array.from(document.querySelectorAll("a")).map((element) => ({
+        text: textContent(element),
+        href: element.getAttribute("href") || "",
+      })).filter((entry) => entry.text || entry.href).slice(0, 20),
+      buttons: Array.from(document.querySelectorAll("button")).map(textContent).filter(Boolean).slice(0, 20),
+    };
+  })()`).catch((): PageSummary => ({
+    url: page.url(),
+    title: "",
+    heading: [],
+    links: [],
+    buttons: [],
+  }));
+}
+
+async function gotoTarget(page: Page, config: RunnerConfig, pathName: string) {
+  await page.goto(targetUrl(config, pathName), { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+}
+
+async function clickBelanjaNavigationLink(page: Page) {
+  const roleLink = page.getByRole("link", { name: /belanja|pengeluaran|transaksi|realisasi/i }).first();
+  if (await roleLink.isVisible().catch(() => false)) {
+    await roleLink.click();
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+    return true;
+  }
+
+  for (const selector of [
+    "a[href*='belanja' i]",
+    "a[href*='pengeluaran' i]",
+    "a[href*='transaksi' i]",
+    "a[href*='realisasi' i]",
+  ]) {
+    const link = page.locator(selector).first();
+    if (await link.isVisible().catch(() => false)) {
+      await link.click();
+      await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+      return true;
+    }
+  }
+  return false;
+}
+
+async function tryOpenBelanjaFormFromCurrentPage(page: Page) {
+  if (await inputByName(page, "tanggal", false)) return true;
+  const clicked = await clickFirstButton(page, targetFieldMap.addButtonTexts);
+  if (!clicked) return false;
+  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+  return Boolean(await inputByName(page, "tanggal", false));
+}
+
 function expenseSection(payload: BelanjaPayload): BelanjaSection {
   if (payload.expenseType === "labor" || payload.expenseType === "equipment" || payload.expenseType === "material") {
     return payload.expenseType;
@@ -196,32 +262,6 @@ async function nativeOptions(locator: Locator): Promise<NativeOptionSnapshot[]> 
     });
   }
   return snapshots;
-}
-
-async function hasAnyChoices(page: Page, selectId: string) {
-  const select = page.locator(`#${selectId}`).first();
-  if (!await select.count().catch(() => 0)) return false;
-  for (const option of await nativeOptions(select)) {
-    if (meaningful(option.text || option.value)) return true;
-  }
-
-  const options = choiceRoot(page, selectId).locator(".choices__list--dropdown .choices__item--choice");
-  const count = await options.count().catch(() => 0);
-  for (let index = 0; index < count; index += 1) {
-    const text = normalizeBelanjaText(await options.nth(index).innerText().catch(() => ""));
-    if (meaningful(text)) return true;
-  }
-  return false;
-}
-
-async function waitForAnyChoices(page: Page, selectId: string, timeout = 12_000) {
-  const deadline = Date.now() + timeout;
-  do {
-    if (await hasAnyChoices(page, selectId)) return true;
-    await page.waitForTimeout(250);
-  } while (Date.now() < deadline);
-  debugTarget(`waitForAnyChoices timeout selectId=${selectId} timeout=${timeout}`);
-  return false;
 }
 
 async function hasMatchingChoice(page: Page, selectId: string, terms: string[]) {
@@ -400,16 +440,33 @@ async function fillEquipment(page: Page, payload: BelanjaPayload) {
 }
 
 export async function openBelanjaForm(page: Page, config: RunnerConfig) {
-  await page.goto(targetUrl(config, targetFieldMap.belanjaCreateUrlPath), { waitUntil: "domcontentloaded", timeout: 20_000 });
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-  if (await inputByName(page, "tanggal", false)) return;
+  const candidates = [
+    config.targetBelanjaCreateUrlPath,
+    targetFieldMap.belanjaCreateUrlPath,
+    config.targetBelanjaUrlPath,
+    targetFieldMap.belanjaUrlPath,
+  ].filter((item, index, items) => item && items.indexOf(item) === index);
 
-  await page.goto(targetUrl(config, targetFieldMap.belanjaUrlPath), { waitUntil: "domcontentloaded", timeout: 20_000 });
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-  const clicked = await clickFirstButton(page, targetFieldMap.addButtonTexts);
-  if (!clicked) throw new Error("Tombol tambah/input Belanja tidak ditemukan.");
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-  if (!await inputByName(page, "tanggal", false)) throw new Error("Halaman form Belanja tidak terbuka setelah klik tombol tambah.");
+  for (const candidate of candidates) {
+    await gotoTarget(page, config, candidate);
+    if (await tryOpenBelanjaFormFromCurrentPage(page)) return;
+  }
+
+  for (const candidate of [config.targetDashboardPath, "/dashboard", "/"].filter((item, index, items) => item && items.indexOf(item) === index)) {
+    await gotoTarget(page, config, candidate);
+    if (await clickBelanjaNavigationLink(page) && await tryOpenBelanjaFormFromCurrentPage(page)) return;
+  }
+
+  const summary = await pageSummary(page);
+  throw new Error([
+    "Tombol tambah/input Belanja tidak ditemukan.",
+    `URL terakhir: ${summary.url}`,
+    `Title: ${summary.title || "-"}`,
+    `Heading: ${summary.heading.join(" | ") || "-"}`,
+    `Link terlihat: ${summary.links.map((link) => `${link.text || "-"} -> ${link.href || "-"}`).join(" | ") || "-"}`,
+    `Button terlihat: ${summary.buttons.join(" | ") || "-"}`,
+    "Jika path web target berbeda, isi TARGET_BELANJA_URL_PATH atau TARGET_BELANJA_CREATE_URL_PATH di .env.belanja.local.",
+  ].join(" "));
 }
 
 export async function fillBelanjaForm(page: Page, config: RunnerConfig, payload: BelanjaPayload) {
@@ -510,25 +567,21 @@ export async function submitBelanjaForm(page: Page) {
 }
 
 export async function inspectTargetBelanja(page: Page, config: RunnerConfig) {
-  await page.goto(targetUrl(config, targetFieldMap.belanjaUrlPath), { waitUntil: "domcontentloaded", timeout: 20_000 });
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-  const data = await page.evaluate(function () {
-    function textContent(element: Element) {
-      return (element.textContent ?? "").trim().replace(/\s+/g, " ");
-    }
-
-    const headings: string[] = [];
+  await openBelanjaForm(page, config).catch(async () => {
+    await gotoTarget(page, config, config.targetDashboardPath);
+  });
+  const data = await page.evaluate(`(() => {
+    const textContent = (element) => (element.textContent || "").trim().replace(/\\s+/g, " ");
+    const headings = [];
     for (const element of Array.from(document.querySelectorAll("h1,h2,h3"))) {
       const text = textContent(element);
       if (text) headings.push(text);
     }
-
-    const labels: string[] = [];
+    const labels = [];
     for (const element of Array.from(document.querySelectorAll("label"))) {
       const text = textContent(element);
       if (text) labels.push(text);
     }
-
     const controls = [];
     for (const element of Array.from(document.querySelectorAll("input,select,textarea,button,a"))) {
       controls.push({
@@ -543,7 +596,6 @@ export async function inspectTargetBelanja(page: Page, config: RunnerConfig) {
         text: textContent(element),
       });
     }
-
     return {
       url: location.href,
       title: document.title,
@@ -551,7 +603,7 @@ export async function inspectTargetBelanja(page: Page, config: RunnerConfig) {
       labels,
       controls,
     };
-  });
+  })()`);
   const filePath = path.join(config.artifactsDir, `belanja-inspect-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
   fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
   return { data, filePath };

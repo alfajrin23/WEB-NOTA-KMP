@@ -8,23 +8,26 @@ async function isLoginPage(page: Page) {
   return page.url().includes("/login") || await page.locator("#email, input[name='email']").first().isVisible().catch(() => false);
 }
 
+async function hasLoginForm(page: Page) {
+  return await page.locator("#email, input[name='email']").first().isVisible().catch(() => false);
+}
+
 export async function createBelanjaContext(browser: Browser, config: RunnerConfig) {
-  if (fs.existsSync(config.authStatePath)) {
+  if (config.reuseAuthState && fs.existsSync(config.authStatePath)) {
     return browser.newContext({ storageState: config.authStatePath });
   }
   return browser.newContext();
 }
 
 export async function ensureAuthenticated(page: Page, context: BrowserContext, config: RunnerConfig) {
-  await page.goto(targetUrl(config, targetFieldMap.belanjaUrlPath), { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await page.goto(targetUrl(config, "/login"), { waitUntil: "domcontentloaded", timeout: 20_000 });
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-  if (!await isLoginPage(page)) return true;
+  if (!await isLoginPage(page) || !await hasLoginForm(page)) return true;
 
   if (!config.targetEmail || !config.targetPassword) {
     throw new Error("TARGET_EMAIL/TARGET_PASSWORD belum diisi. Login otomatis tidak dapat dilakukan.");
   }
 
-  await page.goto(targetUrl(config, "/login"), { waitUntil: "domcontentloaded", timeout: 20_000 });
   const email = page.getByLabel(new RegExp(targetFieldMap.login.email.labels?.[0] ?? "email", "i"))
     .or(page.locator("#email"))
     .or(page.locator("input[name='email']"))
