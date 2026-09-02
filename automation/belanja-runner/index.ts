@@ -1,15 +1,17 @@
 import { getRunnerConfig } from "./config";
-import { inspectBelanjaTarget, isTargetReachable, runBelanjaRunner } from "./runner";
+import { checkTargetReachability, inspectBelanjaTarget, runBelanjaRunner } from "./runner";
 
 async function main() {
   const config = getRunnerConfig();
   const command = process.argv[2] ?? "run";
 
   if (command === "check") {
-    const reachable = await isTargetReachable(config);
+    const targetCheck = await checkTargetReachability(config);
     console.log(JSON.stringify({
       target: config.targetBaseUrl,
-      reachable,
+      targetHealthPath: config.targetHealthPath,
+      targetCheck,
+      reachable: targetCheck.reachable,
       dryRun: config.dryRun,
       headed: config.headed,
       fieldMapVerified: config.fieldMapVerified,

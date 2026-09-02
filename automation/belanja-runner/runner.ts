@@ -8,8 +8,17 @@ import { validateBelanjaPayload } from "../../src/lib/belanja-sync/payload";
 import type { ClaimedBelanjaSyncItem } from "../../src/lib/belanja-sync/types";
 import { BelanjaSyncApiClient } from "./api-client";
 import { createBelanjaContext, ensureAuthenticated } from "./auth";
-import { ensureRunnerDirs, type RunnerConfig } from "./config";
+import { ensureRunnerDirs, targetUrl, type RunnerConfig } from "./config";
 import { compareBelanjaForm, fillBelanjaForm, inspectTargetBelanja, readBelanjaForm, saveDryRunScreenshot, submitBelanjaForm } from "./target";
+
+export type TargetReachability = {
+  reachable: boolean;
+  url: string;
+  status?: number;
+  reason: "ok" | "http_error" | "timeout" | "network_error";
+  detail?: string;
+  elapsedMs: number;
+};
 
 function log(message: string) {
   const time = new Intl.DateTimeFormat("id-ID", {
@@ -25,17 +34,59 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function isTargetReachable(config: RunnerConfig) {
+function fetchErrorDetail(error: unknown) {
+  if (!(error instanceof Error)) return "Unknown error.";
+  const cause = error.cause;
+  const causeCode = cause && typeof cause === "object" && "code" in cause
+    ? String((cause as { code?: unknown }).code)
+    : "";
+  const causeMessage = cause && typeof cause === "object" && "message" in cause
+    ? String((cause as { message?: unknown }).message)
+    : "";
+  return [error.message, causeCode, causeMessage].filter(Boolean).join(" | ");
+}
+
+export async function checkTargetReachability(config: RunnerConfig): Promise<TargetReachability> {
+  const url = targetUrl(config, config.targetHealthPath || "/login");
+  const startedAt = Date.now();
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timeout = setTimeout(() => controller.abort(), config.targetCheckTimeoutMs);
   try {
-    const response = await fetch(new URL("/login", config.targetBaseUrl), { signal: controller.signal });
-    return response.ok;
-  } catch {
-    return false;
+    const response = await fetch(url, {
+      signal: controller.signal,
+      redirect: "follow",
+    });
+    const elapsedMs = Date.now() - startedAt;
+    const reachable = response.status >= 200 && response.status < 500;
+    return {
+      reachable,
+      url,
+      status: response.status,
+      reason: reachable ? "ok" : "http_error",
+      detail: reachable
+        ? `Target merespons HTTP ${response.status}.`
+        : `Target merespons HTTP ${response.status}; cek TARGET_HEALTH_PATH atau kondisi aplikasi target.`,
+      elapsedMs,
+    };
+  } catch (error) {
+    const elapsedMs = Date.now() - startedAt;
+    const reason = elapsedMs >= config.targetCheckTimeoutMs ? "timeout" : "network_error";
+    return {
+      reachable: false,
+      url,
+      reason,
+      detail: reason === "timeout"
+        ? `Timeout setelah ${config.targetCheckTimeoutMs}ms; cek VPN/jaringan/firewall.`
+        : fetchErrorDetail(error),
+      elapsedMs,
+    };
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export async function isTargetReachable(config: RunnerConfig) {
+  return (await checkTargetReachability(config)).reachable;
 }
 
 async function createSession(config: RunnerConfig) {
@@ -135,17 +186,20 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
 
   try {
     while (true) {
-      const reachable = await isTargetReachable(config);
+      const targetCheck = await checkTargetReachability(config);
+      const reachable = targetCheck.reachable;
+      const disconnectedMessage = `Website/VPN target tidak dapat diakses. ${targetCheck.detail ?? targetCheck.reason}`;
       await api.heartbeat({
         status: reachable ? "ready" : "paused",
         targetStatus: reachable ? "connected" : "disconnected",
         dryRun: config.dryRun,
         targetBaseUrl: config.targetBaseUrl,
-        message: reachable ? null : "Website/VPN target tidak dapat diakses.",
+        message: reachable ? null : disconnectedMessage,
       }).catch((error) => log(`Heartbeat gagal: ${error instanceof Error ? error.message : "unknown"}`));
 
       if (!reachable) {
-        log("Website/VPN target unreachable. Runner pause sebelum claim item.");
+        log(`Website/VPN target unreachable (${targetCheck.reason}) url=${targetCheck.url}. Runner pause sebelum claim item.`);
+        if (targetCheck.detail) log(targetCheck.detail);
         if (options.once) break;
         await sleep(config.pollIntervalMs);
         continue;

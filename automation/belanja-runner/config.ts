@@ -4,6 +4,8 @@ import path from "node:path";
 
 export type RunnerConfig = {
   targetBaseUrl: string;
+  targetHealthPath: string;
+  targetCheckTimeoutMs: number;
   targetEmail: string;
   targetPassword: string;
   notaKmpBaseUrl: string;
@@ -59,6 +61,8 @@ export function getRunnerConfig(): RunnerConfig {
 
   return {
     targetBaseUrl: process.env.TARGET_BASE_URL || "http://10.21.21.10:9023",
+    targetHealthPath: process.env.TARGET_HEALTH_PATH || "/login",
+    targetCheckTimeoutMs: numberEnv("TARGET_CHECK_TIMEOUT_MS", 10000),
     targetEmail: process.env.TARGET_EMAIL || "",
     targetPassword: process.env.TARGET_PASSWORD || "",
     notaKmpBaseUrl: process.env.WEB_NOTA_API_URL || process.env.NOTA_KMP_BASE_URL || "http://localhost:3000",
