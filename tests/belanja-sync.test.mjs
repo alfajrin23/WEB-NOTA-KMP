@@ -92,7 +92,7 @@ test("anti-duplikasi default tidak queue item success atau active", () => {
   assert.equal(shouldQueueBelanjaItem("success").queue, false);
   assert.equal(shouldQueueBelanjaItem("pending").queue, false);
   assert.equal(shouldQueueBelanjaItem("processing").queue, false);
-  assert.equal(shouldQueueBelanjaItem("needs_review").queue, false);
+  assert.equal(shouldQueueBelanjaItem("needs_review").queue, true);
 });
 
 test("kirim ulang eksplisit mengizinkan success untuk queue baru", () => {

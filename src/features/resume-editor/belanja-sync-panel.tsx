@@ -55,7 +55,7 @@ function jobLabel(status: BelanjaSyncJob["status"]) {
 }
 
 function canSelectForJob(status: RowStatus, forceResend: boolean) {
-  if (status === "pending" || status === "processing" || status === "needs_review") return false;
+  if (status === "pending" || status === "processing") return false;
   if (status === "success") return forceResend;
   return true;
 }

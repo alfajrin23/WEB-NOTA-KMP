@@ -39,7 +39,7 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 Runner Belanja memakai token dinamis di Supabase, bukan token global Vercel.
 
-1. Jalankan migration Supabase sampai `supabase/migrations/20260902_runner_tokens.sql`.
+1. Jalankan migration Supabase sampai `supabase/migrations/20260902_belanja_sync_active_index.sql`.
 2. Pastikan Vercel punya `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, dan `SUPABASE_SERVICE_ROLE_KEY`.
 3. Buka `Settings -> Playwright Runners`.
 4. Klik `Create Runner Token`, isi nama device, pilih expiry, lalu copy token yang muncul sekali.

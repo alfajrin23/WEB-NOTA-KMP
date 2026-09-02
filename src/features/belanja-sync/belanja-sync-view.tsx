@@ -67,7 +67,7 @@ function modalStatusClass(status: ModalRowStatus) {
 }
 
 function canSelectForSend(status: ModalRowStatus) {
-  return status !== "pending" && status !== "processing" && status !== "needs_review" && status !== "success";
+  return status !== "pending" && status !== "processing" && status !== "success";
 }
 
 function latestJobProgress(job: BelanjaSyncJob | null) {

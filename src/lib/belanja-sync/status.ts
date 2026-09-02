@@ -1,7 +1,7 @@
 import type { BelanjaSyncItemStatus } from "./types";
 
 export function isBelanjaItemActive(status: BelanjaSyncItemStatus | undefined | null) {
-  return status === "pending" || status === "processing" || status === "needs_review";
+  return status === "pending" || status === "processing";
 }
 
 export function isBelanjaItemSuccess(status: BelanjaSyncItemStatus | undefined | null) {

@@ -23,6 +23,7 @@ const ITEM_SELECT = "id,job_id,project_id,source_resume_item_id,status,attempt_c
 const HEARTBEAT_SELECT = "runner_id,status,target_status,dry_run,last_seen_at,target_base_url,message,metadata_json";
 const RUNNER_ONLINE_WINDOW_MS = 90_000;
 const STALE_PROCESSING_WINDOW_MS = 30 * 60_000;
+const ACTIVE_QUEUE_REASON = "Item sudah ada di antrean aktif, tidak dibuat duplikat.";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -441,6 +442,7 @@ async function updateJobRollup(client: SupabaseClient, jobId: string) {
 export async function getBelanjaProjectState(projectId: string): Promise<BelanjaProjectSyncState> {
   try {
     const client = clientOrThrow();
+    await markStaleProcessingItems(client);
     const [itemsResult, jobsResult, runner] = await Promise.all([
       client
         .from("belanja_sync_items")
@@ -487,6 +489,7 @@ export async function getBelanjaProjectState(projectId: string): Promise<Belanja
 export async function getBelanjaSyncOverview() {
   try {
     const client = clientOrThrow();
+    await markStaleProcessingItems(client);
     const [itemsResult, runner] = await Promise.all([
       client
         .from("belanja_sync_items")
@@ -577,6 +580,7 @@ export async function getBelanjaSyncOverview() {
 
 export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
   const client = clientOrThrow();
+  await markStaleProcessingItems(client);
   const uniqueItemIds = [...new Set(input.itemIds.filter(Boolean))];
   if (!input.projectId) throw new Error("projectId wajib diisi.");
   if (uniqueItemIds.length === 0) throw new Error("Pilih minimal satu item resume.");
@@ -606,7 +610,7 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
     let status: BelanjaSyncItemStatus = "pending";
     let errorMessage: string | null = null;
     const queueDecision = activeExisting
-      ? { queue: false, reason: "Item sudah ada di antrean aktif, tidak dibuat duplikat." }
+      ? { queue: false, reason: ACTIVE_QUEUE_REASON }
       : shouldQueueBelanjaItem(existing?.status, input.forceResend);
 
     if (!queueDecision.queue) {
@@ -663,15 +667,27 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
 
   const job = jobRow as BelanjaJobRow;
   const rowsWithJob = itemRows.map((row) => ({ ...row, job_id: job.id }));
-  const { error: itemError } = await client.from("belanja_sync_items").insert(rowsWithJob);
-  if (itemError) {
+  let activeDuplicateCount = 0;
+
+  for (const row of rowsWithJob) {
+    const { error: itemError } = await client.from("belanja_sync_items").insert(row);
+    if (!itemError) continue;
+
     if (isActiveItemUniqueViolation(itemError)) {
-      await client.from("belanja_sync_jobs").delete().eq("id", job.id);
-      return {
-        job: null,
-        state: await getBelanjaProjectState(input.projectId),
-        message: "Sebagian item sudah punya antrean aktif. Status sudah direfresh; item tersebut tidak dibuat duplikat.",
-      };
+      activeDuplicateCount += 1;
+      const { error: skippedError } = await client.from("belanja_sync_items").insert({
+        ...row,
+        status: "skipped" as const,
+        error_message: ACTIVE_QUEUE_REASON,
+        finished_at: nowIso(),
+      });
+      if (!skippedError) continue;
+
+      await client
+        .from("belanja_sync_jobs")
+        .update({ status: "failed", error_message: skippedError.message, finished_at: nowIso() })
+        .eq("id", job.id);
+      throwDatabaseError(skippedError, "Gagal membuat item Belanja Sync.");
     }
 
     await client
@@ -683,7 +699,13 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
 
   const refreshedJob = await updateJobRollup(client, job.id);
   const state = await getBelanjaProjectState(input.projectId);
-  return { job: refreshedJob, state };
+  return {
+    job: refreshedJob,
+    state,
+    message: activeDuplicateCount > 0
+      ? `${activeDuplicateCount} item dilewati karena masih punya antrean aktif; item lainnya tetap dibuat.`
+      : undefined,
+  };
 }
 
 export async function getBelanjaSyncJob(jobId: string) {
@@ -839,18 +861,36 @@ export async function recordBelanjaRunnerHeartbeat(input: {
 
 async function markStaleProcessingItems(client: SupabaseClient) {
   const staleBefore = new Date(Date.now() - STALE_PROCESSING_WINDOW_MS).toISOString();
-  const { data, error } = await client
+  const staleUpdate = {
+    status: "needs_review" as const,
+    error_message: "Runner berhenti saat item processing. Cek target manual sebelum retry agar tidak duplikat.",
+    finished_at: nowIso(),
+  };
+  const staleByStartedAt = await client
     .from("belanja_sync_items")
-    .update({
-      status: "needs_review",
-      error_message: "Runner berhenti saat item processing. Cek target manual sebelum retry agar tidak duplikat.",
-      finished_at: nowIso(),
-    })
+    .update(staleUpdate)
     .eq("status", "processing")
     .lt("started_at", staleBefore)
     .select("job_id");
-  if (error) throwDatabaseError(error, "Gagal menandai stale processing item.");
-  const jobIds = [...new Set(((data ?? []) as Array<{ job_id: string }>).map((row) => row.job_id))];
+  if (staleByStartedAt.error) {
+    throwDatabaseError(staleByStartedAt.error, "Gagal menandai stale processing item.");
+  }
+
+  const staleByUpdatedAt = await client
+    .from("belanja_sync_items")
+    .update(staleUpdate)
+    .eq("status", "processing")
+    .is("started_at", null)
+    .lt("updated_at", staleBefore)
+    .select("job_id");
+  if (staleByUpdatedAt.error) {
+    throwDatabaseError(staleByUpdatedAt.error, "Gagal menandai stale processing item.");
+  }
+
+  const jobIds = [...new Set([
+    ...((staleByStartedAt.data ?? []) as Array<{ job_id: string }>).map((row) => row.job_id),
+    ...((staleByUpdatedAt.data ?? []) as Array<{ job_id: string }>).map((row) => row.job_id),
+  ])];
   await Promise.all(jobIds.map((jobId) => updateJobRollup(client, jobId)));
 }
 
