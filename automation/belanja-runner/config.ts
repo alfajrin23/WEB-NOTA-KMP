@@ -19,6 +19,10 @@ export type RunnerConfig = {
   headed: boolean;
   fieldMapVerified: boolean;
   pollIntervalMs: number;
+  targetCheckIntervalMs: number;
+  targetDisconnectAfterFailures: number;
+  heartbeatIntervalMs: number;
+  statusLogIntervalMs: number;
   rootDir: string;
   authStatePath: string;
   artifactsDir: string;
@@ -56,6 +60,11 @@ function numberEnv(name: string, fallback: number) {
   return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
 }
 
+function integerEnv(name: string, fallback: number) {
+  const numeric = Number(process.env[name]);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : fallback;
+}
+
 export function getRunnerConfig(): RunnerConfig {
   const rootDir = process.cwd();
   loadLocalEnv(rootDir);
@@ -66,7 +75,7 @@ export function getRunnerConfig(): RunnerConfig {
   return {
     targetBaseUrl: process.env.TARGET_BASE_URL || "http://10.21.21.10:9023",
     targetHealthPath: process.env.TARGET_HEALTH_PATH || "/login",
-    targetCheckTimeoutMs: numberEnv("TARGET_CHECK_TIMEOUT_MS", 10000),
+    targetCheckTimeoutMs: numberEnv("TARGET_CHECK_TIMEOUT_MS", 3000),
     targetDashboardPath: process.env.TARGET_DASHBOARD_PATH || "/home",
     targetBelanjaUrlPath: process.env.TARGET_BELANJA_URL_PATH || "/belanja",
     targetBelanjaCreateUrlPath: process.env.TARGET_BELANJA_CREATE_URL_PATH || "/belanja/create",
@@ -79,7 +88,11 @@ export function getRunnerConfig(): RunnerConfig {
     dryRun: booleanEnv("BELANJA_DRY_RUN", true),
     headed: booleanEnv("BELANJA_RUNNER_HEADED", true),
     fieldMapVerified: booleanEnv("BELANJA_FIELD_MAP_VERIFIED", false),
-    pollIntervalMs: numberEnv("BELANJA_RUNNER_POLL_MS", 5000),
+    pollIntervalMs: numberEnv("BELANJA_RUNNER_POLL_MS", 1000),
+    targetCheckIntervalMs: numberEnv("BELANJA_TARGET_CHECK_INTERVAL_MS", 30000),
+    targetDisconnectAfterFailures: integerEnv("BELANJA_TARGET_DISCONNECT_AFTER_FAILURES", 2),
+    heartbeatIntervalMs: numberEnv("BELANJA_RUNNER_HEARTBEAT_MS", 15000),
+    statusLogIntervalMs: numberEnv("BELANJA_RUNNER_STATUS_LOG_MS", 15000),
     rootDir,
     artifactsDir,
     authStatePath: path.join(authDir, "belanja.json"),

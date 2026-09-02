@@ -20,6 +20,13 @@ export type TargetReachability = {
   elapsedMs: number;
 };
 
+type TargetMonitor = {
+  check: TargetReachability;
+  checkedAt: number;
+  consecutiveFailures: number;
+  stableReachable: boolean;
+};
+
 function log(message: string) {
   const time = new Intl.DateTimeFormat("id-ID", {
     hour: "2-digit",
@@ -89,6 +96,27 @@ export async function isTargetReachable(config: RunnerConfig) {
   return (await checkTargetReachability(config)).reachable;
 }
 
+function shouldRefreshTargetCheck(monitor: TargetMonitor | null, config: RunnerConfig) {
+  if (!monitor) return true;
+  const intervalMs = monitor.stableReachable ? config.targetCheckIntervalMs : config.pollIntervalMs;
+  return Date.now() - monitor.checkedAt >= intervalMs;
+}
+
+async function updateTargetMonitor(config: RunnerConfig, monitor: TargetMonitor | null) {
+  const check = await checkTargetReachability(config);
+  const consecutiveFailures = check.reachable ? 0 : (monitor?.consecutiveFailures ?? 0) + 1;
+  return {
+    check,
+    checkedAt: Date.now(),
+    consecutiveFailures,
+    stableReachable: check.reachable || ((monitor?.stableReachable ?? false) && consecutiveFailures < config.targetDisconnectAfterFailures),
+  };
+}
+
+function monitorMessage(monitor: TargetMonitor) {
+  return `Website/VPN target tidak dapat diakses. ${monitor.check.detail ?? monitor.check.reason}`;
+}
+
 async function createSession(config: RunnerConfig) {
   const browser = await chromium.launch({ headless: !config.headed });
   const context = await createBelanjaContext(browser, config);
@@ -124,15 +152,17 @@ async function processClaim(api: BelanjaSyncApiClient, config: RunnerConfig, pag
 
   let formValues: Awaited<ReturnType<typeof readBelanjaForm>>;
   let comparison: ReturnType<typeof compareBelanjaForm>;
-  let screenshotPath: string;
+  let screenshotPath: string | null = null;
   try {
     phase = "fill";
     await fillBelanjaForm(page, config, payload);
     phase = "read";
     formValues = await readBelanjaForm(page);
     comparison = compareBelanjaForm(payload, formValues);
-    phase = "screenshot";
-    screenshotPath = await saveDryRunScreenshot(page, config, job.id, item.id);
+    if (effectiveDryRun || !comparison.ok) {
+      phase = "screenshot";
+      screenshotPath = await saveDryRunScreenshot(page, config, job.id, item.id);
+    }
   } catch (error) {
     throw classifyBelanjaAutomationError(error, { phase, dryRun: effectiveDryRun });
   }
@@ -179,6 +209,11 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
   let context: BrowserContext | null = null;
   let page: Page | null = null;
   let authenticated = false;
+  let targetMonitor: TargetMonitor | null = null;
+  let lastHeartbeatAt = 0;
+  let lastHeartbeatTargetStatus: TargetReachability["reachable"] | null = null;
+  let lastStatusLogAt = 0;
+  let cachedPendingCount = 0;
 
   console.log("================================");
   console.log("KDKMP BELANJA AUTOMATION RUNNER");
@@ -186,20 +221,40 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
 
   try {
     while (true) {
-      const targetCheck = await checkTargetReachability(config);
-      const reachable = targetCheck.reachable;
-      const disconnectedMessage = `Website/VPN target tidak dapat diakses. ${targetCheck.detail ?? targetCheck.reason}`;
-      await api.heartbeat({
-        status: reachable ? "ready" : "paused",
-        targetStatus: reachable ? "connected" : "disconnected",
-        dryRun: config.dryRun,
-        targetBaseUrl: config.targetBaseUrl,
-        message: reachable ? null : disconnectedMessage,
-      }).catch((error) => log(`Heartbeat gagal: ${error instanceof Error ? error.message : "unknown"}`));
+      let refreshedTargetCheck = false;
+      if (shouldRefreshTargetCheck(targetMonitor, config)) {
+        targetMonitor = await updateTargetMonitor(config, targetMonitor);
+        refreshedTargetCheck = true;
+        if (!targetMonitor.check.reachable) {
+          const remaining = Math.max(config.targetDisconnectAfterFailures - targetMonitor.consecutiveFailures, 0);
+          if (targetMonitor.stableReachable && remaining > 0) {
+            log(`Health-check target timeout sementara (${targetMonitor.check.reason}) url=${targetMonitor.check.url}; lanjut dulu, disconnected setelah ${remaining} gagal lagi.`);
+          }
+        }
+      }
+
+      const reachable = targetMonitor?.stableReachable ?? false;
+      const shouldHeartbeat = Date.now() - lastHeartbeatAt >= config.heartbeatIntervalMs || lastHeartbeatTargetStatus !== reachable;
+      if (shouldHeartbeat) {
+        const message = targetMonitor && !reachable ? monitorMessage(targetMonitor) : null;
+        await api.heartbeat({
+          status: reachable ? "ready" : "paused",
+          targetStatus: reachable ? "connected" : "disconnected",
+          dryRun: config.dryRun,
+          targetBaseUrl: config.targetBaseUrl,
+          message,
+        }).then(() => {
+          lastHeartbeatAt = Date.now();
+          lastHeartbeatTargetStatus = reachable;
+        }).catch((error) => log(`Heartbeat gagal: ${error instanceof Error ? error.message : "unknown"}`));
+      }
 
       if (!reachable) {
-        log(`Website/VPN target unreachable (${targetCheck.reason}) url=${targetCheck.url}. Runner pause sebelum claim item.`);
-        if (targetCheck.detail) log(targetCheck.detail);
+        const targetCheck = targetMonitor?.check;
+        if (refreshedTargetCheck) {
+          log(`Website/VPN target unreachable (${targetCheck?.reason ?? "unknown"}) url=${targetCheck?.url ?? config.targetBaseUrl}. Runner pause sebelum claim item.`);
+          if (targetCheck?.detail) log(targetCheck.detail);
+        }
         if (options.once) break;
         await sleep(config.pollIntervalMs);
         continue;
@@ -210,13 +265,16 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
         authenticated = true;
       }
 
-      const pendingCount = await api.pendingCount().catch(() => 0);
-      console.log(`Target        : connected`);
-      console.log(`VPN/Website   : reachable`);
-      console.log(`Login         : ${authenticated ? "authenticated" : "not authenticated"}`);
-      console.log(`Queue         : ${pendingCount} pending`);
-      console.log(`Runner        : READY`);
-      console.log("=====================");
+      if (Date.now() - lastStatusLogAt >= config.statusLogIntervalMs) {
+        cachedPendingCount = await api.pendingCount().catch(() => cachedPendingCount);
+        console.log(`Target        : connected`);
+        console.log(`VPN/Website   : reachable`);
+        console.log(`Login         : ${authenticated ? "authenticated" : "not authenticated"}`);
+        console.log(`Queue         : ${cachedPendingCount} pending`);
+        console.log(`Runner        : READY`);
+        console.log("=====================");
+        lastStatusLogAt = Date.now();
+      }
 
       const { claim } = await api.claim();
       if (!claim) {
@@ -231,6 +289,9 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
         targetStatus: "connected",
         dryRun: config.dryRun || claim.job.dryRun,
         targetBaseUrl: config.targetBaseUrl,
+      }).then(() => {
+        lastHeartbeatAt = Date.now();
+        lastHeartbeatTargetStatus = true;
       });
 
       try {
@@ -252,6 +313,7 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
           context = null;
           page = null;
           authenticated = false;
+          targetMonitor = null;
         }
       }
 

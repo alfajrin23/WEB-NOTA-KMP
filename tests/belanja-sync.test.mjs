@@ -16,6 +16,7 @@ import {
   classifyBelanjaAutomationError,
   isPlaywrightTargetClosedError,
 } from "../src/lib/belanja-sync/automation-errors.ts";
+import { getRunnerConfig } from "../automation/belanja-runner/config.ts";
 
 function makeProject() {
   return {
@@ -128,4 +129,33 @@ test("runner tidak auto-retry target tertutup saat submit live", () => {
   assert.equal(classified.retryable, false);
   assert.equal(classified.resetSession, true);
   assert.equal(classified.metadataJson.duplicate_check_required, true);
+});
+
+test("runner memakai default polling cepat dan health-check periodik", () => {
+  const keys = [
+    "TARGET_CHECK_TIMEOUT_MS",
+    "BELANJA_RUNNER_POLL_MS",
+    "BELANJA_TARGET_CHECK_INTERVAL_MS",
+    "BELANJA_TARGET_DISCONNECT_AFTER_FAILURES",
+    "BELANJA_RUNNER_HEARTBEAT_MS",
+    "BELANJA_RUNNER_STATUS_LOG_MS",
+  ];
+  const previous = new Map(keys.map((key) => [key, process.env[key]]));
+
+  try {
+    for (const key of keys) process.env[key] = "";
+    const config = getRunnerConfig();
+
+    assert.equal(config.targetCheckTimeoutMs, 3000);
+    assert.equal(config.pollIntervalMs, 1000);
+    assert.equal(config.targetCheckIntervalMs, 30000);
+    assert.equal(config.targetDisconnectAfterFailures, 2);
+    assert.equal(config.heartbeatIntervalMs, 15000);
+    assert.equal(config.statusLogIntervalMs, 15000);
+  } finally {
+    for (const [key, value] of previous) {
+      if (value == null) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });

@@ -13,10 +13,15 @@ WEB_NOTA_API_URL=https://web-nota-kmp-woad.vercel.app
 RUNNER_TOKEN=kmp_runner_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 TARGET_BASE_URL=http://10.21.21.10:9023
 TARGET_HEALTH_PATH=/login
-TARGET_CHECK_TIMEOUT_MS=10000
+TARGET_CHECK_TIMEOUT_MS=3000
 TARGET_DASHBOARD_PATH=/home
 TARGET_BELANJA_URL_PATH=/belanja
 TARGET_BELANJA_CREATE_URL_PATH=/belanja/create
+BELANJA_RUNNER_POLL_MS=1000
+BELANJA_TARGET_CHECK_INTERVAL_MS=30000
+BELANJA_TARGET_DISCONNECT_AFTER_FAILURES=2
+BELANJA_RUNNER_HEARTBEAT_MS=15000
+BELANJA_RUNNER_STATUS_LOG_MS=15000
 ```
 
 `BELANJA_RUNNER_TOKEN` dan `NOTA_KMP_BASE_URL` masih dibaca sebagai alias lama untuk transisi, tetapi runner baru sebaiknya memakai `RUNNER_TOKEN` dan `WEB_NOTA_API_URL`.
@@ -40,6 +45,8 @@ Output `targetCheck` akan menampilkan URL yang dicek, HTTP status jika server me
 5. Jika runner membuka 404 seperti `/belanja`, cek path Belanja yang benar dari menu target lalu isi `TARGET_BELANJA_URL_PATH` atau `TARGET_BELANJA_CREATE_URL_PATH`.
 6. Jika nama user/role di Chrome bukan akun yang diisi di `.env.belanja.local`, hapus `automation/belanja-runner/.auth/belanja.json` atau pastikan `BELANJA_REUSE_AUTH_STATE=false`.
 7. Setiap PC memakai token sendiri dari `Settings -> Playwright Runners`.
+
+Runner tidak lagi menjalankan health-check sebelum setiap item. Setelah target pernah reachable, runner mengecek ulang target secara periodik lewat `BELANJA_TARGET_CHECK_INTERVAL_MS` dan baru menampilkan `disconnected` setelah `BELANJA_TARGET_DISCONNECT_AFTER_FAILURES` kegagalan beruntun. Ini mengurangi putus-nyambung singkat yang sebelumnya memotong waktu pengiriman item.
 
 ## Membuat atau revoke runner
 
