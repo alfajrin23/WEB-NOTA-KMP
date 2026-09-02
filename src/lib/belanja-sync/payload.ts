@@ -7,6 +7,28 @@ export function normalizeBelanjaText(value: string | null | undefined) {
   return (value ?? "").replace(/\s+/g, " ").trim();
 }
 
+export function normalizeBelanjaMatchText(value: string | null | undefined) {
+  return normalizeBelanjaText(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function belanjaTextTokens(value: string | null | undefined) {
+  return normalizeBelanjaText(value)
+    .toLowerCase()
+    .split(/\s+/)
+    .map((token) => token.replace(/[^a-z0-9]+/g, ""))
+    .filter(Boolean);
+}
+
+export function belanjaTextMatches(actual: string | null | undefined, expected: string | null | undefined) {
+  const actualNorm = normalizeBelanjaMatchText(actual);
+  const expectedNorm = normalizeBelanjaMatchText(expected);
+  if (!actualNorm || !expectedNorm) return false;
+  if (actualNorm === expectedNorm || actualNorm.includes(expectedNorm)) return true;
+
+  const expectedTokens = belanjaTextTokens(expected);
+  return expectedTokens.length > 1 && expectedTokens.every((token) => actualNorm.includes(token));
+}
+
 export function normalizeBelanjaNumber(value: number | string | null | undefined) {
   if (typeof value === "number") return Number.isFinite(value) ? value : 0;
   const raw = String(value ?? "").trim();

@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/.edge-debug*/
 
 # next.js
 /.next/

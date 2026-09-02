@@ -1,14 +1,24 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { Locator, Page } from "playwright";
-import { normalizeBelanjaIsoDate, normalizeBelanjaNumber, normalizeBelanjaText } from "../../src/lib/belanja-sync/payload";
+import {
+  belanjaTextMatches,
+  normalizeBelanjaIsoDate,
+  normalizeBelanjaMatchText,
+  normalizeBelanjaNumber,
+  normalizeBelanjaText,
+} from "../../src/lib/belanja-sync/payload";
 import type { BelanjaPayload } from "../../src/lib/belanja-sync/types";
 import type { RunnerConfig } from "./config";
 import { targetUrl } from "./config";
-import { targetFieldMap, type BelanjaFieldKey, type FieldCandidate } from "./config/target-field-map";
+import { targetFieldMap, type BelanjaFieldKey } from "./config/target-field-map";
 
 type BelanjaSection = "material" | "labor" | "equipment";
 type FilledValues = Partial<Record<BelanjaFieldKey | "tanggalBayar" | "vendor", string>>;
+type NativeOptionSnapshot = {
+  value: string;
+  text: string;
+};
 
 const CHOICE_ROOT_XPATH = "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' choices ')]";
 const STAGE_TERMS: Record<string, string[]> = {
@@ -29,8 +39,17 @@ function attr(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
+function debugTarget(message: string) {
+  if (process.env.BELANJA_TARGET_DEBUG === "true") console.log(`[target] ${message}`);
+}
+
 function normalizeMatch(value: string | null | undefined) {
-  return normalizeBelanjaText(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return normalizeBelanjaMatchText(value);
+}
+
+function choiceMatches(text: string | null | undefined, terms: string[]) {
+  const meaningfulTerms = terms.map(normalizeBelanjaText).filter(Boolean);
+  return meaningfulTerms.length > 0 && meaningfulTerms.every((term) => belanjaTextMatches(text, term));
 }
 
 function meaningful(value: string | null | undefined) {
@@ -38,31 +57,36 @@ function meaningful(value: string | null | undefined) {
   return normalized && !/pilih data|no choices|tidak ada pilihan/i.test(normalized);
 }
 
-function candidateLocators(page: Page, candidate: FieldCandidate): Locator[] {
-  const locators: Locator[] = [];
-  for (const label of candidate.labels ?? []) locators.push(page.getByLabel(new RegExp(label, "i")).first());
-  for (const placeholder of candidate.placeholders ?? []) locators.push(page.getByPlaceholder(new RegExp(placeholder, "i")).first());
-  for (const id of candidate.ids ?? []) locators.push(page.locator(`[id="${attr(id)}"]`).first());
-  for (const name of candidate.names ?? []) locators.push(page.locator(`[name="${attr(name)}"]`).first());
-  return locators;
-}
-
-async function firstVisible(locators: Locator[]) {
-  for (const locator of locators) {
-    if (await locator.isVisible().catch(() => false)) return locator;
+async function dispatchFieldEvents(locator: Locator) {
+  for (const eventName of ["input", "change", "keyup", "blur"]) {
+    await locator.dispatchEvent(eventName).catch(() => {});
   }
-  return null;
 }
 
-async function findField(page: Page, key: BelanjaFieldKey) {
-  const candidate = targetFieldMap.fields[key];
-  const locator = await firstVisible(candidateLocators(page, candidate));
-  if (!locator && candidate.required) throw new Error(`Field target "${key}" tidak ditemukan. Jalankan belanja:inspect dan update target-field-map.`);
-  return locator;
+async function replaceFieldByKeyboard(locator: Locator, value: string) {
+  await locator.click();
+  await locator.press(process.platform === "darwin" ? "Meta+A" : "Control+A");
+  await locator.press("Backspace").catch(() => {});
+  await locator.type(value);
+  await locator.press("Tab").catch(() => {});
+  await dispatchFieldEvents(locator);
+}
+
+async function setNativeSelectByText(locator: Locator, value: string) {
+  const options = await nativeOptions(locator);
+  const option = options.find((entry) => belanjaTextMatches(entry.text, value) || belanjaTextMatches(entry.value, value));
+  if (!option) {
+    throw new Error(`Pilihan "${value}" tidak ditemukan. Opsi terlihat: ${options.map((entry) => entry.text || entry.value).slice(0, 12).join(" | ") || "-"}.`);
+  }
+  await locator.selectOption({ value: option.value }, { timeout: 2_000 }).catch(async () => {
+    await locator.selectOption({ label: option.text }, { timeout: 2_000 });
+  });
+  await dispatchFieldEvents(locator);
+  return true;
 }
 
 async function setField(locator: Locator, value: string) {
-  const fieldState = await locator.evaluate((element) => {
+  const fieldState = await locator.evaluate(function (element) {
     const field = element as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
     return {
       disabled: field.disabled,
@@ -73,23 +97,32 @@ async function setField(locator: Locator, value: string) {
     };
   }).catch(() => ({ disabled: false, readOnly: false, name: "", className: "", tag: "" }));
   if (fieldState.disabled) return false;
-  const needsProgrammaticValue = fieldState.readOnly || /tarif|harga|subtotal|price/i.test(`${fieldState.name} ${fieldState.className}`);
-  if (needsProgrammaticValue && (fieldState.tag === "input" || fieldState.tag === "textarea")) {
-    await locator.evaluate((element, nextValue) => {
+  const needsKeyboardValue = /tarif|harga|price/i.test(`${fieldState.name} ${fieldState.className}`);
+  if (needsKeyboardValue && !fieldState.readOnly && fieldState.tag === "input") {
+    await replaceFieldByKeyboard(locator, value);
+    return true;
+  }
+  if (fieldState.readOnly && (fieldState.tag === "input" || fieldState.tag === "textarea")) {
+    await locator.evaluate(function (element, nextValue) {
       const field = element as HTMLInputElement | HTMLTextAreaElement;
       field.value = nextValue;
+      field.dispatchEvent(new Event("input", { bubbles: true }));
+      field.dispatchEvent(new Event("change", { bubbles: true }));
+      field.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true }));
+      field.dispatchEvent(new FocusEvent("blur", { bubbles: true }));
     }, value);
+    await dispatchFieldEvents(locator);
     return true;
   }
 
-  const tag = fieldState.tag || await locator.evaluate((element) => element.tagName.toLowerCase()).catch(() => "");
+  const tag = fieldState.tag || await locator.evaluate(function (element) {
+    return element.tagName.toLowerCase();
+  }).catch(() => "");
   if (tag === "select") {
-    await locator.selectOption({ label: value }).catch(async () => {
-      await locator.selectOption(value);
-    });
-    return true;
+    return setNativeSelectByText(locator, value);
   }
   await locator.fill(value);
+  await dispatchFieldEvents(locator);
   return true;
 }
 
@@ -136,82 +169,149 @@ function choiceRoot(page: Page, selectId: string) {
 }
 
 async function selectedChoiceText(page: Page, selectId: string) {
-  const selectText = await page.locator(`#${selectId}`).first().evaluate((element) => {
-    const select = element as HTMLSelectElement;
-    return select.selectedOptions?.[0]?.textContent ?? "";
-  }).catch(() => "");
+  const selectText = await page.locator(`#${selectId}`).first().locator("option:checked").first().textContent().catch(() => "");
   if (meaningful(selectText)) return normalizeBelanjaText(selectText);
   return normalizeBelanjaText(await choiceRoot(page, selectId).locator(".choices__list--single").innerText().catch(() => ""));
 }
 
-async function waitForAnyChoices(page: Page, selectId: string) {
-  await page.waitForFunction(
-    (id) => {
-      const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
-      const select = document.getElementById(id);
-      const root = select?.closest(".choices");
-      if (!root) return false;
-      const options = Array.from(root.querySelectorAll(".choices__list--dropdown .choices__item--choice"));
-      return options.some((option) => {
-        const normalized = normalize(option.textContent ?? "");
-        return normalized && !/pilihdata|nochoices|tidakadapilihan/.test(normalized);
-      });
-    },
-    selectId,
-    { timeout: 12_000 },
-  ).catch(() => {});
+async function waitForChoiceSettle(page: Page) {
+  await page.waitForLoadState("networkidle", { timeout: 1_500 }).catch(() => {});
+  await page.waitForTimeout(150);
 }
 
-async function waitForChoices(page: Page, selectId: string, normalizedTerms: string[]) {
-  await page.waitForFunction(
-    ({ id, terms }) => {
-      const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
-      const select = document.getElementById(id);
-      const root = select?.closest(".choices");
-      if (!root) return false;
-      const options = Array.from(root.querySelectorAll(".choices__list--dropdown .choices__item--choice"));
-      return options.some((option) => {
-        const text = option.textContent ?? "";
-        const normalized = normalize(text);
-        return normalized && !/pilihdata|nochoices|tidakadapilihan/.test(normalized) && terms.every((term) => normalized.includes(term));
-      });
-    },
-    { id: selectId, terms: normalizedTerms },
-    { timeout: 10_000 },
-  ).catch(() => {});
+async function dispatchChoiceChange(page: Page, selectId: string) {
+  await page.locator(`#${selectId}`).first().dispatchEvent("change").catch(() => {});
+  await waitForChoiceSettle(page);
 }
 
-async function selectChoice(page: Page, selectId: string, searchText: string, terms: string[]) {
-  const normalizedTerms = terms.map(normalizeMatch).filter(Boolean);
-  if (normalizedTerms.length === 0) throw new Error(`Nilai dropdown ${selectId} kosong.`);
-
-  const current = normalizeMatch(await selectedChoiceText(page, selectId));
-  if (current && normalizedTerms.every((term) => current.includes(term))) return;
-
-  await waitForAnyChoices(page, selectId);
-  const root = choiceRoot(page, selectId);
-  await root.locator(".choices__inner").click();
-  const input = root.locator("input.choices__input--cloned").first();
-  await input.waitFor({ state: "visible", timeout: 5_000 });
-  await input.fill(searchText || terms[0] || "");
-  await waitForChoices(page, selectId, normalizedTerms);
-
-  const options = root.locator(".choices__list--dropdown .choices__item--choice");
-  const optionCount = await options.count();
-  const seen: string[] = [];
-  for (let index = 0; index < optionCount; index += 1) {
+async function nativeOptions(locator: Locator): Promise<NativeOptionSnapshot[]> {
+  const options = locator.locator("option");
+  const count = await options.count().catch(() => 0);
+  const snapshots: NativeOptionSnapshot[] = [];
+  for (let index = 0; index < count; index += 1) {
     const option = options.nth(index);
-    const text = normalizeBelanjaText(await option.innerText().catch(() => ""));
-    if (!meaningful(text)) continue;
-    seen.push(text);
-    const normalized = normalizeMatch(text);
-    if (normalizedTerms.every((term) => normalized.includes(term))) {
-      await option.click();
-      await page.waitForLoadState("networkidle", { timeout: 8_000 }).catch(() => {});
-      return;
-    }
+    snapshots.push({
+      value: await option.getAttribute("value").then((item) => item ?? "").catch(() => ""),
+      text: normalizeBelanjaText(await option.textContent().then((item) => item ?? "").catch(() => "")),
+    });
+  }
+  return snapshots;
+}
+
+async function hasAnyChoices(page: Page, selectId: string) {
+  const select = page.locator(`#${selectId}`).first();
+  if (!await select.count().catch(() => 0)) return false;
+  for (const option of await nativeOptions(select)) {
+    if (meaningful(option.text || option.value)) return true;
   }
 
+  const options = choiceRoot(page, selectId).locator(".choices__list--dropdown .choices__item--choice");
+  const count = await options.count().catch(() => 0);
+  for (let index = 0; index < count; index += 1) {
+    const text = normalizeBelanjaText(await options.nth(index).innerText().catch(() => ""));
+    if (meaningful(text)) return true;
+  }
+  return false;
+}
+
+async function waitForAnyChoices(page: Page, selectId: string, timeout = 12_000) {
+  const deadline = Date.now() + timeout;
+  do {
+    if (await hasAnyChoices(page, selectId)) return true;
+    await page.waitForTimeout(250);
+  } while (Date.now() < deadline);
+  debugTarget(`waitForAnyChoices timeout selectId=${selectId} timeout=${timeout}`);
+  return false;
+}
+
+async function hasMatchingChoice(page: Page, selectId: string, terms: string[]) {
+  const select = page.locator(`#${selectId}`).first();
+  if (!await select.count().catch(() => 0)) return false;
+  for (const option of await nativeOptions(select)) {
+    if (meaningful(option.text || option.value) && (choiceMatches(option.text, terms) || choiceMatches(option.value, terms))) return true;
+  }
+
+  const options = choiceRoot(page, selectId).locator(".choices__list--dropdown .choices__item--choice");
+  const count = await options.count().catch(() => 0);
+  for (let index = 0; index < count; index += 1) {
+    const text = normalizeBelanjaText(await options.nth(index).innerText().catch(() => ""));
+    if (meaningful(text) && choiceMatches(text, terms)) return true;
+  }
+  return false;
+}
+
+async function waitForChoices(page: Page, selectId: string, terms: string[]) {
+  const deadline = Date.now() + 10_000;
+  do {
+    if (await hasMatchingChoice(page, selectId, terms)) return true;
+    await page.waitForTimeout(250);
+  } while (Date.now() < deadline);
+  debugTarget(`waitForChoices timeout selectId=${selectId} terms="${terms.join(" ")}"`);
+  return false;
+}
+
+async function selectNativeChoice(page: Page, selectId: string, terms: string[]) {
+  const select = page.locator(`#${selectId}`).first();
+  const option = (await nativeOptions(select))
+    .find((entry) => meaningful(entry.text || entry.value) && (choiceMatches(entry.text, terms) || choiceMatches(entry.value, terms)));
+  if (!option) return false;
+  try {
+    await select.selectOption({ value: option.value }, { timeout: 2_000 }).catch(async () => {
+      await select.selectOption({ label: option.text }, { timeout: 2_000 });
+    });
+    await dispatchFieldEvents(select);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function selectChoice(page: Page, selectId: string, searchText: string, terms: string[], options: { forceChange?: boolean } = {}) {
+  const started = Date.now();
+  const choiceTerms = terms.map(normalizeBelanjaText).filter(Boolean);
+  if (choiceTerms.length === 0) throw new Error(`Nilai dropdown ${selectId} kosong.`);
+
+  const current = await selectedChoiceText(page, selectId);
+  if (choiceMatches(current, choiceTerms)) {
+    if (options.forceChange) await dispatchChoiceChange(page, selectId);
+    debugTarget(`selectChoice kept selectId=${selectId} elapsedMs=${Date.now() - started}`);
+    return;
+  }
+
+  const root = choiceRoot(page, selectId);
+  const searchCandidates = [...new Set([searchText, ...terms, choiceTerms.join(" ")].map(normalizeBelanjaText).filter(Boolean))];
+  const choiceOptions = root.locator(".choices__list--dropdown .choices__item--choice");
+  const seen: string[] = [];
+
+  for (const candidate of searchCandidates) {
+    await root.locator(".choices__inner").click();
+    const input = root.locator("input.choices__input--cloned").first();
+    await input.waitFor({ state: "visible", timeout: 5_000 });
+    await input.fill(candidate);
+    await waitForChoices(page, selectId, choiceTerms);
+
+    const optionCount = await choiceOptions.count();
+    for (let index = 0; index < optionCount; index += 1) {
+      const option = choiceOptions.nth(index);
+      const text = normalizeBelanjaText(await option.innerText().catch(() => ""));
+      if (!meaningful(text)) continue;
+      if (!seen.includes(text)) seen.push(text);
+      if (choiceMatches(text, choiceTerms)) {
+        await option.click();
+        await waitForChoiceSettle(page);
+        debugTarget(`selectChoice clicked selectId=${selectId} candidate="${candidate}" elapsedMs=${Date.now() - started}`);
+        return;
+      }
+    }
+    if (await selectNativeChoice(page, selectId, choiceTerms)) {
+      await waitForChoiceSettle(page);
+      debugTarget(`selectChoice native selectId=${selectId} candidate="${candidate}" elapsedMs=${Date.now() - started}`);
+      return;
+    }
+    await page.keyboard.press("Escape").catch(() => {});
+  }
+
+  debugTarget(`selectChoice failed selectId=${selectId} elapsedMs=${Date.now() - started}`);
   throw new Error(`Pilihan "${terms.join(" ")}" tidak ditemukan pada dropdown ${selectId}. Opsi terlihat: ${seen.slice(0, 8).join(" | ") || "-"}.`);
 }
 
@@ -255,13 +355,11 @@ function laborBreakdown(payload: BelanjaPayload) {
 
 async function fillWorkflow(page: Page, payload: BelanjaPayload) {
   const district = normalizeBelanjaText(payload.kecamatan);
-  await selectChoice(page, "gerai", payload.desa ?? "", [payload.desa ?? "", district]);
+  await selectChoice(page, "gerai", payload.desa ?? "", [payload.desa ?? "", district], { forceChange: true });
   const stageTerms = stageSearchTerms(payload);
-  await selectChoice(page, "tahapan", stageTerms.join(" "), stageTerms);
-  await waitForAnyChoices(page, "item_pekerjaan");
+  await selectChoice(page, "tahapan", stageTerms.join(" "), stageTerms, { forceChange: true });
   const itemTerms = categoryTerms(payload);
   await selectChoice(page, "item_pekerjaan", itemTerms.join(" "), itemTerms);
-  await waitForAnyChoices(page, "kategori_belanja");
   const section = expenseSection(payload);
   await selectChoice(page, "kategori_belanja", targetFieldMap.categoryTexts[section][0], targetFieldMap.categoryTexts[section]);
   await setInputByName(page, "tanggal", payload.tanggal);
@@ -304,13 +402,14 @@ async function fillEquipment(page: Page, payload: BelanjaPayload) {
 export async function openBelanjaForm(page: Page, config: RunnerConfig) {
   await page.goto(targetUrl(config, targetFieldMap.belanjaCreateUrlPath), { waitUntil: "domcontentloaded", timeout: 20_000 });
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-  if (await page.locator("#gerai").first().count()) return;
+  if (await inputByName(page, "tanggal", false)) return;
 
   await page.goto(targetUrl(config, targetFieldMap.belanjaUrlPath), { waitUntil: "domcontentloaded", timeout: 20_000 });
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
   const clicked = await clickFirstButton(page, targetFieldMap.addButtonTexts);
   if (!clicked) throw new Error("Tombol tambah/input Belanja tidak ditemukan.");
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+  if (!await inputByName(page, "tanggal", false)) throw new Error("Halaman form Belanja tidak terbuka setelah klik tombol tambah.");
 }
 
 export async function fillBelanjaForm(page: Page, config: RunnerConfig, payload: BelanjaPayload) {
@@ -362,9 +461,7 @@ export function compareBelanjaForm(payload: BelanjaPayload, values: FilledValues
   const compareText = (key: BelanjaFieldKey, expected: string) => {
     const actual = normalizeBelanjaText(values[key]);
     if (!expected || !actual) return;
-    const actualNorm = normalizeMatch(actual);
-    const expectedNorm = normalizeMatch(expected);
-    if (actualNorm !== expectedNorm && !actualNorm.includes(expectedNorm) && !expectedNorm.includes(actualNorm)) {
+    if (!belanjaTextMatches(actual, expected)) {
       mismatches.push(`${key}: form "${actual}" != resume "${expected}"`);
     }
   };
@@ -415,23 +512,46 @@ export async function submitBelanjaForm(page: Page) {
 export async function inspectTargetBelanja(page: Page, config: RunnerConfig) {
   await page.goto(targetUrl(config, targetFieldMap.belanjaUrlPath), { waitUntil: "domcontentloaded", timeout: 20_000 });
   await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-  const data = await page.evaluate(() => ({
-    url: location.href,
-    title: document.title,
-    headings: Array.from(document.querySelectorAll("h1,h2,h3")).map((element) => element.textContent?.trim()).filter(Boolean),
-    labels: Array.from(document.querySelectorAll("label")).map((element) => element.textContent?.trim()).filter(Boolean),
-    controls: Array.from(document.querySelectorAll("input,select,textarea,button,a")).map((element) => ({
-      tag: element.tagName.toLowerCase(),
-      type: element.getAttribute("type") || "",
-      name: element.getAttribute("name") || "",
-      id: element.id || "",
-      placeholder: element.getAttribute("placeholder") || "",
-      aria: element.getAttribute("aria-label") || "",
-      role: element.getAttribute("role") || "",
-      href: element.getAttribute("href") || "",
-      text: element.textContent?.trim().replace(/\s+/g, " ") || "",
-    })),
-  }));
+  const data = await page.evaluate(function () {
+    function textContent(element: Element) {
+      return (element.textContent ?? "").trim().replace(/\s+/g, " ");
+    }
+
+    const headings: string[] = [];
+    for (const element of Array.from(document.querySelectorAll("h1,h2,h3"))) {
+      const text = textContent(element);
+      if (text) headings.push(text);
+    }
+
+    const labels: string[] = [];
+    for (const element of Array.from(document.querySelectorAll("label"))) {
+      const text = textContent(element);
+      if (text) labels.push(text);
+    }
+
+    const controls = [];
+    for (const element of Array.from(document.querySelectorAll("input,select,textarea,button,a"))) {
+      controls.push({
+        tag: element.tagName.toLowerCase(),
+        type: element.getAttribute("type") || "",
+        name: element.getAttribute("name") || "",
+        id: element.id || "",
+        placeholder: element.getAttribute("placeholder") || "",
+        aria: element.getAttribute("aria-label") || "",
+        role: element.getAttribute("role") || "",
+        href: element.getAttribute("href") || "",
+        text: textContent(element),
+      });
+    }
+
+    return {
+      url: location.href,
+      title: document.title,
+      headings,
+      labels,
+      controls,
+    };
+  });
   const filePath = path.join(config.artifactsDir, `belanja-inspect-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
   fs.writeFileSync(filePath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
   return { data, filePath };

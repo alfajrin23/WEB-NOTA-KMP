@@ -1,12 +1,13 @@
 
 > kdkmp-nota-generator@0.1.0 dev
-> next dev -p 3000
+> next dev
 
 ▲ Next.js 16.2.9 (Turbopack)
 - Local:         http://localhost:3000
-- Network:       http://192.168.1.33:3000
+- Network:       http://10.128.0.45:3000
 - Environments: .env.local
-✓ Ready in 1204ms
+✓ Ready in 297ms
 Creating turbopack project { dir: 'D:\\WEB NOTA KMP', testMode: true }
 
- GET / 200 in 1124ms (next.js: 392ms, application-code: 732ms)
+ GET /api/belanja-sync/overview 200 in 165ms (next.js: 144ms, application-code: 21ms)
+ GET /api/belanja-sync/overview 200 in 52ms (next.js: 48ms, application-code: 4ms)

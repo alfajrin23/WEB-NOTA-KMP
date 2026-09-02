@@ -1,4 +1,9 @@
 import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import {
+  BelanjaAutomationItemError,
+  classifyBelanjaAutomationError,
+  type BelanjaAutomationPhase,
+} from "../../src/lib/belanja-sync/automation-errors";
 import { validateBelanjaPayload } from "../../src/lib/belanja-sync/payload";
 import type { ClaimedBelanjaSyncItem } from "../../src/lib/belanja-sync/types";
 import { BelanjaSyncApiClient } from "./api-client";
@@ -45,6 +50,7 @@ async function processClaim(api: BelanjaSyncApiClient, config: RunnerConfig, pag
   const { job, item } = claim;
   const payload = item.payload;
   const effectiveDryRun = config.dryRun || job.dryRun;
+  let phase: BelanjaAutomationPhase = "unknown";
   log(`Item ${payload.namaItem} | ${payload.desa ?? "-"} | ${effectiveDryRun ? "DRY RUN" : "LIVE"}`);
 
   const validation = validateBelanjaPayload(payload);
@@ -65,10 +71,20 @@ async function processClaim(api: BelanjaSyncApiClient, config: RunnerConfig, pag
     return;
   }
 
-  await fillBelanjaForm(page, config, payload);
-  const formValues = await readBelanjaForm(page);
-  const comparison = compareBelanjaForm(payload, formValues);
-  const screenshotPath = await saveDryRunScreenshot(page, config, job.id, item.id);
+  let formValues: Awaited<ReturnType<typeof readBelanjaForm>>;
+  let comparison: ReturnType<typeof compareBelanjaForm>;
+  let screenshotPath: string;
+  try {
+    phase = "fill";
+    await fillBelanjaForm(page, config, payload);
+    phase = "read";
+    formValues = await readBelanjaForm(page);
+    comparison = compareBelanjaForm(payload, formValues);
+    phase = "screenshot";
+    screenshotPath = await saveDryRunScreenshot(page, config, job.id, item.id);
+  } catch (error) {
+    throw classifyBelanjaAutomationError(error, { phase, dryRun: effectiveDryRun });
+  }
 
   if (!comparison.ok) {
     await api.markFailed(item.id, {
@@ -90,7 +106,13 @@ async function processClaim(api: BelanjaSyncApiClient, config: RunnerConfig, pag
     return;
   }
 
-  const submitResult = await submitBelanjaForm(page);
+  let submitResult: Awaited<ReturnType<typeof submitBelanjaForm>>;
+  try {
+    phase = "submit";
+    submitResult = await submitBelanjaForm(page);
+  } catch (error) {
+    throw classifyBelanjaAutomationError(error, { phase, dryRun: effectiveDryRun });
+  }
   await api.markSuccess(item.id, {
     dryRun: false,
     targetReference: submitResult.targetReference,
@@ -160,13 +182,17 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
       try {
         await processClaim(api, config, page, claim);
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Automation item gagal.";
+        const classified = error instanceof BelanjaAutomationItemError
+          ? error
+          : classifyBelanjaAutomationError(error, { dryRun: config.dryRun || claim.job.dryRun });
+        const message = classified.message;
         log(`FAILED ${message}`);
         await api.markFailed(claim.item.id, {
           errorMessage: message,
-          retryable: /timeout|network|navigation|unreachable/i.test(message),
+          retryable: classified.retryable,
+          metadataJson: classified.metadataJson,
         }).catch((markError) => log(`Gagal update status failed: ${markError instanceof Error ? markError.message : "unknown"}`));
-        if (/target closed|browser has been closed/i.test(message)) {
+        if (classified.resetSession) {
           await browser?.close().catch(() => {});
           browser = null;
           context = null;

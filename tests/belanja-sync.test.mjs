@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  belanjaTextMatches,
   buildBelanjaPayload,
   normalizeBelanjaIsoDate,
   normalizeBelanjaNumber,
@@ -11,6 +12,10 @@ import {
   nextFailedBelanjaStatus,
   shouldQueueBelanjaItem,
 } from "../src/lib/belanja-sync/status.ts";
+import {
+  classifyBelanjaAutomationError,
+  isPlaywrightTargetClosedError,
+} from "../src/lib/belanja-sync/automation-errors.ts";
 
 function makeProject() {
   return {
@@ -75,6 +80,13 @@ test("validasi menolak jumlah yang tidak sama dengan qty x harga satuan", () => 
   assert.match(validation.errors.join(" "), /tidak sama/);
 });
 
+test("matching teks belanja menerima urutan kata berbeda pada item target", () => {
+  assert.equal(belanjaTextMatches("Mandor Lembur", "lembur Mandor"), true);
+  assert.equal(belanjaTextMatches("I.02 Pekerjaan Bouwplank", "I.02"), true);
+  assert.equal(belanjaTextMatches("lembur", "lembur Mandor"), false);
+  assert.equal(belanjaTextMatches("Kepala Tukang Lembur", "lembur Mandor"), false);
+});
+
 test("anti-duplikasi default tidak queue item success atau active", () => {
   assert.deepEqual(shouldQueueBelanjaItem(null), { queue: true, reason: null });
   assert.equal(shouldQueueBelanjaItem("success").queue, false);
@@ -92,4 +104,28 @@ test("retry gagal hanya kembali pending sebelum max attempt", () => {
   assert.equal(nextFailedBelanjaStatus(1, 3, true), "pending");
   assert.equal(nextFailedBelanjaStatus(3, 3, true), "failed");
   assert.equal(nextFailedBelanjaStatus(1, 3, false), "failed");
+});
+
+test("runner retry otomatis saat Playwright menutup page sebelum submit", () => {
+  const message = "locator.count: Target page, context or browser has been closed";
+  const classified = classifyBelanjaAutomationError(new Error(message), {
+    phase: "fill",
+    dryRun: false,
+  });
+
+  assert.equal(isPlaywrightTargetClosedError(message), true);
+  assert.equal(classified.retryable, true);
+  assert.equal(classified.resetSession, true);
+  assert.equal(classified.metadataJson.automation_phase, "fill");
+});
+
+test("runner tidak auto-retry target tertutup saat submit live", () => {
+  const classified = classifyBelanjaAutomationError(
+    new Error("Target page, context or browser has been closed"),
+    { phase: "submit", dryRun: false },
+  );
+
+  assert.equal(classified.retryable, false);
+  assert.equal(classified.resetSession, true);
+  assert.equal(classified.metadataJson.duplicate_check_required, true);
 });
