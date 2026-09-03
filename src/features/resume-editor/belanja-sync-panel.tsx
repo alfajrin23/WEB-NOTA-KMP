@@ -315,7 +315,7 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
         {!dryRun && state?.runner?.dryRun !== false ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
             <div className="mb-1 flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Runner default DRY RUN</div>
-            <p>Job ini tetap akan diproses LIVE. Pastikan runner lokal memakai `BELANJA_FIELD_MAP_VERIFIED=true` sebelum item diproses.</p>
+            <p>Job ini tetap akan diproses LIVE. Mapping Belanja harus sudah terverifikasi lewat dry run atau riwayat sukses sebelumnya, atau set `BELANJA_FIELD_MAP_VERIFIED=true` pada runner yang memang sudah dicek.</p>
           </div>
         ) : null}
 

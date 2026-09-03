@@ -351,6 +351,31 @@ function activeBySourceItemId(items: BelanjaSyncItem[]) {
   return active;
 }
 
+function hasVerifiedFieldMapProof(status: BelanjaSyncItemStatus, errorMessage: string | null, metadataJson: JsonRecord | null) {
+  if (status === "success") return true;
+  if (status !== "skipped") return false;
+  const metadata = asRecord(metadataJson);
+  const fromDryRun = typeof errorMessage === "string" && errorMessage.includes("DRY_RUN_OK");
+  const fromMetadata = metadata.comparison != null && metadata.dry_run === true;
+  return fromDryRun || fromMetadata;
+}
+
+async function projectHasVerifiedFieldMap(client: SupabaseClient, projectId: string) {
+  const { data, error } = await client
+    .from("belanja_sync_items")
+    .select("status,error_message,metadata_json")
+    .eq("project_id", projectId)
+    .order("updated_at", { ascending: false })
+    .limit(250);
+  if (error) throwDatabaseError(error, "Gagal memeriksa status verifikasi mapping Belanja.");
+
+  return ((data ?? []) as Array<{
+    status: BelanjaSyncItemStatus;
+    error_message: string | null;
+    metadata_json: JsonRecord | null;
+  }>).some((row) => hasVerifiedFieldMapProof(row.status, row.error_message, row.metadata_json));
+}
+
 async function getLatestRunnerHeartbeat(client: SupabaseClient) {
   const { data, error } = await client
     .from("belanja_runner_heartbeats")
@@ -644,6 +669,9 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
   const failedCount = itemRows.filter((row) => row.status === "failed").length;
   const skippedCount = itemRows.filter((row) => row.status === "skipped").length;
   const jobStatus: BelanjaSyncJobStatus = pendingCount > 0 ? "pending" : failedCount > 0 ? "completed_with_errors" : "completed";
+  const fieldMapVerified = input.dryRun === false
+    && ((existingItems.length > 0 && existingItems.some((item) => hasVerifiedFieldMapProof(item.status, item.errorMessage ?? null, item.metadataJson ?? null)))
+      || await projectHasVerifiedFieldMap(client, input.projectId));
 
   const { data: jobRow, error: jobError } = await client
     .from("belanja_sync_jobs")
@@ -659,6 +687,8 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
       metadata_json: {
         force_resend: input.forceResend ?? false,
         created_from: "web",
+        field_map_verified: fieldMapVerified,
+        field_map_verified_source: fieldMapVerified ? "project_history" : "unverified",
       },
     })
     .select(JOB_SELECT)
@@ -960,8 +990,28 @@ export async function claimNextBelanjaSyncItem(runnerId: string): Promise<Claime
       .eq("id", job.id);
 
     const refreshedJob = await getJobRow(client, job.id);
+    let finalJob = rowToJob(refreshedJob ?? job);
+    const finalJobMetadata = asRecord(finalJob.metadataJson);
+    if (!finalJob.dryRun) {
+      const verified = finalJobMetadata.field_map_verified === true || await projectHasVerifiedFieldMap(client, finalJob.projectId);
+      if (verified && finalJobMetadata.field_map_verified !== true) {
+        const { data: updatedJob, error: jobMetadataError } = await client
+          .from("belanja_sync_jobs")
+          .update({
+            metadata_json: {
+              ...finalJobMetadata,
+              field_map_verified: true,
+              field_map_verified_source: finalJobMetadata.field_map_verified_source ?? "project_history",
+            },
+          })
+          .eq("id", job.id)
+          .select(JOB_SELECT)
+          .single();
+        if (!jobMetadataError && updatedJob) finalJob = rowToJob(updatedJob as BelanjaJobRow);
+      }
+    }
     return {
-      job: rowToJob(refreshedJob ?? job),
+      job: finalJob,
       item: rowToItem(updated as BelanjaItemRow),
     };
   }

@@ -20,7 +20,7 @@ import {
   isPlaywrightTargetClosedError,
 } from "../src/lib/belanja-sync/automation-errors.ts";
 import { getRunnerConfig, loadLocalEnv } from "../automation/belanja-runner/config.ts";
-import { resolveEffectiveDryRun } from "../automation/belanja-runner/mode.ts";
+import { resolveEffectiveDryRun, resolveEffectiveFieldMapVerified } from "../automation/belanja-runner/mode.ts";
 
 function makeProject() {
   return {
@@ -138,6 +138,30 @@ test("runner tidak auto-retry target tertutup saat submit live", () => {
 test("runner menghormati mode LIVE dari job UI walaupun default env dry-run", () => {
   assert.equal(resolveEffectiveDryRun({ dryRun: true }, { dryRun: false }), false);
   assert.equal(resolveEffectiveDryRun({ dryRun: true }, { dryRun: true }), true);
+});
+
+test("runner menerima verifikasi mapping dari metadata job walaupun env lokal false", () => {
+  assert.equal(
+    resolveEffectiveFieldMapVerified(
+      { fieldMapVerified: false },
+      { metadataJson: { field_map_verified: true } },
+    ),
+    true,
+  );
+  assert.equal(
+    resolveEffectiveFieldMapVerified(
+      { fieldMapVerified: false },
+      { metadataJson: { fieldMapVerified: "true" } },
+    ),
+    true,
+  );
+  assert.equal(
+    resolveEffectiveFieldMapVerified(
+      { fieldMapVerified: false },
+      { metadataJson: {} },
+    ),
+    false,
+  );
 });
 
 test("runner memakai default polling cepat dan health-check periodik", () => {

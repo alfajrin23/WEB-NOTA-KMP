@@ -9,7 +9,7 @@ import type { ClaimedBelanjaSyncItem } from "../../src/lib/belanja-sync/types";
 import { BelanjaSyncApiClient } from "./api-client";
 import { createBelanjaContext, ensureAuthenticated } from "./auth";
 import { ensureRunnerDirs, targetUrl, type RunnerConfig } from "./config";
-import { resolveEffectiveDryRun } from "./mode";
+import { resolveEffectiveDryRun, resolveEffectiveFieldMapVerified } from "./mode";
 import { compareBelanjaForm, fillBelanjaForm, inspectTargetBelanja, readBelanjaForm, saveDryRunScreenshot, submitBelanjaForm } from "./target";
 
 export type TargetReachability = {
@@ -143,9 +143,9 @@ async function processClaim(api: BelanjaSyncApiClient, config: RunnerConfig, pag
     return;
   }
 
-  if (!effectiveDryRun && !config.fieldMapVerified) {
+  if (!effectiveDryRun && !resolveEffectiveFieldMapVerified(config, job)) {
     await api.markFailed(item.id, {
-      errorMessage: "Live mode diblokir karena BELANJA_FIELD_MAP_VERIFIED=false. Verifikasi mapping via dry run terlebih dahulu.",
+      errorMessage: "Live mode diblokir karena mapping Belanja belum terverifikasi. Jalankan dry run sampai DRY_RUN_OK atau set BELANJA_FIELD_MAP_VERIFIED=true pada runner yang sudah diverifikasi.",
       retryable: false,
     });
     return;
