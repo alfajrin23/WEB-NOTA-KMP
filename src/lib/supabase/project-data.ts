@@ -11,6 +11,7 @@ import type { KwitansiSyncKey } from "@/lib/kwitansi-rules";
 import { isSpecialPLNKwitansi } from "@/lib/pln-document-groups";
 import { buildResumeItemsForNewProject } from "@/lib/resume-history";
 import { buildProjectSummary, getResumeItemAmount } from "@/lib/resume-calculations";
+import { cleanKwitansiWorkerRole } from "@/lib/kwitansi-role-cleanup";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import {
   CustomNote,
@@ -297,6 +298,10 @@ function latestTimestamp(values: Array<string | null | undefined>): string {
 
 function customString(custom: JsonRecord, key: string, fallback: string | undefined) {
   return Object.prototype.hasOwnProperty.call(custom, key) ? asString(custom[key]) : fallback;
+}
+
+function customKwitansiRole(custom: JsonRecord, fallback: string | undefined) {
+  return cleanKwitansiWorkerRole(customString(custom, "jabatan", fallback));
 }
 
 function hasOwnInput(input: KwitansiEditInput, key: keyof KwitansiEditInput) {
@@ -702,7 +707,7 @@ function applyKwitansiEdit(doc: GeneratedNota, edit: KwitansiEdit | undefined): 
     kwitansiNumber: customString(custom, "no_kwitansi", doc.kwitansiNumber),
     kwitansiPayerName: customString(custom, "nama_pemberi", doc.kwitansiPayerName),
     kwitansiPaymentDescription: customString(custom, "keterangan", doc.kwitansiPaymentDescription),
-    kwitansiRoleName: customString(custom, "jabatan", doc.kwitansiRoleName),
+    kwitansiRoleName: customKwitansiRole(custom, doc.kwitansiRoleName),
     kwitansiNote: customString(custom, "catatan", doc.kwitansiNote),
     kwitansiAmount: Object.prototype.hasOwnProperty.call(custom, "nominal") ? asOptionalNumber(custom.nominal) : doc.kwitansiAmount,
     kwitansiAmountWords: customString(custom, "uang_sejumlah", doc.kwitansiAmountWords),
@@ -1827,7 +1832,7 @@ export async function upsertKwitansiEdit(projectId: string, noteId: string, inpu
   if (hasOwnInput(input, "noKwitansi")) customData.no_kwitansi = input.noKwitansi ?? "";
   if (hasOwnInput(input, "namaPemberi")) customData.nama_pemberi = input.namaPemberi ?? "";
   if (hasOwnInput(input, "keterangan")) customData.keterangan = input.keterangan ?? "";
-  if (hasOwnInput(input, "jabatan")) customData.jabatan = input.jabatan ?? "";
+  if (hasOwnInput(input, "jabatan")) customData.jabatan = cleanKwitansiWorkerRole(input.jabatan ?? "");
   if (hasOwnInput(input, "catatan")) customData.catatan = input.catatan ?? "";
   if (hasOwnInput(input, "nominal")) customData.nominal = input.nominal ?? null;
   if (hasOwnInput(input, "uangSejumlah")) customData.uang_sejumlah = input.uangSejumlah ?? "";

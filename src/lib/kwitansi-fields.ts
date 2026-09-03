@@ -3,6 +3,9 @@ import { isOutsideCoreStage } from "@/constants/stages";
 import { formatDateIndonesia, formatProjectKdkmpWilayah, parseDateInputToIso, terbilangRupiah } from "@/utils/format";
 import { getResumeItemAmount } from "./resume-calculations";
 import { isOperationalSupportKwitansiDoc } from "./kwitansi-rules";
+import { cleanKwitansiWorkerRole } from "./kwitansi-role-cleanup";
+
+export { cleanKwitansiWorkerRole } from "./kwitansi-role-cleanup";
 
 function normalized(value: string | undefined | null) {
   return (value ?? "").trim().toLowerCase();
@@ -395,7 +398,7 @@ export function getKwitansiPaymentLines(doc: GeneratedNota, project: Project) {
 }
 
 export function getKwitansiProjectLines(doc: GeneratedNota, project: Project) {
-  const role = getKwitansiRole(doc);
+  const role = cleanKwitansiWorkerRole(getKwitansiRole(doc));
   const customLocation = doc.kwitansiCity?.trim();
   if (customLocation) return [customLocation, role];
   if (isStageSixDrillingWellDoc(doc)) return ["CV. PRATAMA PROJECT MANDIRI", role];

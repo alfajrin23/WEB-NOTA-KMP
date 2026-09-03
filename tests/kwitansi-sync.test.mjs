@@ -7,6 +7,7 @@ import {
   getKwitansiReceiverSyncPlan,
   kwitansiSyncKeyForDoc,
 } from "../src/lib/kwitansi-rules.ts";
+import { cleanKwitansiWorkerRole } from "../src/lib/kwitansi-role-cleanup.ts";
 
 const STAGES = ["TAHAP_I", "TAHAP_II", "TAHAP_III", "TAHAP_IV"];
 
@@ -76,6 +77,14 @@ test("Kepala Tukang tersinkron ke satu kwitansi pada tiga tahap lain", () => {
 
   assert.deepEqual(targets.map((doc) => doc.stageCode), ["TAHAP_II", "TAHAP_III", "TAHAP_IV"]);
   assert.ok(docs.every((doc) => kwitansiSyncKeyForDoc(doc, doc.kwitansiRoleName) === "kepala_tukang"));
+});
+
+test("Jabatan pekerja lembur pada kwitansi ditampilkan tanpa kata lembur", () => {
+  assert.equal(cleanKwitansiWorkerRole("lembur Mandor"), "Mandor");
+  assert.equal(cleanKwitansiWorkerRole("Lembur Kepala Tukang"), "Kepala Tukang");
+  assert.equal(cleanKwitansiWorkerRole("lembur Tukang"), "Tukang");
+  assert.equal(cleanKwitansiWorkerRole("lembur Kuli/Kenek"), "Kuli/Kenek");
+  assert.equal(cleanKwitansiWorkerRole("Mandor Lembur"), "Mandor");
 });
 
 test("Pekerja Terampil dan Tukang hanya tersinkron ke slot yang sama", () => {

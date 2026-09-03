@@ -19,6 +19,7 @@ import {
 import { buildResumeItemsForNewProject, latestEditedProject } from "@/lib/resume-history";
 import { findPriceSyncItems } from "@/lib/resume-price-sync";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
+import { cleanKwitansiWorkerRole } from "@/lib/kwitansi-role-cleanup";
 import {
   formatProjectRecipientAddress,
   formatProjectRecipientName,
@@ -1076,7 +1077,10 @@ export function useKdkmpStore() {
     }
     if (!supabaseReady) throw new Error("Supabase belum dikonfigurasi. Perubahan kwitansi belum dapat disimpan permanen.");
 
-    const nextDoc: GeneratedNota = { ...source, ...patch };
+    const normalizedPatch = Object.prototype.hasOwnProperty.call(patch, "kwitansiRoleName")
+      ? { ...patch, kwitansiRoleName: cleanKwitansiWorkerRole(patch.kwitansiRoleName ?? "") }
+      : patch;
+    const nextDoc: GeneratedNota = { ...source, ...normalizedPatch };
     const nextDocs = generatedNotasRef.current.map((doc) => (doc.id === noteId ? nextDoc : doc));
     generatedNotasRef.current = nextDocs;
     setGeneratedNotas(nextDocs);
@@ -1093,7 +1097,7 @@ export function useKdkmpStore() {
     if (Object.prototype.hasOwnProperty.call(patch, "kwitansiNumber")) input.noKwitansi = nextDoc.kwitansiNumber ?? "";
     if (Object.prototype.hasOwnProperty.call(patch, "kwitansiPayerName")) input.namaPemberi = nextDoc.kwitansiPayerName ?? "";
     if (Object.prototype.hasOwnProperty.call(patch, "kwitansiPaymentDescription")) input.keterangan = nextDoc.kwitansiPaymentDescription ?? "";
-    if (Object.prototype.hasOwnProperty.call(patch, "kwitansiRoleName")) input.jabatan = nextDoc.kwitansiRoleName ?? "";
+    if (Object.prototype.hasOwnProperty.call(normalizedPatch, "kwitansiRoleName")) input.jabatan = nextDoc.kwitansiRoleName ?? "";
     if (Object.prototype.hasOwnProperty.call(patch, "kwitansiNote")) input.catatan = nextDoc.kwitansiNote ?? "";
     if (Object.prototype.hasOwnProperty.call(patch, "kwitansiAmount")) input.nominal = locksAmountToResume ? null : nextDoc.kwitansiAmount ?? null;
     if (Object.prototype.hasOwnProperty.call(patch, "kwitansiAmountWords")) input.uangSejumlah = locksAmountToResume ? "" : nextDoc.kwitansiAmountWords ?? "";

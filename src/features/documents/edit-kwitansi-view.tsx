@@ -17,6 +17,7 @@ import { getKwitansiPageChunk, KwitansiBatchTemplate } from "@/components/templa
 import { STAGES, getStageLabel } from "@/constants/stages";
 import {
   canKwitansiPayerBeBlank,
+  cleanKwitansiWorkerRole,
   getDefaultKwitansiPaymentDescription,
   getKwitansiAmount,
   getKwitansiAmountWords,
@@ -79,7 +80,7 @@ function buildDraft(doc: EditableKwitansiDoc, project: Project): EditDraft {
     receiver: doc.kwitansiReceiverName ?? "",
     note: doc.kwitansiNote ?? "",
     location: doc.kwitansiCity?.trim() || projectLines[0] || formatProjectKdkmpWilayah(project),
-    role: doc.kwitansiRoleName?.trim() || getKwitansiRole(doc),
+    role: projectLines[1] || cleanKwitansiWorkerRole(doc.kwitansiRoleName?.trim() || getKwitansiRole(doc)),
     templateColor: doc.warnaTemplate || "default",
     dateIsManual: Boolean(doc.kwitansiDate?.trim()),
     paymentDescriptionIsManual: Boolean(
@@ -433,6 +434,7 @@ export function EditKwitansiView() {
     setSaving(true);
     try {
       const receiverName = draft.receiver.trim();
+      const roleName = cleanKwitansiWorkerRole(draft.role.trim());
       const patch: Partial<Pick<
         GeneratedNota,
         "kwitansiReceiverName" | "kwitansiNumber" | "kwitansiPayerName" | "kwitansiPaymentDescription" | "kwitansiRoleName" | "kwitansiNote" |
@@ -447,17 +449,17 @@ export function EditKwitansiView() {
         kwitansiReceiverName: receiverName,
         kwitansiNote: draft.note.trim(),
         kwitansiCity: draft.location.trim(),
-        kwitansiRoleName: draft.role.trim(),
+        kwitansiRoleName: roleName,
         warnaTemplate: draft.templateColor,
       };
       const receiverChanged = receiverName !== (editingDoc.kwitansiReceiverName ?? "").trim();
       const sourceSyncKey = receiverChanged
-        ? syncKeysByDocId.get(editingDoc.id) ?? kwitansiSyncKeyForDoc(editingDoc, draft.role)
+        ? syncKeysByDocId.get(editingDoc.id) ?? kwitansiSyncKeyForDoc(editingDoc, roleName)
         : null;
       const receiverSyncStages = sourceSyncKey === "mandor" ? MANDOR_KWITANSI_SYNC_STAGES : CORE_KWITANSI_SYNC_STAGES;
       const syncPlan = receiverChanged && sourceSyncKey && receiverSyncStages.has(editingDoc.stageCode)
         ? getKwitansiReceiverSyncPlan(docs, editingDoc, syncKeysByDocId, {
-          roleText: draft.role,
+          roleText: roleName,
           targetStages: receiverSyncStages,
         })
         : { syncKey: null, targets: [] };
