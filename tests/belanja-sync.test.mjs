@@ -17,6 +17,7 @@ import {
   isPlaywrightTargetClosedError,
 } from "../src/lib/belanja-sync/automation-errors.ts";
 import { getRunnerConfig } from "../automation/belanja-runner/config.ts";
+import { resolveEffectiveDryRun } from "../automation/belanja-runner/mode.ts";
 
 function makeProject() {
   return {
@@ -129,6 +130,11 @@ test("runner tidak auto-retry target tertutup saat submit live", () => {
   assert.equal(classified.retryable, false);
   assert.equal(classified.resetSession, true);
   assert.equal(classified.metadataJson.duplicate_check_required, true);
+});
+
+test("runner menghormati mode LIVE dari job UI walaupun default env dry-run", () => {
+  assert.equal(resolveEffectiveDryRun({ dryRun: true }, { dryRun: false }), false);
+  assert.equal(resolveEffectiveDryRun({ dryRun: true }, { dryRun: true }), true);
 });
 
 test("runner memakai default polling cepat dan health-check periodik", () => {

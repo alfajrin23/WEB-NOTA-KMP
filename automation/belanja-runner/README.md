@@ -75,4 +75,4 @@ npm run belanja:inspect
 npm run belanja:runner
 ```
 
-`BELANJA_DRY_RUN=true` adalah default aman. Live mode hanya boleh dipakai setelah mapping `/belanja` sudah diverifikasi dan `BELANJA_FIELD_MAP_VERIFIED=true`.
+`BELANJA_DRY_RUN=true` adalah default aman untuk heartbeat runner dan job lama yang tidak membawa flag mode. Job yang dibuat dari UI tetap menentukan mode sendiri: checkbox Dry Run aktif berarti simulasi, checkbox dimatikan berarti LIVE. Live mode tetap diblokir runner kalau mapping `/belanja` belum diverifikasi dengan `BELANJA_FIELD_MAP_VERIFIED=true`.

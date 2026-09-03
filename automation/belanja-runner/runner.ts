@@ -9,6 +9,7 @@ import type { ClaimedBelanjaSyncItem } from "../../src/lib/belanja-sync/types";
 import { BelanjaSyncApiClient } from "./api-client";
 import { createBelanjaContext, ensureAuthenticated } from "./auth";
 import { ensureRunnerDirs, targetUrl, type RunnerConfig } from "./config";
+import { resolveEffectiveDryRun } from "./mode";
 import { compareBelanjaForm, fillBelanjaForm, inspectTargetBelanja, readBelanjaForm, saveDryRunScreenshot, submitBelanjaForm } from "./target";
 
 export type TargetReachability = {
@@ -128,7 +129,7 @@ async function createSession(config: RunnerConfig) {
 async function processClaim(api: BelanjaSyncApiClient, config: RunnerConfig, page: Page, claim: ClaimedBelanjaSyncItem) {
   const { job, item } = claim;
   const payload = item.payload;
-  const effectiveDryRun = config.dryRun || job.dryRun;
+  const effectiveDryRun = resolveEffectiveDryRun(config, job);
   let phase: BelanjaAutomationPhase = "unknown";
   log(`Item ${payload.namaItem} | ${payload.desa ?? "-"} | ${effectiveDryRun ? "DRY RUN" : "LIVE"}`);
 
@@ -309,7 +310,7 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
       await api.heartbeat({
         status: "busy",
         targetStatus: "connected",
-        dryRun: config.dryRun || claim.job.dryRun,
+        dryRun: resolveEffectiveDryRun(config, claim.job),
         targetBaseUrl: config.targetBaseUrl,
       }).then(() => {
         lastHeartbeatAt = Date.now();
@@ -321,7 +322,7 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
       } catch (error) {
         const classified = error instanceof BelanjaAutomationItemError
           ? error
-          : classifyBelanjaAutomationError(error, { dryRun: config.dryRun || claim.job.dryRun });
+          : classifyBelanjaAutomationError(error, { dryRun: resolveEffectiveDryRun(config, claim.job) });
         const message = classified.message;
         log(`FAILED ${message}`);
         await api.markFailed(claim.item.id, {

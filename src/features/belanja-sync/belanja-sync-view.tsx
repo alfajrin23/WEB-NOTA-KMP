@@ -268,11 +268,6 @@ export function BelanjaSyncView() {
       toast.error(`${invalidRows.length} item belum valid untuk dikirim.`);
       return;
     }
-    if (!modalDryRun && modalState?.runner?.dryRun !== false) {
-      toast.error("Runner lokal masih mode DRY RUN. Ubah BELANJA_DRY_RUN=false lalu jalankan ulang runner sebelum kirim LIVE.");
-      return;
-    }
-
     const confirmed = window.confirm(
       modalDryRun
         ? `Buat DRY RUN untuk ${selectedItemIds.size} item dari ${formatProjectWilayah(modalProject)}? Data hanya divalidasi, belum tersimpan ke web target.`
@@ -329,12 +324,11 @@ export function BelanjaSyncView() {
     if (!modalLatestJob) return "Pilih item Resume lalu buat job pengiriman.";
     if (!modalState?.runner?.online) return "Pending: runner lokal belum aktif atau heartbeat belum masuk ke Vercel.";
     if (modalState.runner.targetStatus !== "connected") return "Pending: runner hidup, tetapi website target/VPN belum connected.";
-    if (!modalDryRun && modalState.runner.dryRun !== false) return "LIVE belum aktif: runner lokal masih mode DRY RUN.";
     if (processingRow) return `Sedang mengirim: ${processingRow.payload.namaItem}`;
     if (nextPendingRow) return `Menunggu runner mengambil item berikutnya: ${nextPendingRow.payload.namaItem}`;
     if (modalLatestJob.failedItems > 0) return "Selesai dengan item gagal. Lihat detail error di tabel.";
     return "Job selesai.";
-  }, [modalDryRun, modalLatestJob, modalState?.runner, nextPendingRow, processingRow]);
+  }, [modalLatestJob, modalState?.runner, nextPendingRow, processingRow]);
 
   return (
     <MotionPage>
@@ -358,7 +352,7 @@ export function BelanjaSyncView() {
           <CardContent className="grid gap-3 md:grid-cols-4">
             <Metric label="Runner" value={overview?.runner?.online ? "Online" : "Offline"} tone={overview?.runner?.online ? "ok" : "default"} />
             <Metric label="Target" value={overview?.runner?.targetStatus ?? "unknown"} tone={overview?.runner?.targetStatus === "connected" ? "ok" : "warn"} />
-            <Metric label="Mode" value={overview?.runner?.dryRun === false ? "LIVE" : "DRY RUN"} tone={overview?.runner?.dryRun === false ? "warn" : "default"} />
+            <Metric label="Default Job" value={overview?.runner?.dryRun === false ? "LIVE" : "DRY RUN"} tone={overview?.runner?.dryRun === false ? "warn" : "default"} />
             <Metric label="Heartbeat" value={overview?.runner ? formatDateTimeIndonesia(overview.runner.lastSeenAt) : "-"} />
             <div className="rounded-lg border border-slate-200 p-3 dark:border-slate-800 md:col-span-4">
               <p className="flex items-center gap-2 text-xs font-semibold text-slate-500"><Terminal className="h-3.5 w-3.5" />Runner lokal</p>
@@ -487,8 +481,8 @@ export function BelanjaSyncView() {
 
                 {!modalDryRun && modalState?.runner?.dryRun !== false ? (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-                    <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />LIVE belum aktif di runner</div>
-                    <p className="mt-1">Job LIVE dari UI tetap akan jadi simulasi selama `.env.belanja.local` masih `BELANJA_DRY_RUN=true`.</p>
+                    <div className="flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Runner default DRY RUN</div>
+                    <p className="mt-1">Job ini tetap akan diproses LIVE. Pastikan runner lokal memakai `BELANJA_FIELD_MAP_VERIFIED=true` sebelum item diproses.</p>
                   </div>
                 ) : null}
 

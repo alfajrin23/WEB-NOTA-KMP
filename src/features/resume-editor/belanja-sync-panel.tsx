@@ -192,11 +192,6 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
       toast.error(`${invalidRows.length} item belum valid untuk dikirim.`);
       return;
     }
-    if (!dryRun && state?.runner?.dryRun !== false) {
-      toast.error("Runner lokal masih mode DRY RUN. Ubah BELANJA_DRY_RUN=false lalu jalankan ulang runner sebelum kirim LIVE.");
-      return;
-    }
-
     const confirmed = window.confirm(
       resend
         ? `Kirim ulang ${selectedIds.size} item ke Web Belanja? Aksi ini bisa membuat transaksi duplikat jika item sudah pernah sukses.`
@@ -294,7 +289,7 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
               Runner {runnerOnline ? "Online" : "Offline"}
             </Badge>
             <Badge className={state?.runner?.dryRun === false ? "bg-amber-50 text-amber-700" : "bg-cyan-50 text-cyan-700"}>
-              Mode Runner {state?.runner?.dryRun === false ? "LIVE" : "DRY RUN"}
+              Default Runner {state?.runner?.dryRun === false ? "LIVE" : "DRY RUN"}
             </Badge>
             <Badge className={state?.runner?.targetStatus === "connected" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}>
               Target {state?.runner?.targetStatus ?? "unknown"}
@@ -319,8 +314,8 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
 
         {!dryRun && state?.runner?.dryRun !== false ? (
           <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-100">
-            <div className="mb-1 flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />LIVE belum aktif di runner</div>
-            <p>Job LIVE dari UI tetap akan jadi simulasi selama `.env.belanja.local` masih `BELANJA_DRY_RUN=true`.</p>
+            <div className="mb-1 flex items-center gap-2 font-semibold"><AlertTriangle className="h-4 w-4" />Runner default DRY RUN</div>
+            <p>Job ini tetap akan diproses LIVE. Pastikan runner lokal memakai `BELANJA_FIELD_MAP_VERIFIED=true` sebelum item diproses.</p>
           </div>
         ) : null}
 
