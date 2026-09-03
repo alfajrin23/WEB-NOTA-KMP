@@ -2,6 +2,35 @@ import type { Project, ResumeItem } from "../../types/domain";
 import type { BelanjaPayload, BelanjaPayloadValidation } from "./types";
 
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const BELANJA_TEXT_ALIAS_GROUPS = [
+  ["cibinong", "cubinong"],
+  ["stemper", "stamper"],
+  ["stemperkodok", "stamperkodok"],
+  ["honorariumtimsurveipengukuranpemetaan", "mandor"],
+  ["jasapemasangantambahdayapln", "biayapekerjainstalasilistrik", "dayapln5500va", "instalasilistrik", "dayapln"],
+  ["jaborongsignagekdkmp", "jasa borong signage kdkmp", "signagekdkmp", "jasa borong"],
+  ["tukangboronganbaja", "boronganbaja"],
+  ["tukangboronganpekfoldingdoor", "jasaborongpekfoldingdoor", "boronganaluminumdankaca", "foldingdoor"],
+  ["tukangboronganpekpintukacaframeless", "boronganaluminumdankaca", "pintukacaframeless"],
+  ["tukangboronganpekdindingpartisikaca", "boronganaluminumdankaca", "partisikaca"],
+  ["tukangboronganpekpintubesi", "boronganpintubesi", "pintubesi"],
+  ["tukangboronganpekfoldinggate", "boronganfoldinggate", "foldinggate"],
+  ["dukunganoperasionalbabinsa", "babinsa"],
+  ["pekerjatebaslahanpembersihan", "tebaslahan", "pembersihanlahan"],
+  ["uangjalanpengawalanlapangan", "uangjalan", "pengawalanlapangan"],
+  ["jasaborong", "jasaborongsignagekdkmp"],
+].map((group) => [...new Set(group.map((entry) => normalizeBelanjaMatchText(entry)).filter(Boolean))]);
+
+const BELANJA_TEXT_ALIAS_LOOKUP = new Map<string, Set<string>>();
+
+for (const group of BELANJA_TEXT_ALIAS_GROUPS) {
+  const values = new Set(group);
+  for (const value of group) {
+    const lookup = BELANJA_TEXT_ALIAS_LOOKUP.get(value) ?? new Set<string>();
+    for (const alias of values) lookup.add(alias);
+    BELANJA_TEXT_ALIAS_LOOKUP.set(value, lookup);
+  }
+}
 
 export function normalizeBelanjaText(value: string | null | undefined) {
   return (value ?? "").replace(/\s+/g, " ").trim();
@@ -9,6 +38,15 @@ export function normalizeBelanjaText(value: string | null | undefined) {
 
 export function normalizeBelanjaMatchText(value: string | null | undefined) {
   return normalizeBelanjaText(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+export function belanjaTextVariants(value: string | null | undefined) {
+  const normalized = normalizeBelanjaMatchText(value);
+  if (!normalized) return [];
+  const variants = new Set<string>([normalized]);
+  const aliases = BELANJA_TEXT_ALIAS_LOOKUP.get(normalized);
+  if (aliases) for (const alias of aliases) variants.add(alias);
+  return [...variants];
 }
 
 function belanjaTextTokens(value: string | null | undefined) {
@@ -25,8 +63,15 @@ export function belanjaTextMatches(actual: string | null | undefined, expected: 
   if (!actualNorm || !expectedNorm) return false;
   if (actualNorm === expectedNorm || actualNorm.includes(expectedNorm)) return true;
 
+  const actualVariants = belanjaTextVariants(actual);
+  const expectedVariants = belanjaTextVariants(expected);
+  if (actualVariants.some((variant) => expectedVariants.includes(variant))) return true;
+
   const expectedTokens = belanjaTextTokens(expected);
-  return expectedTokens.length > 1 && expectedTokens.every((token) => actualNorm.includes(token));
+  if (expectedTokens.length > 1 && expectedTokens.every((token) => actualNorm.includes(token))) return true;
+
+  const actualTokens = belanjaTextTokens(actual);
+  return actualTokens.length > 1 && actualTokens.every((token) => expectedNorm.includes(token));
 }
 
 export function normalizeBelanjaNumber(value: number | string | null | undefined) {

@@ -7,6 +7,7 @@ import {
   normalizeBelanjaMatchText,
   normalizeBelanjaNumber,
   normalizeBelanjaText,
+  belanjaTextVariants,
 } from "../../src/lib/belanja-sync/payload";
 import type { BelanjaPayload } from "../../src/lib/belanja-sync/types";
 import type { RunnerConfig } from "./config";
@@ -334,7 +335,13 @@ async function selectChoice(page: Page, config: RunnerConfig, selectId: string, 
   }
 
   const root = choiceRoot(page, selectId);
-  const searchCandidates = [...new Set([searchText, ...terms, choiceTerms.join(" ")].map(normalizeBelanjaText).filter(Boolean))];
+  const searchCandidates = [...new Set([
+    searchText,
+    ...terms,
+    choiceTerms.join(" "),
+    ...terms.flatMap((term) => belanjaTextVariants(term)),
+    ...belanjaTextVariants(searchText),
+  ].map(normalizeBelanjaText).filter(Boolean))];
   const choiceOptions = root.locator(".choices__list--dropdown .choices__item--choice");
   const seen: string[] = [];
 
