@@ -75,4 +75,6 @@ npm run belanja:inspect
 npm run belanja:runner
 ```
 
-`BELANJA_DRY_RUN=true` adalah default aman untuk heartbeat runner dan job lama yang tidak membawa flag mode. Job yang dibuat dari UI tetap menentukan mode sendiri: checkbox Dry Run aktif berarti simulasi, checkbox dimatikan berarti LIVE. Live mode diblokir hanya kalau mapping `/belanja` belum punya bukti verifikasi dari dry run/sukses sebelumnya dan runner lokal juga belum diset `BELANJA_FIELD_MAP_VERIFIED=true`.
+`BELANJA_DRY_RUN=true` adalah default aman untuk heartbeat runner dan job lama yang tidak membawa flag mode. Job yang dibuat dari UI tetap menentukan mode sendiri: checkbox Dry Run aktif berarti simulasi, checkbox dimatikan berarti LIVE. Mapping `/belanja` diverifikasi sekali melalui dry run yang berhasil dan buktinya disimpan di antrean Supabase, sehingga runner di PC lain tidak perlu mengisi flag verifikasi ulang. `BELANJA_FIELD_MAP_VERIFIED=true` tetap dapat dipakai sebagai override lokal setelah mapping diperiksa manual.
+
+`BELANJA_FIELD_MAP_VERIFIED` adalah env runner lokal, bukan env Vercel. Jangan menaruh username/password target atau token runner di repository maupun env client/browser. Vercel hanya menyediakan API queue; Playwright tetap berjalan pada PC runner yang terhubung ke VPN.

@@ -88,6 +88,13 @@ test("validasi menolak jumlah yang tidak sama dengan qty x harga satuan", () => 
 test("matching teks belanja menerima urutan kata berbeda pada item target", () => {
   assert.equal(belanjaTextMatches("Mandor Lembur", "lembur Mandor"), true);
   assert.equal(belanjaTextMatches("I.02 Pekerjaan Bouwplank", "I.02"), true);
+  assert.equal(
+    belanjaTextMatches(
+      "Koperasi Desa Batulawang (Jawa Barat, Cianjur, Cibinong, Batulawang)",
+      "Batulawang Cubinong",
+    ),
+    true,
+  );
   assert.equal(belanjaTextMatches("lembur", "lembur Mandor"), false);
   assert.equal(belanjaTextMatches("Kepala Tukang Lembur", "lembur Mandor"), false);
 });

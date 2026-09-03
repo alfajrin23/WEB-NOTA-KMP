@@ -68,10 +68,13 @@ export function belanjaTextMatches(actual: string | null | undefined, expected: 
   if (actualVariants.some((variant) => expectedVariants.includes(variant))) return true;
 
   const expectedTokens = belanjaTextTokens(expected);
-  if (expectedTokens.length > 1 && expectedTokens.every((token) => actualNorm.includes(token))) return true;
+  if (
+    expectedTokens.length > 1
+    && expectedTokens.every((token) => belanjaTextVariants(token).some((variant) => actualNorm.includes(variant)))
+  ) return true;
 
   const actualTokens = belanjaTextTokens(actual);
-  return actualTokens.length > 1 && actualTokens.every((token) => expectedNorm.includes(token));
+  return actualTokens.length > 1 && actualTokens.every((token) => belanjaTextVariants(token).some((variant) => expectedNorm.includes(variant)));
 }
 
 export function normalizeBelanjaNumber(value: number | string | null | undefined) {

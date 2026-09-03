@@ -360,13 +360,13 @@ function hasVerifiedFieldMapProof(status: BelanjaSyncItemStatus, errorMessage: s
   return fromDryRun || fromMetadata;
 }
 
-async function projectHasVerifiedFieldMap(client: SupabaseClient, projectId: string) {
+async function hasVerifiedFieldMapInHistory(client: SupabaseClient) {
   const { data, error } = await client
     .from("belanja_sync_items")
     .select("status,error_message,metadata_json")
-    .eq("project_id", projectId)
+    .in("status", ["success", "skipped"])
     .order("updated_at", { ascending: false })
-    .limit(250);
+    .limit(1000);
   if (error) throwDatabaseError(error, "Gagal memeriksa status verifikasi mapping Belanja.");
 
   return ((data ?? []) as Array<{
@@ -627,6 +627,10 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
   const existingBySource = latestBySourceItemId(existingItems);
   const activeBySource = activeBySourceItemId(existingItems);
   const timestamp = nowIso();
+  // Mapping target Belanja bersifat global untuk seluruh project. Setelah satu
+  // dry run berhasil, PC runner lain tidak perlu mengulang verifikasi hanya
+  // karena mengirim project/desa yang berbeda.
+  const fieldMapVerified = input.dryRun === false && await hasVerifiedFieldMapInHistory(client);
   const itemRows = project.items.map((item) => {
     const existing = existingBySource[item.id];
     const activeExisting = activeBySource[item.id];
@@ -661,6 +665,7 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
         validation,
         force_resend: input.forceResend ?? false,
         source_snapshot_at: timestamp,
+        field_map_verified: fieldMapVerified,
       },
     };
   });
@@ -669,10 +674,6 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
   const failedCount = itemRows.filter((row) => row.status === "failed").length;
   const skippedCount = itemRows.filter((row) => row.status === "skipped").length;
   const jobStatus: BelanjaSyncJobStatus = pendingCount > 0 ? "pending" : failedCount > 0 ? "completed_with_errors" : "completed";
-  const fieldMapVerified = input.dryRun === false
-    && ((existingItems.length > 0 && existingItems.some((item) => hasVerifiedFieldMapProof(item.status, item.errorMessage ?? null, item.metadataJson ?? null)))
-      || await projectHasVerifiedFieldMap(client, input.projectId));
-
   const { data: jobRow, error: jobError } = await client
     .from("belanja_sync_jobs")
     .insert({
@@ -993,7 +994,7 @@ export async function claimNextBelanjaSyncItem(runnerId: string): Promise<Claime
     let finalJob = rowToJob(refreshedJob ?? job);
     const finalJobMetadata = asRecord(finalJob.metadataJson);
     if (!finalJob.dryRun) {
-      const verified = finalJobMetadata.field_map_verified === true || await projectHasVerifiedFieldMap(client, finalJob.projectId);
+      const verified = finalJobMetadata.field_map_verified === true || await hasVerifiedFieldMapInHistory(client);
       if (verified && finalJobMetadata.field_map_verified !== true) {
         const { data: updatedJob, error: jobMetadataError } = await client
           .from("belanja_sync_jobs")
