@@ -190,7 +190,7 @@ async function processClaim(api: BelanjaSyncApiClient, config: RunnerConfig, pag
   let submitResult: Awaited<ReturnType<typeof submitBelanjaForm>>;
   try {
     phase = "submit";
-    submitResult = await submitBelanjaForm(page);
+    submitResult = await submitBelanjaForm(page, config);
   } catch (error) {
     throw classifyBelanjaAutomationError(error, { phase, dryRun: effectiveDryRun });
   }
@@ -198,6 +198,20 @@ async function processClaim(api: BelanjaSyncApiClient, config: RunnerConfig, pag
     dryRun: false,
     targetReference: submitResult.targetReference,
     metadataJson: { comparison },
+  }).catch((error) => {
+    throw new BelanjaAutomationItemError(
+      `Transaksi target kemungkinan sudah tersimpan, tetapi WEB NOTA gagal mencatat SUCCESS: ${error instanceof Error ? error.message : "unknown"}. Cek manual sebelum kirim ulang agar tidak duplikat.`,
+      {
+        retryable: false,
+        resetSession: false,
+        metadataJson: {
+          automation_phase: "submit",
+          target_reference: submitResult.targetReference,
+          duplicate_check_required: true,
+          success_mark_failed: true,
+        },
+      },
+    );
   });
   log(`SUCCESS targetRef=${submitResult.targetReference ?? "-"}`);
 }
@@ -276,7 +290,15 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
         lastStatusLogAt = Date.now();
       }
 
-      const { claim } = await api.claim();
+      let claim: ClaimedBelanjaSyncItem | null = null;
+      try {
+        ({ claim } = await api.claim());
+      } catch (error) {
+        log(`Koneksi WEB NOTA sementara gagal saat claim: ${error instanceof Error ? error.message : "unknown"}. Runner tetap hidup dan retry.`);
+        if (options.once) break;
+        await sleep(config.pollIntervalMs);
+        continue;
+      }
       if (!claim) {
         log("Tidak ada item pending.");
         if (options.once) break;
@@ -292,7 +314,7 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
       }).then(() => {
         lastHeartbeatAt = Date.now();
         lastHeartbeatTargetStatus = true;
-      });
+      }).catch((error) => log(`Heartbeat busy gagal: ${error instanceof Error ? error.message : "unknown"}; item tetap diproses.`));
 
       try {
         await processClaim(api, config, page, claim);

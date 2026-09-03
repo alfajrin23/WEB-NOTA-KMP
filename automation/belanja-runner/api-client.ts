@@ -7,6 +7,19 @@ import type { RunnerConfig } from "./config";
 export class BelanjaSyncApiClient {
   constructor(private readonly config: RunnerConfig) {}
 
+  private sleep(ms: number) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private isRetryableStatus(status: number) {
+    return status === 408 || status === 429 || status >= 500;
+  }
+
+  private isRetryableError(error: unknown) {
+    if (!(error instanceof Error)) return false;
+    return /abort|timeout|fetch failed|network|ECONNRESET|ECONNREFUSED|ENOTFOUND|ETIMEDOUT|EAI_AGAIN/i.test(error.message);
+  }
+
   private async request<T>(path: string, options: { method?: string; body?: unknown; auth?: boolean } = {}): Promise<T> {
     const url = new URL(path, this.config.notaKmpBaseUrl).toString();
     const headers: Record<string, string> = { "Content-Type": "application/json" };
@@ -15,17 +28,37 @@ export class BelanjaSyncApiClient {
       headers.Authorization = `Bearer ${this.config.runnerToken}`;
     }
 
-    const response = await fetch(url, {
-      method: options.method ?? "GET",
-      headers,
-      body: options.body === undefined ? undefined : JSON.stringify(options.body),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const message = typeof payload.error === "string" ? payload.error : `HTTP ${response.status}`;
-      throw new Error(message);
+    const attempts = Math.max(1, this.config.apiRequestRetries + 1);
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), this.config.apiRequestTimeoutMs);
+      try {
+        const response = await fetch(url, {
+          method: options.method ?? "GET",
+          headers,
+          body: options.body === undefined ? undefined : JSON.stringify(options.body),
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (response.ok) return payload as T;
+
+        const message = typeof payload.error === "string" ? payload.error : `HTTP ${response.status}`;
+        const error = new Error(message);
+        lastError = error;
+        if (!this.isRetryableStatus(response.status) || attempt >= attempts) throw error;
+      } catch (error) {
+        lastError = error;
+        if (!this.isRetryableError(error) || attempt >= attempts) throw error;
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      await this.sleep(Math.min(1000 * attempt, 5000));
     }
-    return payload as T;
+
+    throw lastError instanceof Error ? lastError : new Error("Request WEB NOTA gagal.");
   }
 
   heartbeat(input: {

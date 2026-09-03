@@ -85,8 +85,8 @@ async function setNativeSelectByText(locator: Locator, value: string) {
   if (!option) {
     throw new Error(`Pilihan "${value}" tidak ditemukan. Opsi terlihat: ${options.map((entry) => entry.text || entry.value).slice(0, 12).join(" | ") || "-"}.`);
   }
-  await locator.selectOption({ value: option.value }, { timeout: 2_000 }).catch(async () => {
-    await locator.selectOption({ label: option.text }, { timeout: 2_000 });
+  await locator.selectOption({ value: option.value }, { timeout: 800 }).catch(async () => {
+    await locator.selectOption({ label: option.text }, { timeout: 800 });
   });
   await dispatchFieldEvents(locator);
   return true;
@@ -171,14 +171,16 @@ async function pageSummary(page: Page): Promise<PageSummary> {
 
 async function gotoTarget(page: Page, config: RunnerConfig, pathName: string) {
   await page.goto(targetUrl(config, pathName), { waitUntil: "domcontentloaded", timeout: 20_000 });
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+  await page.waitForSelector('input[name="tanggal"], textarea[name="tanggal"], select[name="tanggal"], body', {
+    timeout: config.fastUiTimeoutMs,
+  }).catch(() => {});
 }
 
-async function clickBelanjaNavigationLink(page: Page) {
+async function clickBelanjaNavigationLink(page: Page, config: RunnerConfig) {
   const roleLink = page.getByRole("link", { name: /belanja|pengeluaran|transaksi|realisasi/i }).first();
   if (await roleLink.isVisible().catch(() => false)) {
     await roleLink.click();
-    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+    await page.waitForLoadState("domcontentloaded", { timeout: config.fastUiTimeoutMs }).catch(() => {});
     return true;
   }
 
@@ -191,19 +193,24 @@ async function clickBelanjaNavigationLink(page: Page) {
     const link = page.locator(selector).first();
     if (await link.isVisible().catch(() => false)) {
       await link.click();
-      await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+      await page.waitForLoadState("domcontentloaded", { timeout: config.fastUiTimeoutMs }).catch(() => {});
       return true;
     }
   }
   return false;
 }
 
-async function tryOpenBelanjaFormFromCurrentPage(page: Page) {
+async function waitForInputByName(page: Page, name: string, timeout: number) {
+  const selector = `input[name="${attr(name)}"], textarea[name="${attr(name)}"], select[name="${attr(name)}"]`;
+  await page.waitForSelector(selector, { state: "visible", timeout }).catch(() => {});
+  return inputByName(page, name, false);
+}
+
+async function tryOpenBelanjaFormFromCurrentPage(page: Page, config: RunnerConfig) {
   if (await inputByName(page, "tanggal", false)) return true;
   const clicked = await clickFirstButton(page, targetFieldMap.addButtonTexts);
   if (!clicked) return false;
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
-  return Boolean(await inputByName(page, "tanggal", false));
+  return Boolean(await waitForInputByName(page, "tanggal", config.fastUiTimeoutMs));
 }
 
 function expenseSection(payload: BelanjaPayload): BelanjaSection {
@@ -240,14 +247,13 @@ async function selectedChoiceText(page: Page, selectId: string) {
   return normalizeBelanjaText(await choiceRoot(page, selectId).locator(".choices__list--single").innerText().catch(() => ""));
 }
 
-async function waitForChoiceSettle(page: Page) {
-  await page.waitForLoadState("networkidle", { timeout: 1_500 }).catch(() => {});
-  await page.waitForTimeout(150);
+async function waitForChoiceSettle(page: Page, config: RunnerConfig) {
+  if (config.choiceSettleMs > 0) await page.waitForTimeout(config.choiceSettleMs);
 }
 
-async function dispatchChoiceChange(page: Page, selectId: string) {
+async function dispatchChoiceChange(page: Page, config: RunnerConfig, selectId: string) {
   await page.locator(`#${selectId}`).first().dispatchEvent("change").catch(() => {});
-  await waitForChoiceSettle(page);
+  await waitForChoiceSettle(page, config);
 }
 
 async function nativeOptions(locator: Locator): Promise<NativeOptionSnapshot[]> {
@@ -280,24 +286,14 @@ async function hasMatchingChoice(page: Page, selectId: string, terms: string[]) 
   return false;
 }
 
-async function waitForChoices(page: Page, selectId: string, terms: string[]) {
-  const deadline = Date.now() + 10_000;
-  do {
-    if (await hasMatchingChoice(page, selectId, terms)) return true;
-    await page.waitForTimeout(250);
-  } while (Date.now() < deadline);
-  debugTarget(`waitForChoices timeout selectId=${selectId} terms="${terms.join(" ")}"`);
-  return false;
-}
-
 async function selectNativeChoice(page: Page, selectId: string, terms: string[]) {
   const select = page.locator(`#${selectId}`).first();
   const option = (await nativeOptions(select))
     .find((entry) => meaningful(entry.text || entry.value) && (choiceMatches(entry.text, terms) || choiceMatches(entry.value, terms)));
   if (!option) return false;
   try {
-    await select.selectOption({ value: option.value }, { timeout: 2_000 }).catch(async () => {
-      await select.selectOption({ label: option.text }, { timeout: 2_000 });
+    await select.selectOption({ value: option.value }, { timeout: 800 }).catch(async () => {
+      await select.selectOption({ label: option.text }, { timeout: 800 });
     });
     await dispatchFieldEvents(select);
     return true;
@@ -306,16 +302,35 @@ async function selectNativeChoice(page: Page, selectId: string, terms: string[])
   }
 }
 
-async function selectChoice(page: Page, selectId: string, searchText: string, terms: string[], options: { forceChange?: boolean } = {}) {
+async function waitForChoices(page: Page, config: RunnerConfig, selectId: string, terms: string[]) {
+  const deadline = Date.now() + config.choiceSearchTimeoutMs;
+  do {
+    if (await hasMatchingChoice(page, selectId, terms)) return true;
+    await page.waitForTimeout(50);
+  } while (Date.now() < deadline);
+  debugTarget(`waitForChoices timeout selectId=${selectId} terms="${terms.join(" ")}"`);
+  return false;
+}
+
+async function selectChoice(page: Page, config: RunnerConfig, selectId: string, searchText: string, terms: string[], options: { forceChange?: boolean } = {}) {
   const started = Date.now();
   const choiceTerms = terms.map(normalizeBelanjaText).filter(Boolean);
   if (choiceTerms.length === 0) throw new Error(`Nilai dropdown ${selectId} kosong.`);
 
   const current = await selectedChoiceText(page, selectId);
   if (choiceMatches(current, choiceTerms)) {
-    if (options.forceChange) await dispatchChoiceChange(page, selectId);
+    if (options.forceChange) await dispatchChoiceChange(page, config, selectId);
     debugTarget(`selectChoice kept selectId=${selectId} elapsedMs=${Date.now() - started}`);
     return;
+  }
+
+  if (await selectNativeChoice(page, selectId, choiceTerms)) {
+    await waitForChoiceSettle(page, config);
+    const selected = await selectedChoiceText(page, selectId);
+    if (choiceMatches(selected, choiceTerms)) {
+      debugTarget(`selectChoice native-first selectId=${selectId} elapsedMs=${Date.now() - started}`);
+      return;
+    }
   }
 
   const root = choiceRoot(page, selectId);
@@ -326,9 +341,9 @@ async function selectChoice(page: Page, selectId: string, searchText: string, te
   for (const candidate of searchCandidates) {
     await root.locator(".choices__inner").click();
     const input = root.locator("input.choices__input--cloned").first();
-    await input.waitFor({ state: "visible", timeout: 5_000 });
+    await input.waitFor({ state: "visible", timeout: config.fastUiTimeoutMs });
     await input.fill(candidate);
-    await waitForChoices(page, selectId, choiceTerms);
+    await waitForChoices(page, config, selectId, choiceTerms);
 
     const optionCount = await choiceOptions.count();
     for (let index = 0; index < optionCount; index += 1) {
@@ -338,13 +353,13 @@ async function selectChoice(page: Page, selectId: string, searchText: string, te
       if (!seen.includes(text)) seen.push(text);
       if (choiceMatches(text, choiceTerms)) {
         await option.click();
-        await waitForChoiceSettle(page);
+        await waitForChoiceSettle(page, config);
         debugTarget(`selectChoice clicked selectId=${selectId} candidate="${candidate}" elapsedMs=${Date.now() - started}`);
         return;
       }
     }
     if (await selectNativeChoice(page, selectId, choiceTerms)) {
-      await waitForChoiceSettle(page);
+      await waitForChoiceSettle(page, config);
       debugTarget(`selectChoice native selectId=${selectId} candidate="${candidate}" elapsedMs=${Date.now() - started}`);
       return;
     }
@@ -393,21 +408,21 @@ function laborBreakdown(payload: BelanjaPayload) {
   };
 }
 
-async function fillWorkflow(page: Page, payload: BelanjaPayload) {
+async function fillWorkflow(page: Page, config: RunnerConfig, payload: BelanjaPayload) {
   const district = normalizeBelanjaText(payload.kecamatan);
-  await selectChoice(page, "gerai", payload.desa ?? "", [payload.desa ?? "", district], { forceChange: true });
+  await selectChoice(page, config, "gerai", payload.desa ?? "", [payload.desa ?? "", district], { forceChange: true });
   const stageTerms = stageSearchTerms(payload);
-  await selectChoice(page, "tahapan", stageTerms.join(" "), stageTerms, { forceChange: true });
+  await selectChoice(page, config, "tahapan", stageTerms.join(" "), stageTerms, { forceChange: true });
   const itemTerms = categoryTerms(payload);
-  await selectChoice(page, "item_pekerjaan", itemTerms.join(" "), itemTerms);
+  await selectChoice(page, config, "item_pekerjaan", itemTerms.join(" "), itemTerms);
   const section = expenseSection(payload);
-  await selectChoice(page, "kategori_belanja", targetFieldMap.categoryTexts[section][0], targetFieldMap.categoryTexts[section]);
+  await selectChoice(page, config, "kategori_belanja", targetFieldMap.categoryTexts[section][0], targetFieldMap.categoryTexts[section]);
   await setInputByName(page, "tanggal", payload.tanggal);
   return section;
 }
 
-async function fillMaterial(page: Page, payload: BelanjaPayload) {
-  await selectChoice(page, "nama_material", payload.namaItem, [payload.namaItem]);
+async function fillMaterial(page: Page, config: RunnerConfig, payload: BelanjaPayload) {
+  await selectChoice(page, config, "nama_material", payload.namaItem, [payload.namaItem]);
   await setInputByName(page, "jumlah_material[]", payload.qty);
   await setInputByName(page, "satuan_material[]", payload.satuan);
   await setInputByName(page, "harga_material[]", payload.hargaSatuan);
@@ -416,9 +431,9 @@ async function fillMaterial(page: Page, payload: BelanjaPayload) {
   await setInputByName(page, "nama_penyedia[]", payload.vendor ?? "", false);
 }
 
-async function fillLabor(page: Page, payload: BelanjaPayload) {
+async function fillLabor(page: Page, config: RunnerConfig, payload: BelanjaPayload) {
   const { people, days } = laborBreakdown(payload);
-  await selectChoice(page, "jenis_tukang", payload.namaItem, [payload.namaItem]);
+  await selectChoice(page, config, "jenis_tukang", payload.namaItem, [payload.namaItem]);
   await setInputByName(page, "jumlah_orang[]", people);
   await setInputByName(page, "jumlah_hari[]", days);
   await setInputByName(page, "tarif_harian[]", payload.hargaSatuan);
@@ -427,8 +442,8 @@ async function fillLabor(page: Page, payload: BelanjaPayload) {
   await setInputByName(page, "nama_penyedia[]", payload.vendor ?? "", false);
 }
 
-async function fillEquipment(page: Page, payload: BelanjaPayload) {
-  await selectChoice(page, "nama_alat", payload.namaItem, [payload.namaItem]);
+async function fillEquipment(page: Page, config: RunnerConfig, payload: BelanjaPayload) {
+  await selectChoice(page, config, "nama_alat", payload.namaItem, [payload.namaItem]);
   await setInputByName(page, "jumlah_alat[]", 1);
   const duration = await inputByName(page, "durasi[]", false);
   if (duration) await setField(duration, payload.satuan);
@@ -449,12 +464,12 @@ export async function openBelanjaForm(page: Page, config: RunnerConfig) {
 
   for (const candidate of candidates) {
     await gotoTarget(page, config, candidate);
-    if (await tryOpenBelanjaFormFromCurrentPage(page)) return;
+    if (await tryOpenBelanjaFormFromCurrentPage(page, config)) return;
   }
 
   for (const candidate of [config.targetDashboardPath, "/dashboard", "/"].filter((item, index, items) => item && items.indexOf(item) === index)) {
     await gotoTarget(page, config, candidate);
-    if (await clickBelanjaNavigationLink(page) && await tryOpenBelanjaFormFromCurrentPage(page)) return;
+    if (await clickBelanjaNavigationLink(page, config) && await tryOpenBelanjaFormFromCurrentPage(page, config)) return;
   }
 
   const summary = await pageSummary(page);
@@ -471,11 +486,11 @@ export async function openBelanjaForm(page: Page, config: RunnerConfig) {
 
 export async function fillBelanjaForm(page: Page, config: RunnerConfig, payload: BelanjaPayload) {
   await openBelanjaForm(page, config);
-  const section = await fillWorkflow(page, payload);
+  const section = await fillWorkflow(page, config, payload);
 
-  if (section === "material") await fillMaterial(page, payload);
-  else if (section === "labor") await fillLabor(page, payload);
-  else await fillEquipment(page, payload);
+  if (section === "material") await fillMaterial(page, config, payload);
+  else if (section === "labor") await fillLabor(page, config, payload);
+  else await fillEquipment(page, config, payload);
 
   return readBelanjaForm(page);
 }
@@ -552,17 +567,35 @@ export async function saveDryRunScreenshot(page: Page, config: RunnerConfig, job
   return filePath;
 }
 
-export async function submitBelanjaForm(page: Page) {
+async function closeSuccessDialog(page: Page) {
+  for (const label of ["OK", "Oke", "Ok", "Tutup", "Close", "Lanjut"]) {
+    const button = page.getByRole("button", { name: new RegExp(`^${label}$`, "i") }).first();
+    if (await button.waitFor({ state: "visible", timeout: 300 }).then(() => true).catch(() => false)) {
+      await button.click({ timeout: 1_000 }).catch(() => {});
+      return true;
+    }
+  }
+  return false;
+}
+
+export async function submitBelanjaForm(page: Page, config?: Pick<RunnerConfig, "submitSuccessWaitMs">) {
   const clicked = await clickFirstButton(page, targetFieldMap.submitButtonTexts);
   if (!clicked) throw new Error("Tombol submit/simpan Belanja tidak ditemukan.");
-  await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {});
   const successText = regexFrom(targetFieldMap.successTexts);
   const success = page.getByText(successText).first();
-  if (!await success.isVisible().catch(() => false)) {
+  const successVisible = await success.waitFor({
+    state: "visible",
+    timeout: config?.submitSuccessWaitMs ?? 4_000,
+  }).then(() => true).catch(async () => {
+    await page.waitForLoadState("domcontentloaded", { timeout: 1_500 }).catch(() => {});
+    return success.isVisible().catch(() => false);
+  });
+  if (!successVisible) {
     throw new Error("Bukti transaksi berhasil tidak ditemukan setelah submit.");
   }
   const body = await page.locator("body").innerText().catch(() => "");
   const reference = /(?:ref(?:erence)?|no(?:mor)?(?: transaksi)?|kode)\s*[:#-]?\s*([A-Z0-9./-]{4,})/i.exec(body)?.[1] ?? null;
+  await closeSuccessDialog(page);
   return { targetReference: reference };
 }
 

@@ -1060,6 +1060,34 @@ function withReadTimeout<T>(request: Promise<T>, timeoutMs: number, label: strin
   });
 }
 
+function readRetryDelay(attempt: number) {
+  return Math.min(500 * 2 ** attempt, 3_000);
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientReadError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /timeout|timed out|network|fetch failed|failed to fetch|load failed|abort|502|503|504|rate limit|too many requests/i.test(message);
+}
+
+async function withReadRetry<T>(loader: () => Promise<T>, label: string, retries = 2): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    try {
+      return await loader();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientReadError(error) || attempt >= retries) throw error;
+      console.warn(`${label} gagal sementara, retry ${attempt + 1}/${retries}.`, error);
+      await sleep(readRetryDelay(attempt));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`${label} gagal.`);
+}
+
 async function fetchDashboardBundleUncached(): Promise<ProjectBundle> {
   const client = supabase();
   if (!client) {
@@ -1239,7 +1267,10 @@ export function fetchProjectBundle(projectId?: string): Promise<ProjectBundle> {
   if (existingRequest) return existingRequest;
 
   const request = withReadTimeout(
-    fetchProjectBundleUncached(projectId),
+    withReadRetry(
+      () => fetchProjectBundleUncached(projectId),
+      projectId ? "Pemuatan project" : "Pemuatan seluruh data",
+    ),
     projectId ? 20_000 : 35_000,
     projectId ? "Pemuatan project" : "Pemuatan seluruh data",
   ).finally(() => {
@@ -1252,7 +1283,11 @@ export function fetchProjectBundle(projectId?: string): Promise<ProjectBundle> {
 /** Lightweight dashboard load: project metadata, exact totals, and note counters. */
 export function fetchDashboardBundle(): Promise<ProjectBundle> {
   if (inFlightDashboardBundle) return inFlightDashboardBundle;
-  inFlightDashboardBundle = withReadTimeout(fetchDashboardBundleUncached(), 15_000, "Pemuatan dashboard")
+  inFlightDashboardBundle = withReadTimeout(
+    withReadRetry(() => fetchDashboardBundleUncached(), "Pemuatan dashboard"),
+    15_000,
+    "Pemuatan dashboard",
+  )
     .finally(() => {
       inFlightDashboardBundle = null;
     });

@@ -139,6 +139,12 @@ test("runner memakai default polling cepat dan health-check periodik", () => {
     "BELANJA_TARGET_DISCONNECT_AFTER_FAILURES",
     "BELANJA_RUNNER_HEARTBEAT_MS",
     "BELANJA_RUNNER_STATUS_LOG_MS",
+    "BELANJA_API_REQUEST_TIMEOUT_MS",
+    "BELANJA_API_REQUEST_RETRIES",
+    "BELANJA_SUBMIT_SUCCESS_WAIT_MS",
+    "BELANJA_FAST_UI_TIMEOUT_MS",
+    "BELANJA_CHOICE_SEARCH_TIMEOUT_MS",
+    "BELANJA_CHOICE_SETTLE_MS",
   ];
   const previous = new Map(keys.map((key) => [key, process.env[key]]));
 
@@ -148,10 +154,16 @@ test("runner memakai default polling cepat dan health-check periodik", () => {
 
     assert.equal(config.targetCheckTimeoutMs, 3000);
     assert.equal(config.pollIntervalMs, 1000);
-    assert.equal(config.targetCheckIntervalMs, 30000);
-    assert.equal(config.targetDisconnectAfterFailures, 2);
+    assert.equal(config.targetCheckIntervalMs, 45000);
+    assert.equal(config.targetDisconnectAfterFailures, 8);
     assert.equal(config.heartbeatIntervalMs, 15000);
     assert.equal(config.statusLogIntervalMs, 15000);
+    assert.equal(config.apiRequestTimeoutMs, 15000);
+    assert.equal(config.apiRequestRetries, 4);
+    assert.equal(config.submitSuccessWaitMs, 2000);
+    assert.equal(config.fastUiTimeoutMs, 1200);
+    assert.equal(config.choiceSearchTimeoutMs, 2000);
+    assert.equal(config.choiceSettleMs, 50);
   } finally {
     for (const [key, value] of previous) {
       if (value == null) delete process.env[key];

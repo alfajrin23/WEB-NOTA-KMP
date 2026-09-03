@@ -23,6 +23,12 @@ export type RunnerConfig = {
   targetDisconnectAfterFailures: number;
   heartbeatIntervalMs: number;
   statusLogIntervalMs: number;
+  apiRequestTimeoutMs: number;
+  apiRequestRetries: number;
+  submitSuccessWaitMs: number;
+  fastUiTimeoutMs: number;
+  choiceSearchTimeoutMs: number;
+  choiceSettleMs: number;
   rootDir: string;
   authStatePath: string;
   artifactsDir: string;
@@ -89,10 +95,16 @@ export function getRunnerConfig(): RunnerConfig {
     headed: booleanEnv("BELANJA_RUNNER_HEADED", true),
     fieldMapVerified: booleanEnv("BELANJA_FIELD_MAP_VERIFIED", false),
     pollIntervalMs: numberEnv("BELANJA_RUNNER_POLL_MS", 1000),
-    targetCheckIntervalMs: numberEnv("BELANJA_TARGET_CHECK_INTERVAL_MS", 30000),
-    targetDisconnectAfterFailures: integerEnv("BELANJA_TARGET_DISCONNECT_AFTER_FAILURES", 2),
+    targetCheckIntervalMs: numberEnv("BELANJA_TARGET_CHECK_INTERVAL_MS", 45000),
+    targetDisconnectAfterFailures: integerEnv("BELANJA_TARGET_DISCONNECT_AFTER_FAILURES", 8),
     heartbeatIntervalMs: numberEnv("BELANJA_RUNNER_HEARTBEAT_MS", 15000),
     statusLogIntervalMs: numberEnv("BELANJA_RUNNER_STATUS_LOG_MS", 15000),
+    apiRequestTimeoutMs: numberEnv("BELANJA_API_REQUEST_TIMEOUT_MS", 15000),
+    apiRequestRetries: integerEnv("BELANJA_API_REQUEST_RETRIES", 4),
+    submitSuccessWaitMs: numberEnv("BELANJA_SUBMIT_SUCCESS_WAIT_MS", 2000),
+    fastUiTimeoutMs: numberEnv("BELANJA_FAST_UI_TIMEOUT_MS", 1200),
+    choiceSearchTimeoutMs: numberEnv("BELANJA_CHOICE_SEARCH_TIMEOUT_MS", 2000),
+    choiceSettleMs: numberEnv("BELANJA_CHOICE_SETTLE_MS", 50),
     rootDir,
     artifactsDir,
     authStatePath: path.join(authDir, "belanja.json"),

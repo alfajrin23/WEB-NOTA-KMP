@@ -18,10 +18,16 @@ TARGET_DASHBOARD_PATH=/home
 TARGET_BELANJA_URL_PATH=/belanja
 TARGET_BELANJA_CREATE_URL_PATH=/belanja/create
 BELANJA_RUNNER_POLL_MS=1000
-BELANJA_TARGET_CHECK_INTERVAL_MS=30000
-BELANJA_TARGET_DISCONNECT_AFTER_FAILURES=2
+BELANJA_TARGET_CHECK_INTERVAL_MS=45000
+BELANJA_TARGET_DISCONNECT_AFTER_FAILURES=8
 BELANJA_RUNNER_HEARTBEAT_MS=15000
 BELANJA_RUNNER_STATUS_LOG_MS=15000
+BELANJA_API_REQUEST_TIMEOUT_MS=15000
+BELANJA_API_REQUEST_RETRIES=4
+BELANJA_SUBMIT_SUCCESS_WAIT_MS=2000
+BELANJA_FAST_UI_TIMEOUT_MS=1200
+BELANJA_CHOICE_SEARCH_TIMEOUT_MS=2000
+BELANJA_CHOICE_SETTLE_MS=50
 ```
 
 `BELANJA_RUNNER_TOKEN` dan `NOTA_KMP_BASE_URL` masih dibaca sebagai alias lama untuk transisi, tetapi runner baru sebaiknya memakai `RUNNER_TOKEN` dan `WEB_NOTA_API_URL`.
@@ -46,7 +52,9 @@ Output `targetCheck` akan menampilkan URL yang dicek, HTTP status jika server me
 6. Jika nama user/role di Chrome bukan akun yang diisi di `.env.belanja.local`, hapus `automation/belanja-runner/.auth/belanja.json` atau pastikan `BELANJA_REUSE_AUTH_STATE=false`.
 7. Setiap PC memakai token sendiri dari `Settings -> Playwright Runners`.
 
-Runner tidak lagi menjalankan health-check sebelum setiap item. Setelah target pernah reachable, runner mengecek ulang target secara periodik lewat `BELANJA_TARGET_CHECK_INTERVAL_MS` dan baru menampilkan `disconnected` setelah `BELANJA_TARGET_DISCONNECT_AFTER_FAILURES` kegagalan beruntun. Ini mengurangi putus-nyambung singkat yang sebelumnya memotong waktu pengiriman item.
+Runner tidak lagi menjalankan health-check sebelum setiap item. Setelah target pernah reachable, runner mengecek ulang target secara periodik lewat `BELANJA_TARGET_CHECK_INTERVAL_MS` dan baru menampilkan `disconnected` setelah `BELANJA_TARGET_DISCONNECT_AFTER_FAILURES` kegagalan beruntun. Default sekarang memberi toleransi sekitar 6 menit untuk putus sesaat, dan request runner ke WEB NOTA otomatis retry lewat `BELANJA_API_REQUEST_RETRIES`. Ini mengurangi putus-nyambung singkat yang sebelumnya memotong waktu pengiriman item.
+
+`BELANJA_SUBMIT_SUCCESS_WAIT_MS` mengatur batas tunggu teks sukses setelah klik simpan. Runner tidak lagi menunggu `networkidle` panjang; begitu teks sukses terlihat, runner langsung menutup modal OK/Oke jika ada dan lanjut ke item berikutnya. Untuk mode cepat, `BELANJA_FAST_UI_TIMEOUT_MS`, `BELANJA_CHOICE_SEARCH_TIMEOUT_MS`, dan `BELANJA_CHOICE_SETTLE_MS` memang dibuat pendek agar proses input sampai modal sukses terasa responsif.
 
 ## Membuat atau revoke runner
 

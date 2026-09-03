@@ -350,7 +350,7 @@ export function useKdkmpStore() {
   }, [generatedNotas]);
 
   const refresh = useCallback(async (options: { background?: boolean } = {}) => {
-    setLoading(true);
+    if (!options.background) setLoading(true);
     if (!options.background) setSyncError(null);
     try {
       const { projectId, dashboardOnly } = currentBundleTarget();
@@ -368,8 +368,25 @@ export function useKdkmpStore() {
       setSyncError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Gagal memuat data Supabase.";
-      setSyncError(message);
-      toast.error(message);
+      const { projectId, dashboardOnly } = currentBundleTarget();
+      const cached = readCachedProjectBundleOrNull(projectId, dashboardOnly);
+      if (cached) {
+        const cachedData = applyBundle(cached);
+        setProjects(cachedData.projects);
+        setGeneratedNotas(cachedData.generatedNotas);
+        generatedNotasRef.current = cachedData.generatedNotas;
+        setKwitansiEdits(cachedData.kwitansiEdits);
+        setCustomNotes(cachedData.customNotes);
+        setHistory(cachedData.history);
+        setDashboardProjectStats(cachedData.dashboardProjectStats);
+        setDashboardNotaStats(cachedData.dashboardNotaStats);
+        setDashboardSummaryOnly(cachedData.dashboardSummaryOnly);
+        setSyncError(`${message} Data cache terakhir tetap ditampilkan.`);
+        if (!options.background) toast.warning("Supabase belum merespons. Data cache terakhir ditampilkan.");
+      } else {
+        setSyncError(message);
+        if (!options.background) toast.error(message);
+      }
     } finally {
       setLoading(false);
       setHydrated(true);
