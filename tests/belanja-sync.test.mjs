@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
 
 import {
@@ -16,7 +19,7 @@ import {
   classifyBelanjaAutomationError,
   isPlaywrightTargetClosedError,
 } from "../src/lib/belanja-sync/automation-errors.ts";
-import { getRunnerConfig } from "../automation/belanja-runner/config.ts";
+import { getRunnerConfig, loadLocalEnv } from "../automation/belanja-runner/config.ts";
 import { resolveEffectiveDryRun } from "../automation/belanja-runner/mode.ts";
 
 function makeProject() {
@@ -175,5 +178,38 @@ test("runner memakai default polling cepat dan health-check periodik", () => {
       if (value == null) delete process.env[key];
       else process.env[key] = value;
     }
+  }
+});
+
+test("runner memuat env lokal dari folder induk walau cwd ada di subfolder", () => {
+  const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "belanja-env-"));
+  const nestedDir = path.join(tempRoot, "automation", "belanja-runner");
+  fs.mkdirSync(nestedDir, { recursive: true });
+  fs.writeFileSync(path.join(tempRoot, ".env.belanja.local"), [
+    "BELANJA_FIELD_MAP_VERIFIED=true",
+    "BELANJA_DRY_RUN=false",
+  ].join("\n"));
+
+  const previous = {
+    fieldMap: process.env.BELANJA_FIELD_MAP_VERIFIED,
+    dryRun: process.env.BELANJA_DRY_RUN,
+  };
+
+  try {
+    delete process.env.BELANJA_FIELD_MAP_VERIFIED;
+    delete process.env.BELANJA_DRY_RUN;
+
+    loadLocalEnv(nestedDir);
+
+    assert.equal(process.env.BELANJA_FIELD_MAP_VERIFIED, "true");
+    assert.equal(process.env.BELANJA_DRY_RUN, "false");
+  } finally {
+    if (previous.fieldMap == null) delete process.env.BELANJA_FIELD_MAP_VERIFIED;
+    else process.env.BELANJA_FIELD_MAP_VERIFIED = previous.fieldMap;
+
+    if (previous.dryRun == null) delete process.env.BELANJA_DRY_RUN;
+    else process.env.BELANJA_DRY_RUN = previous.dryRun;
+
+    fs.rmSync(tempRoot, { recursive: true, force: true });
   }
 });

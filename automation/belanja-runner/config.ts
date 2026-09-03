@@ -50,8 +50,18 @@ function parseEnvFile(filePath: string) {
 }
 
 export function loadLocalEnv(rootDir = process.cwd()) {
-  for (const fileName of [".env.belanja.local", ".env.belanja"]) {
-    parseEnvFile(path.join(rootDir, fileName));
+  const visited = new Set<string>();
+  let currentDir = path.resolve(rootDir);
+
+  while (!visited.has(currentDir)) {
+    visited.add(currentDir);
+    for (const fileName of [".env.belanja.local", ".env.belanja"]) {
+      parseEnvFile(path.join(currentDir, fileName));
+    }
+
+    const parentDir = path.dirname(currentDir);
+    if (parentDir === currentDir) break;
+    currentDir = parentDir;
   }
 }
 
