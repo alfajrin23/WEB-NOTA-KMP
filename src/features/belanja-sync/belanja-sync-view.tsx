@@ -10,19 +10,16 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { MotionPage } from "@/components/ui/motion-page";
 import { Progress } from "@/components/ui/progress";
+import { fetchBelanjaSyncOverview, readCachedBelanjaSyncOverview, type BelanjaSyncOverviewPayload } from "@/lib/belanja-sync/client-overview";
+import { buildDestinationKdkmp, formatKdkmpIdentity, SOURCE_KDKMP } from "@/lib/belanja-sync/kdkmp";
 import { buildBelanjaPayload, summarizeBelanjaPayloads, validateBelanjaPayload } from "@/lib/belanja-sync/payload";
-import type { BelanjaProjectSyncState, BelanjaRunnerHeartbeat, BelanjaSyncItem, BelanjaSyncJob, BelanjaSyncOverviewProject } from "@/lib/belanja-sync/types";
+import { buildBelanjaTransactionPlan, DEFAULT_BELANJA_BASE_TRANSACTION_COUNT, summarizeBelanjaTransactionPlan } from "@/lib/belanja-sync/transaction-plan";
+import type { BelanjaProjectSyncState, BelanjaSyncItem, BelanjaSyncJob, BelanjaSyncOverviewProject } from "@/lib/belanja-sync/types";
+import { fetchProjectBundle } from "@/lib/supabase/project-data";
 import { cn } from "@/lib/utils";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
 import type { Project } from "@/types/domain";
 import { formatDateIndonesia, formatProjectWilayah, formatDateTimeIndonesia, formatRupiah } from "@/utils/format";
-
-type OverviewPayload = {
-  schemaReady: boolean;
-  runner: BelanjaRunnerHeartbeat | null;
-  projects: BelanjaSyncOverviewProject[];
-  errorMessage?: string;
-};
 
 type ModalRowStatus = "not_sent" | "pending" | "processing" | "success" | "failed" | "skipped" | "needs_review" | "dry_run";
 
@@ -76,8 +73,9 @@ function latestJobProgress(job: BelanjaSyncJob | null) {
 }
 
 export function BelanjaSyncView() {
-  const { projects } = useKdkmpStore();
-  const [overview, setOverview] = useState<OverviewPayload | null>(null);
+  const { projects, loading: projectsLoading, syncError: projectSyncError, dashboardSummaryOnly } = useKdkmpStore();
+  const [overview, setOverview] = useState<BelanjaSyncOverviewPayload | null>(null);
+  const [overviewError, setOverviewError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [modalProject, setModalProject] = useState<Project | null>(null);
@@ -88,27 +86,49 @@ export function BelanjaSyncView() {
   const [modalDryRun, setModalDryRun] = useState(true);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
+  const refresh = useCallback(async (options: { background?: boolean; force?: boolean } = {}) => {
+    if (!options.background) setLoading(true);
     try {
-      const response = await fetch("/api/belanja-sync/overview", { cache: "no-store" });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? "Gagal memuat overview Belanja Sync.");
-      setOverview(payload as OverviewPayload);
+      const payload = await fetchBelanjaSyncOverview({ force: options.force });
+      setOverview(payload);
+      setOverviewError(payload.schemaReady ? null : payload.errorMessage ?? "Belanja Sync belum siap.");
     } catch (error) {
-      setOverview({
-        schemaReady: false,
-        runner: null,
-        projects: [],
-        errorMessage: error instanceof Error ? error.message : "Gagal memuat overview Belanja Sync.",
-      });
+      const cached = readCachedBelanjaSyncOverview();
+      const message = error instanceof Error ? error.message : "Gagal memuat overview Belanja Sync.";
+      if (cached) {
+        setOverview(cached);
+      } else {
+        setOverview((current) => current ?? {
+          schemaReady: false,
+          runner: null,
+          projects: [],
+          errorMessage: message,
+        });
+      }
+      setOverviewError(message);
+      if (!options.background) {
+        toast.warning("Status Belanja Sync belum merespons. Data terakhir tetap ditampilkan.");
+      }
     } finally {
-      setLoading(false);
+      if (!options.background) setLoading(false);
+      else setLoading(false);
     }
   }, []);
 
+  const hydrateProjectForModal = useCallback(async (project: Project) => {
+    if (!dashboardSummaryOnly && project.items.length > 0) return project;
+    const bundle = await fetchProjectBundle(project.id);
+    const hydratedProject = bundle.projects.find((entry) => entry.id === project.id);
+    if (!hydratedProject || hydratedProject.items.length === 0) {
+      throw new Error("Detail Resume project belum berhasil dimuat dari Supabase.");
+    }
+    return hydratedProject;
+  }, [dashboardSummaryOnly]);
+
   useEffect(() => {
-    void refresh();
+    const cached = readCachedBelanjaSyncOverview();
+    if (cached) setOverview(cached);
+    void refresh({ background: Boolean(cached) });
   }, [refresh]);
 
   const loadModalState = useCallback(async (project: Project, initializeSelection = false) => {
@@ -144,8 +164,18 @@ export function BelanjaSyncView() {
     setModalQuery("");
     setModalDryRun(true);
     setSelectedItemIds(new Set());
-    void loadModalState(project, true);
-  }, [loadModalState]);
+    void (async () => {
+      setModalLoading(true);
+      try {
+        const hydratedProject = await hydrateProjectForModal(project);
+        setModalProject(hydratedProject);
+        await loadModalState(hydratedProject, true);
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Gagal memuat detail Resume project.");
+        setModalLoading(false);
+      }
+    })();
+  }, [hydrateProjectForModal, loadModalState]);
 
   const closeSendModal = useCallback(() => {
     setModalProject(null);
@@ -155,7 +185,7 @@ export function BelanjaSyncView() {
   }, []);
 
   useEffect(() => {
-    if (!modalProject) return;
+    if (!modalProject || modalProject.items.length === 0) return;
     const interval = window.setInterval(() => void loadModalState(modalProject, false), 3_000);
     return () => window.clearInterval(interval);
   }, [loadModalState, modalProject]);
@@ -231,6 +261,23 @@ export function BelanjaSyncView() {
     () => summarizeBelanjaPayloads(selectedModalRows.map((row) => row.payload)),
     [selectedModalRows],
   );
+  const modalTransactionPlan = useMemo(() => {
+    if (!modalProject) return { plan: null, summary: null, error: null as string | null };
+    try {
+      const plan = buildBelanjaTransactionPlan(modalProject, selectedModalRows.map((row) => row.item));
+      return { plan, summary: summarizeBelanjaTransactionPlan(plan), error: null as string | null };
+    } catch (error) {
+      return { plan: null, summary: null, error: error instanceof Error ? error.message : "Rencana transaksi tidak valid." };
+    }
+  }, [modalProject, selectedModalRows]);
+  const modalDestinationLabel = useMemo(() => {
+    if (!modalProject) return "-";
+    try {
+      return formatKdkmpIdentity(buildDestinationKdkmp(modalProject));
+    } catch {
+      return `${modalProject.villageName} / ${modalProject.districtName} / ${modalProject.regencyName}`;
+    }
+  }, [modalProject]);
   const modalLatestJob = modalState?.jobs[0] ?? null;
   const modalProgress = latestJobProgress(modalLatestJob);
   const processingRow = modalRows.find((row) => row.status === "processing");
@@ -268,10 +315,18 @@ export function BelanjaSyncView() {
       toast.error(`${invalidRows.length} item belum valid untuk dikirim.`);
       return;
     }
+    if (modalTransactionPlan.error || !modalTransactionPlan.summary) {
+      toast.error(modalTransactionPlan.error ?? "Rencana transaksi tidak valid.");
+      return;
+    }
+    if (modalTransactionPlan.summary.transactionCount !== DEFAULT_BELANJA_BASE_TRANSACTION_COUNT) {
+      toast.error(`Resume terpilih membentuk ${modalTransactionPlan.summary.transactionCount} transaksi, expected ${DEFAULT_BELANJA_BASE_TRANSACTION_COUNT}.`);
+      return;
+    }
     const confirmed = window.confirm(
       modalDryRun
-        ? `Buat DRY RUN untuk ${selectedItemIds.size} item dari ${formatProjectWilayah(modalProject)}? Data hanya divalidasi, belum tersimpan ke web target.`
-        : `KIRIM LIVE ${selectedItemIds.size} item dari ${formatProjectWilayah(modalProject)} ke Web Belanja? Data akan disubmit ke web target.`,
+        ? `Buat DRY RUN copy ${DEFAULT_BELANJA_BASE_TRANSACTION_COUNT} transaksi template Maleber ke ${modalDestinationLabel}? Tidak ada copy atau edit live.`
+        : `${DEFAULT_BELANJA_BASE_TRANSACTION_COUNT} transaksi template Maleber akan disalin ke:\n\n${modalDestinationLabel}\n\nSetelah disalin, transaksi akan disesuaikan menggunakan data Resume tujuan. Lanjutkan?`,
     );
     if (!confirmed) return;
 
@@ -285,6 +340,8 @@ export function BelanjaSyncView() {
           itemIds: [...selectedItemIds],
           dryRun: modalDryRun,
           forceResend: false,
+          operationType: "copy_reconcile_v1",
+          expectedTransactionCount: DEFAULT_BELANJA_BASE_TRANSACTION_COUNT,
         }),
       });
       const result = await response.json();
@@ -292,7 +349,7 @@ export function BelanjaSyncView() {
       setModalState(result.state as BelanjaProjectSyncState);
       setSelectedItemIds(new Set());
       toast.success(result.message ?? "Job masuk antrean Belanja Sync.");
-      await refresh();
+      await refresh({ force: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Gagal membuat job Belanja Sync.");
     } finally {
@@ -312,7 +369,7 @@ export function BelanjaSyncView() {
       setModalState(result.state as BelanjaProjectSyncState);
       setSelectedItemIds(new Set());
       toast.success("Status Belanja Sync direset.");
-      await refresh();
+      await refresh({ force: true });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Gagal reset status Belanja Sync.");
     } finally {
@@ -324,6 +381,7 @@ export function BelanjaSyncView() {
     if (!modalLatestJob) return "Pilih item Resume lalu buat job pengiriman.";
     if (!modalState?.runner?.online) return "Pending: runner lokal belum aktif atau heartbeat belum masuk ke Vercel.";
     if (modalState.runner.targetStatus !== "connected") return "Pending: runner hidup, tetapi website target/VPN belum connected.";
+    if (modalLatestJob.stageMessage || modalLatestJob.progress?.message) return modalLatestJob.stageMessage ?? modalLatestJob.progress?.message ?? "";
     if (processingRow) return `Sedang mengirim: ${processingRow.payload.namaItem}`;
     if (nextPendingRow) return `Menunggu runner mengambil item berikutnya: ${nextPendingRow.payload.namaItem}`;
     if (modalLatestJob.failedItems > 0) return "Selesai dengan item gagal. Lihat detail error di tabel.";
@@ -338,7 +396,7 @@ export function BelanjaSyncView() {
             <h2 className="text-2xl font-bold tracking-normal">Belanja Sync</h2>
             <p className="text-sm text-slate-500">Queue dan status runner lokal untuk pengiriman Resume ke Web Belanja.</p>
           </div>
-          <Button variant="outline" onClick={refresh} disabled={loading}>
+          <Button variant="outline" onClick={() => void refresh({ force: true })} disabled={loading}>
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
             Refresh
           </Button>
@@ -363,7 +421,22 @@ export function BelanjaSyncView() {
           </CardContent>
         </Card>
 
-        {!overview?.schemaReady ? (
+        {projectSyncError || overviewError ? (
+          <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30">
+            <CardContent className="flex flex-col gap-3 p-4 text-sm text-amber-900 dark:text-amber-100 md:flex-row md:items-center md:justify-between">
+              <div className="flex gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>Data terakhir tetap ditampilkan. Sinkronisasi terbaru gagal: {projectSyncError ?? overviewError}</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => void refresh({ force: true })} disabled={loading}>
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                Refresh
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {!overview?.schemaReady && !overviewError ? (
           <Card className="border-amber-200 dark:border-amber-900">
             <CardContent className="p-5 text-sm text-amber-800 dark:text-amber-100">
               {overview?.errorMessage ?? "Migration Belanja Sync belum dijalankan atau SUPABASE_SERVICE_ROLE_KEY belum tersedia di server."}
@@ -443,7 +516,13 @@ export function BelanjaSyncView() {
                       </td>
                     </tr>
                   ))}
-                  {rows.length === 0 ? (
+                  {projectsLoading && projects.length === 0 ? (
+                    <tr>
+                      <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={7}>
+                        Memuat daftar desa dari Supabase...
+                      </td>
+                    </tr>
+                  ) : rows.length === 0 ? (
                     <tr>
                       <td className="px-4 py-8 text-center text-sm text-slate-500" colSpan={7}>
                         Tidak ada desa yang cocok dengan pencarian.
@@ -471,12 +550,26 @@ export function BelanjaSyncView() {
               </div>
 
               <div className="space-y-4 overflow-auto p-4">
-                <div className="grid gap-3 md:grid-cols-5">
+                <div className="grid gap-3 md:grid-cols-6">
                   <Metric label="Total Resume" value={modalRows.length.toString()} />
-                  <Metric label="Terpilih" value={`${selectedItemIds.size} item`} />
+                  <Metric label="Terpilih" value={`${selectedItemIds.size} baris`} />
                   <Metric label="Nilai Terpilih" value={formatRupiah(selectedSummary.totalAmount)} />
+                  <Metric label="Transaksi" value={(modalTransactionPlan.summary?.transactionCount ?? DEFAULT_BELANJA_BASE_TRANSACTION_COUNT).toString()} tone={modalTransactionPlan.summary?.transactionCount === DEFAULT_BELANJA_BASE_TRANSACTION_COUNT ? "ok" : "warn"} />
                   <Metric label="Runner" value={modalState?.runner?.online ? "Online" : "Offline"} tone={modalState?.runner?.online ? "ok" : "warn"} />
                   <Metric label="Target" value={modalState?.runner?.targetStatus ?? "unknown"} tone={modalState?.runner?.targetStatus === "connected" ? "ok" : "warn"} />
+                </div>
+
+                <div className="grid gap-3 md:grid-cols-2">
+                  <div className="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-800">
+                    <p className="text-xs font-semibold text-slate-500">Tujuan</p>
+                    <p className="mt-1 font-semibold">{modalDestinationLabel}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-800">
+                    <p className="text-xs font-semibold text-slate-500">Template</p>
+                    <p className="mt-1 font-semibold">
+                      {SOURCE_KDKMP.village} / {SOURCE_KDKMP.district} / {SOURCE_KDKMP.regency}
+                    </p>
+                  </div>
                 </div>
 
                 {!modalDryRun && modalState?.runner?.dryRun !== false ? (
@@ -492,14 +585,14 @@ export function BelanjaSyncView() {
                       <p className="font-semibold">{modalStatusMessage}</p>
                       {modalLatestJob ? (
                         <p className="text-xs text-slate-500">
-                          {modalLatestJob.successItems} sukses, {modalLatestJob.failedItems} gagal, {modalLatestJob.skippedItems} skipped dari {modalLatestJob.totalItems} item
+                          {modalLatestJob.successItems} sukses, {modalLatestJob.failedItems} gagal, {modalLatestJob.skippedItems} skipped dari {modalLatestJob.totalItems} transaksi
                         </p>
                       ) : (
                         <p className="text-xs text-slate-500">Belum ada job aktif untuk modal ini.</p>
                       )}
                     </div>
                     <Badge className={modalDryRun ? "bg-cyan-50 text-cyan-700" : "bg-amber-50 text-amber-700"}>
-                      {modalDryRun ? "DRY RUN" : "LIVE"}
+                      {modalLatestJob?.stage ?? (modalDryRun ? "DRY RUN" : "LIVE")}
                     </Badge>
                   </div>
                   <Progress value={modalProgress} />
@@ -528,7 +621,7 @@ export function BelanjaSyncView() {
                     </label>
                     <Button onClick={createModalJob} disabled={modalSubmitting || modalLoading || selectedItemIds.size === 0}>
                       {modalSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                      {modalDryRun ? "Buat Dry Run" : "Kirim LIVE ke Web"}
+                      {modalDryRun ? "Buat Dry Run 43 Transaksi" : "Kirim LIVE 43 Transaksi"}
                     </Button>
                   </div>
                 </div>

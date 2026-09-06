@@ -3,25 +3,41 @@ import { getStageLabel } from "../../constants/stages";
 import type { Project, ProjectStatus, ResumeItem, StageCode, WilayahType } from "../../types/domain";
 import { formatProjectRecipientAddress, formatProjectRecipientName, normalizeWilayahType } from "../../utils/format";
 import { createSupabaseAdminClient } from "../supabase/admin";
+import { buildDestinationKdkmp, formatKdkmpIdentity, isMaleberSource, SOURCE_KDKMP } from "./kdkmp";
 import { buildBelanjaPayload, validateBelanjaPayload } from "./payload";
 import { isBelanjaItemActive, nextFailedBelanjaStatus, shouldQueueBelanjaItem } from "./status";
+import {
+  BELANJA_COPY_RECONCILE_OPERATION,
+  buildBelanjaIdempotencyKey,
+  buildBelanjaTransactionPlan,
+  DEFAULT_BELANJA_BASE_TRANSACTION_COUNT,
+  summarizeBelanjaTransactionPlan,
+} from "./transaction-plan";
 import type {
+  BelanjaCopyReconcileStage,
   BelanjaProjectSyncState,
   BelanjaRunnerHeartbeat,
+  BelanjaSyncJobProgress,
   BelanjaSyncItem,
   BelanjaSyncItemStatus,
   BelanjaSyncJob,
   BelanjaSyncJobStatus,
+  BelanjaSyncOperationType,
+  BelanjaSyncOverviewProject,
+  BelanjaSyncReport,
+  BelanjaTransactionPayload,
   ClaimedBelanjaSyncItem,
+  ClaimedBelanjaSyncJob,
   CreateBelanjaSyncJobInput,
 } from "./types";
 
 const PROJECT_SELECT = "id,nama_desa,jenis_wilayah,kecamatan,kabupaten,nama_project,wilayah,kodim,tanggal_laporan,project_date,metadata_json,status,created_at,updated_at";
 const RESUME_ITEM_SELECT = "id,project_id,tahap,stage_id,stage_name,category_code,category_name,item_no,kategori,tanggal,uraian,qty,satuan,harga_satuan,jumlah,jumlah_override,is_jumlah_manual,vendor,vendor_id,source_file,source_page,source_row,is_manual_added,is_included_in_resume_total,is_generated_to_note,note_id,category_total,stage_total,source_type,validation_status,notes,urutan,created_at,updated_at";
-const JOB_SELECT = "id,project_id,status,dry_run,total_items,success_items,failed_items,skipped_items,created_at,started_at,finished_at,error_message,metadata_json";
+const JOB_SELECT = "id,project_id,status,dry_run,total_items,success_items,failed_items,skipped_items,created_at,updated_at,started_at,finished_at,error_message,metadata_json";
 const ITEM_SELECT = "id,job_id,project_id,source_resume_item_id,status,attempt_count,max_attempts,target_reference,payload_json,error_message,started_at,finished_at,created_at,updated_at,metadata_json";
 const HEARTBEAT_SELECT = "runner_id,status,target_status,dry_run,last_seen_at,target_base_url,message,metadata_json";
-const RUNNER_ONLINE_WINDOW_MS = 90_000;
+const PROJECT_OVERVIEW_SELECT = "project_id,latest_job_created_at,latest_job_json,failed_details";
+const RUNNER_ONLINE_WINDOW_MS = 120_000;
 const STALE_PROCESSING_WINDOW_MS = 30 * 60_000;
 const ACTIVE_QUEUE_REASON = "Item sudah ada di antrean aktif, tidak dibuat duplikat.";
 
@@ -91,6 +107,7 @@ type BelanjaJobRow = {
   failed_items: number | null;
   skipped_items: number | null;
   created_at: string;
+  updated_at: string;
   started_at: string | null;
   finished_at: string | null;
   error_message: string | null;
@@ -126,6 +143,25 @@ type BelanjaHeartbeatRow = {
   metadata_json: JsonRecord | null;
 };
 
+type BelanjaOverviewFailedStatus = Extract<BelanjaSyncItemStatus, "failed" | "needs_review">;
+
+type BelanjaOverviewFailedDetailRow = {
+  sourceResumeItemId?: unknown;
+  itemName?: unknown;
+  tanggal?: unknown;
+  jumlah?: unknown;
+  status?: unknown;
+  errorMessage?: unknown;
+  updatedAt?: unknown;
+};
+
+type BelanjaProjectOverviewRow = {
+  project_id: string;
+  latest_job_created_at: string;
+  latest_job_json: BelanjaJobRow | null;
+  failed_details: BelanjaOverviewFailedDetailRow[] | null;
+};
+
 function clientOrThrow(): SupabaseClient {
   const client = createSupabaseAdminClient();
   if (!client) {
@@ -147,8 +183,54 @@ function asString(value: unknown, fallback = "") {
   return typeof value === "string" ? value : fallback;
 }
 
+function asOptionalString(value: unknown) {
+  return typeof value === "string" ? value : null;
+}
+
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+function asStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function asCopyStage(value: unknown): BelanjaCopyReconcileStage | null {
+  if (
+    value === "PRE_FLIGHT" ||
+    value === "SOURCE_OPENED" ||
+    value === "SOURCE_SELECTED" ||
+    value === "COPY_STARTED" ||
+    value === "COPY_CONFIRMED" ||
+    value === "DESTINATION_COPIED" ||
+    value === "RECONCILING" ||
+    value === "VERIFYING" ||
+    value === "COMPLETED" ||
+    value === "FAILED"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function operationTypeFromMetadata(metadata: JsonRecord): BelanjaSyncOperationType | string {
+  return asString(metadata.operation_type || metadata.operationType, "legacy_item_submit");
+}
+
+function isCopyReconcileMetadata(metadata: JsonRecord) {
+  return operationTypeFromMetadata(metadata) === BELANJA_COPY_RECONCILE_OPERATION;
+}
+
+function isCopyReconcileJobRow(row: BelanjaJobRow | null | undefined) {
+  return Boolean(row && isCopyReconcileMetadata(asRecord(row.metadata_json)));
+}
+
+function buildProgress(stage: BelanjaCopyReconcileStage, patch: Partial<BelanjaSyncJobProgress> = {}): BelanjaSyncJobProgress {
+  return {
+    stage,
+    ...patch,
+    updatedAt: patch.updatedAt ?? nowIso(),
+  };
 }
 
 function asStageCode(value: string | null | undefined): StageCode {
@@ -258,6 +340,8 @@ function rowToProject(row: ProjectRow, items: ResumeItem[]): Project {
 }
 
 function rowToJob(row: BelanjaJobRow): BelanjaSyncJob {
+  const metadata = asRecord(row.metadata_json);
+  const stage = asCopyStage(metadata.stage);
   return {
     id: row.id,
     projectId: row.project_id,
@@ -271,7 +355,16 @@ function rowToJob(row: BelanjaJobRow): BelanjaSyncJob {
     startedAt: row.started_at,
     finishedAt: row.finished_at,
     errorMessage: row.error_message,
-    metadataJson: row.metadata_json ?? {},
+    metadataJson: metadata,
+    operationType: operationTypeFromMetadata(metadata),
+    stage,
+    stageMessage: asOptionalString(metadata.stage_message || metadata.stageMessage),
+    progress: metadata.progress && typeof metadata.progress === "object" && !Array.isArray(metadata.progress)
+      ? metadata.progress as BelanjaSyncJobProgress
+      : null,
+    report: metadata.report && typeof metadata.report === "object" && !Array.isArray(metadata.report)
+      ? metadata.report as BelanjaSyncReport
+      : null,
   };
 }
 
@@ -295,6 +388,22 @@ function rowToItem(row: BelanjaItemRow): BelanjaSyncItem {
   };
 }
 
+function overviewFailedStatus(value: unknown): BelanjaOverviewFailedStatus {
+  return value === "needs_review" ? "needs_review" : "failed";
+}
+
+function rowToOverviewFailedDetail(row: BelanjaOverviewFailedDetailRow) {
+  return {
+    sourceResumeItemId: asString(row.sourceResumeItemId),
+    itemName: asString(row.itemName),
+    tanggal: asString(row.tanggal),
+    jumlah: toNumber(row.jumlah as number | string | null | undefined),
+    status: overviewFailedStatus(row.status),
+    errorMessage: asString(row.errorMessage, "Item gagal tanpa pesan error dari runner."),
+    updatedAt: asString(row.updatedAt, nowIso()),
+  };
+}
+
 function rowToHeartbeat(row: BelanjaHeartbeatRow | null | undefined): BelanjaRunnerHeartbeat | null {
   if (!row) return null;
   const lastSeen = Date.parse(row.last_seen_at);
@@ -307,6 +416,7 @@ function rowToHeartbeat(row: BelanjaHeartbeatRow | null | undefined): BelanjaRun
     online: Number.isFinite(lastSeen) && Date.now() - lastSeen <= RUNNER_ONLINE_WINDOW_MS,
     targetBaseUrl: row.target_base_url,
     message: row.message,
+    metadataJson: row.metadata_json ?? {},
   };
 }
 
@@ -322,13 +432,22 @@ function latestBySourceItemId(items: BelanjaSyncItem[]) {
   const latest: Record<string, BelanjaSyncItem> = {};
 
   for (const item of items) {
-    const current = latest[item.sourceResumeItemId];
+    const metadata = asRecord(item.metadataJson);
+    const payload = item.payload as unknown as JsonRecord;
+    const sourceIds = [
+      item.sourceResumeItemId,
+      ...asStringArray(metadata.source_resume_item_ids),
+      ...asStringArray(payload.sourceResumeItemIds),
+    ].filter(Boolean);
     const itemScore = score[item.status] ?? 0;
-    const currentScore = current ? score[current.status] ?? 0 : -1;
-    const itemTime = Date.parse(item.updatedAt || item.createdAt);
-    const currentTime = current ? Date.parse(current.updatedAt || current.createdAt) : -1;
-    if (!current || itemScore > currentScore || (itemScore === currentScore && itemTime > currentTime)) {
-      latest[item.sourceResumeItemId] = item;
+    for (const sourceId of [...new Set(sourceIds)]) {
+      const current = latest[sourceId];
+      const currentScore = current ? score[current.status] ?? 0 : -1;
+      const itemTime = Date.parse(item.updatedAt || item.createdAt);
+      const currentTime = current ? Date.parse(current.updatedAt || current.createdAt) : -1;
+      if (!current || itemScore > currentScore || (itemScore === currentScore && itemTime > currentTime)) {
+        latest[sourceId] = item;
+      }
     }
   }
 
@@ -442,9 +561,24 @@ async function updateJobRollup(client: SupabaseClient, jobId: string) {
   let status: BelanjaSyncJobStatus = job.status;
   let finishedAt = job.finished_at;
   if (job.status !== "cancelled") {
-    if (activeItems > 0) status = job.started_at || processingItems > 0 ? "processing" : "pending";
-    else status = failedItems > 0 ? "completed_with_errors" : "completed";
-    finishedAt = activeItems > 0 ? null : (job.finished_at ?? timestamp);
+    const metadata = asRecord(job.metadata_json);
+    const copyStage = asCopyStage(metadata.stage);
+    if (isCopyReconcileMetadata(metadata)) {
+      if (copyStage === "FAILED") {
+        status = "failed";
+        finishedAt = job.finished_at ?? timestamp;
+      } else if (copyStage !== "COMPLETED") {
+        status = job.started_at ? "processing" : "pending";
+        finishedAt = null;
+      } else {
+        status = failedItems > 0 ? "completed_with_errors" : "completed";
+        finishedAt = job.finished_at ?? timestamp;
+      }
+    } else {
+      if (activeItems > 0) status = job.started_at || processingItems > 0 ? "processing" : "pending";
+      else status = failedItems > 0 ? "completed_with_errors" : "completed";
+      finishedAt = activeItems > 0 ? null : (job.finished_at ?? timestamp);
+    }
   }
 
   const { data: updated, error: updateError } = await client
@@ -468,6 +602,7 @@ export async function getBelanjaProjectState(projectId: string): Promise<Belanja
   try {
     const client = clientOrThrow();
     await markStaleProcessingItems(client);
+    await markStaleCopyReconcileJobs(client);
     const [itemsResult, jobsResult, runner] = await Promise.all([
       client
         .from("belanja_sync_items")
@@ -487,13 +622,15 @@ export async function getBelanjaProjectState(projectId: string): Promise<Belanja
     if (jobsResult.error) throwDatabaseError(jobsResult.error, "Gagal memuat job Belanja Sync.");
 
     const items = ((itemsResult.data ?? []) as BelanjaItemRow[]).map(rowToItem);
+    const jobs = ((jobsResult.data ?? []) as BelanjaJobRow[]).map(rowToJob);
     return {
       projectId,
       schemaReady: true,
-      jobs: ((jobsResult.data ?? []) as BelanjaJobRow[]).map(rowToJob),
+      jobs,
       items,
       latestBySourceItemId: latestBySourceItemId(items),
       runner,
+      activeJob: jobs.find((job) => job.status === "pending" || job.status === "processing") ?? null,
     };
   } catch (error) {
     if (error instanceof Error && /SUPABASE_SERVICE_ROLE_KEY|migration|schema|belanja_sync_|belanja_runner_/i.test(error.message)) {
@@ -504,6 +641,7 @@ export async function getBelanjaProjectState(projectId: string): Promise<Belanja
         items: [],
         latestBySourceItemId: {},
         runner: null,
+        activeJob: null,
         errorMessage: error.message,
       };
     }
@@ -511,88 +649,56 @@ export async function getBelanjaProjectState(projectId: string): Promise<Belanja
   }
 }
 
+function overviewStatusFromJob(job: BelanjaSyncJob): BelanjaSyncOverviewProject["status"] {
+  if (job.status === "failed" || job.status === "completed_with_errors" || job.failedItems > 0) {
+    return "ada_error";
+  }
+  if (job.status === "pending" || job.status === "processing") {
+    return "sebagian";
+  }
+  const completedItems = job.successItems + job.skippedItems;
+  if (job.totalItems > 0 && completedItems >= job.totalItems) {
+    return "selesai";
+  }
+  if (completedItems > 0) {
+    return "sebagian";
+  }
+  return "belum_dikirim";
+}
+
 export async function getBelanjaSyncOverview() {
   try {
     const client = clientOrThrow();
     await markStaleProcessingItems(client);
-    const [itemsResult, runner] = await Promise.all([
+    await markStaleCopyReconcileJobs(client);
+    const [overviewResult, runner] = await Promise.all([
       client
-        .from("belanja_sync_items")
-        .select("project_id,status,source_resume_item_id,payload_json,error_message,updated_at,created_at")
-        .order("updated_at", { ascending: false }),
+        .from("belanja_sync_project_overview_v1")
+        .select(PROJECT_OVERVIEW_SELECT)
+        .order("latest_job_created_at", { ascending: false })
+        .limit(300),
       getLatestRunnerHeartbeat(client),
     ]);
-    if (itemsResult.error) throwDatabaseError(itemsResult.error, "Gagal memuat overview Belanja Sync.");
+    if (overviewResult.error) throwDatabaseError(overviewResult.error, "Gagal memuat overview job Belanja Sync.");
 
-    const grouped = new Map<string, BelanjaSyncItem[]>();
-    for (const row of (itemsResult.data ?? []) as Array<{
-      project_id: string;
-      status: BelanjaSyncItemStatus;
-      source_resume_item_id: string;
-      payload_json: JsonRecord | null;
-      error_message: string | null;
-      updated_at: string;
-      created_at: string;
-    }>) {
-      const list = grouped.get(row.project_id) ?? [];
-      list.push({
-        id: `${row.project_id}:${row.source_resume_item_id}:${row.updated_at}`,
-        jobId: "",
-        projectId: row.project_id,
-        sourceResumeItemId: row.source_resume_item_id,
-        status: row.status,
-        attemptCount: 0,
-        maxAttempts: 0,
-        payload: row.payload_json as BelanjaSyncItem["payload"] ?? {
-          sourceItemId: row.source_resume_item_id,
-          projectId: row.project_id,
-          tanggal: "",
-          namaItem: "",
-          qty: 0,
-          satuan: "",
-          hargaSatuan: 0,
-          jumlah: 0,
-        },
-        errorMessage: row.error_message,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-      });
-      grouped.set(row.project_id, list);
-    }
-
-    const projects = [...grouped.entries()].map(([projectId, rows]) => {
-      const latest = Object.values(latestBySourceItemId(rows));
-      const successItems = latest.filter((item) => item.status === "success").length;
-      const failedItems = latest.filter((item) => item.status === "failed" || item.status === "needs_review").length;
-      const pendingItems = latest.filter((item) => item.status === "pending" || item.status === "processing").length;
-      const failedDetails = latest
-        .filter((item): item is BelanjaSyncItem & { status: "failed" | "needs_review" } => item.status === "failed" || item.status === "needs_review")
-        .map((item) => ({
-          sourceResumeItemId: item.sourceResumeItemId,
-          itemName: item.payload?.namaItem ?? "",
-          tanggal: item.payload?.tanggal ?? "",
-          jumlah: item.payload?.jumlah ?? 0,
-          status: item.status,
-          errorMessage: item.errorMessage ?? "Item gagal tanpa pesan error dari runner.",
-          updatedAt: item.updatedAt,
-        }))
-        .slice(0, 5);
-      return {
-        projectId,
-        status: successItems === 0 && failedItems === 0 && pendingItems === 0
-          ? "belum_dikirim" as const
-          : failedItems > 0
-            ? "ada_error" as const
-            : pendingItems > 0 || successItems < latest.length
-              ? "sebagian" as const
-              : "selesai" as const,
-        totalItems: latest.length,
-        successItems,
-        failedItems,
-        pendingItems,
-        failedDetails,
-      };
-    });
+    const projects = ((overviewResult.data ?? []) as BelanjaProjectOverviewRow[])
+      .map((row): BelanjaSyncOverviewProject | null => {
+        if (!row.latest_job_json) return null;
+        const job = rowToJob(row.latest_job_json);
+        const failedDetails = (row.failed_details ?? []).map(rowToOverviewFailedDetail);
+        const pendingItems = Math.max(job.totalItems - job.successItems - job.failedItems - job.skippedItems, 0);
+        return {
+          projectId: job.projectId,
+          status: overviewStatusFromJob(job),
+          totalItems: job.totalItems,
+          successItems: job.successItems,
+          failedItems: job.failedItems,
+          pendingItems,
+          latestJob: job,
+          failedDetails,
+        };
+      })
+      .filter((project): project is BelanjaSyncOverviewProject => Boolean(project));
 
     return { schemaReady: true, runner, projects };
   } catch (error) {
@@ -603,7 +709,7 @@ export async function getBelanjaSyncOverview() {
   }
 }
 
-export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
+async function createLegacyBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
   const client = clientOrThrow();
   await markStaleProcessingItems(client);
   const uniqueItemIds = [...new Set(input.itemIds.filter(Boolean))];
@@ -739,6 +845,232 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
   };
 }
 
+function isActiveJobStatus(status: BelanjaSyncJobStatus) {
+  return status === "pending" || status === "processing";
+}
+
+function runnerFieldMapVerified(runner: BelanjaRunnerHeartbeat | null) {
+  const metadata = asRecord(runner?.metadataJson);
+  return metadata.field_map_verified === true
+    || metadata.fieldMapVerified === true
+    || metadata.belanja_field_map_verified === true;
+}
+
+function activeCopyJobError(job: BelanjaSyncJob, idempotencyKey: string) {
+  const metadata = asRecord(job.metadataJson);
+  if (metadata.idempotency_key === idempotencyKey) {
+    return `Job copy/reconcile yang sama masih aktif (${job.id}). Runner akan melanjutkan checkpoint job tersebut; tidak membuat copy baru.`;
+  }
+  return `Project ini masih punya job copy/reconcile aktif (${job.id}). Batalkan atau selesaikan job tersebut sebelum membuat job baru agar 43 transaksi tidak tercopy dua kali.`;
+}
+
+function isActiveJobIdempotencyViolation(error: { code?: string; message?: string } | null | undefined) {
+  return error?.code === "23505" && /belanja_sync_jobs_active_idempotency_idx/i.test(error.message ?? "");
+}
+
+export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
+  if (input.operationType === "legacy_item_submit") return createLegacyBelanjaSyncJob(input);
+
+  const client = clientOrThrow();
+  await markStaleProcessingItems(client);
+  await markStaleCopyReconcileJobs(client);
+  const uniqueItemIds = [...new Set(input.itemIds.filter(Boolean))];
+  if (!input.projectId) throw new Error("projectId wajib diisi.");
+  if (uniqueItemIds.length === 0) throw new Error("Pilih minimal satu item resume.");
+
+  const runner = await getLatestRunnerHeartbeat(client);
+  if (!runner?.online) throw new Error("Runner lokal belum online. Jalankan `npm run belanja:runner` pada PC yang tersambung VPN.");
+  if (runner.targetStatus !== "connected") throw new Error("Runner tidak dapat mengakses Web Belanja. Cek VPN, TARGET_BASE_URL, dan login runner.");
+
+  const project = await loadProjectWithItems(client, input.projectId, uniqueItemIds);
+  const foundItemIds = new Set(project.items.map((item) => item.id));
+  const missingItemIds = uniqueItemIds.filter((itemId) => !foundItemIds.has(itemId));
+  if (missingItemIds.length > 0) throw new Error(`${missingItemIds.length} item resume tidak ditemukan pada project ini.`);
+
+  const destination = buildDestinationKdkmp(project);
+  const destinationIsSource = isMaleberSource(destination);
+  if (destinationIsSource) {
+    throw new Error("KDKMP tujuan sama dengan source template Maleber. Copy ke Maleber sendiri diblokir agar template tidak berubah dan transaksi tidak duplikat.");
+  }
+  const expectedTransactionCount = input.expectedTransactionCount ?? DEFAULT_BELANJA_BASE_TRANSACTION_COUNT;
+  const plan = buildBelanjaTransactionPlan(project, project.items);
+  if (plan.transactionCount !== expectedTransactionCount) {
+    throw new Error(`Payload Resume belum membentuk ${expectedTransactionCount} transaksi target. Terdeteksi ${plan.transactionCount} transaksi; copy Maleber dibatalkan sebelum browser mengubah data.`);
+  }
+
+  const fieldMapVerifiedFromHistory = input.dryRun === false ? await hasVerifiedFieldMapInHistory(client) : false;
+  const fieldMapVerified = input.dryRun === false
+    ? fieldMapVerifiedFromHistory || runnerFieldMapVerified(runner)
+    : false;
+  if (input.dryRun === false && !fieldMapVerified) {
+    throw new Error("Mapping Web Belanja belum diverifikasi. Jalankan dry run sampai DRY_RUN_OK, atau set BELANJA_FIELD_MAP_VERIFIED=true hanya pada runner yang sudah dicek.");
+  }
+
+  const idempotencyKey = buildBelanjaIdempotencyKey({
+    projectId: input.projectId,
+    destination,
+    resumeHash: plan.resumeHash,
+    operationType: BELANJA_COPY_RECONCILE_OPERATION,
+  });
+
+  const { data: activeJobRows, error: activeJobErrorResult } = await client
+    .from("belanja_sync_jobs")
+    .select(JOB_SELECT)
+    .eq("project_id", input.projectId)
+    .in("status", ["pending", "processing"])
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (activeJobErrorResult) throwDatabaseError(activeJobErrorResult, "Gagal memeriksa job aktif Belanja Sync.");
+  const activeCopyJob = ((activeJobRows ?? []) as BelanjaJobRow[])
+    .map(rowToJob)
+    .find((job) => isCopyReconcileMetadata(asRecord(job.metadataJson)));
+  if (activeCopyJob) {
+    return {
+      job: activeCopyJob,
+      state: await getBelanjaProjectState(input.projectId),
+      message: activeCopyJobError(activeCopyJob, idempotencyKey),
+    };
+  }
+
+  const representativeSourceIds = plan.transactions.map((transaction) => transaction.sourceItemId);
+  const { data: activeItemRows, error: activeItemError } = await client
+    .from("belanja_sync_items")
+    .select(ITEM_SELECT)
+    .eq("project_id", input.projectId)
+    .in("source_resume_item_id", representativeSourceIds)
+    .in("status", ["pending", "processing", "needs_review"])
+    .order("created_at", { ascending: false });
+  if (activeItemError) throwDatabaseError(activeItemError, "Gagal memeriksa antrean aktif Belanja Sync.");
+  if ((activeItemRows ?? []).length > 0) {
+    throw new Error("Masih ada antrean Belanja Sync aktif pada item Resume project ini. Selesaikan atau batalkan antrean lama sebelum membuat copy/reconcile baru.");
+  }
+
+  const timestamp = nowIso();
+  const progress = buildProgress("PRE_FLIGHT", {
+    message: "Menyiapkan data resume dan validasi runner.",
+    current: 0,
+    total: expectedTransactionCount,
+  });
+  const report: BelanjaSyncReport = {
+    source: SOURCE_KDKMP,
+    destination,
+    expectedTransactions: expectedTransactionCount,
+    copiedTransactions: 0,
+    verifiedTransactions: 0,
+    materialsUpdated: 0,
+    honorariumUpdated: 0,
+    equipmentUpdated: 0,
+    errors: [],
+    status: "PRE_FLIGHT",
+  };
+
+  const { data: jobRow, error: jobError } = await client
+    .from("belanja_sync_jobs")
+    .insert({
+      project_id: input.projectId,
+      // Keep the job invisible to runners until all transaction items exist.
+      status: "processing",
+      dry_run: input.dryRun ?? true,
+      total_items: plan.transactionCount,
+      success_items: 0,
+      failed_items: 0,
+      skipped_items: 0,
+      finished_at: null,
+      metadata_json: {
+        operation_type: BELANJA_COPY_RECONCILE_OPERATION,
+        force_resend: input.forceResend ?? false,
+        created_from: "web",
+        source_snapshot_at: timestamp,
+        source_kdkmp: SOURCE_KDKMP,
+        destination_kdkmp: destination,
+        destination_is_source: destinationIsSource,
+        expected_transactions: expectedTransactionCount,
+        plan_summary: summarizeBelanjaTransactionPlan(plan),
+        resume_hash: plan.resumeHash,
+        idempotency_key: idempotencyKey,
+        stage: "PRE_FLIGHT",
+        stage_message: progress.message,
+        progress,
+        report,
+        field_map_verified: fieldMapVerified,
+        field_map_verified_source: fieldMapVerified
+          ? fieldMapVerifiedFromHistory
+            ? "project_history"
+            : "runner_heartbeat"
+          : "unverified",
+      },
+    })
+    .select(JOB_SELECT)
+    .single();
+  if (jobError) {
+    if (isActiveJobIdempotencyViolation(jobError)) {
+      const state = await getBelanjaProjectState(input.projectId);
+      const existing = state.jobs.find((job) => isActiveJobStatus(job.status) && asRecord(job.metadataJson).idempotency_key === idempotencyKey);
+      if (existing) return { job: existing, state, message: activeCopyJobError(existing, idempotencyKey) };
+    }
+    throwDatabaseError(jobError, "Gagal membuat Belanja Sync job.");
+  }
+
+  const job = jobRow as BelanjaJobRow;
+  const rowsWithJob = plan.transactions.map((transaction) => ({
+    job_id: job.id,
+    project_id: input.projectId,
+    source_resume_item_id: transaction.sourceItemId,
+    status: "pending" as const,
+    attempt_count: 0,
+    max_attempts: 1,
+    target_reference: null,
+    payload_json: transaction as unknown as JsonRecord,
+    error_message: null,
+    started_at: null,
+    finished_at: null,
+    metadata_json: {
+      operation_type: BELANJA_COPY_RECONCILE_OPERATION,
+      transaction_id: transaction.transactionId,
+      transaction_key: transaction.transactionKey,
+      transaction_kind: transaction.kind,
+      transaction_identity: transaction.transactionIdentity,
+      line_count: transaction.lineCount,
+      source_resume_item_ids: transaction.sourceResumeItemIds,
+      source_snapshot_at: timestamp,
+      field_map_verified: fieldMapVerified,
+    },
+  }));
+
+  for (const row of rowsWithJob) {
+    const { error: itemError } = await client.from("belanja_sync_items").insert(row);
+    if (!itemError) continue;
+
+    await client
+      .from("belanja_sync_jobs")
+      .update({
+        status: "failed",
+        error_message: itemError.message,
+        finished_at: nowIso(),
+        metadata_json: {
+          ...asRecord(job.metadata_json),
+          stage: "FAILED",
+          stage_message: "Gagal membuat daftar transaksi sync.",
+          report: {
+            ...report,
+            status: "FAILED",
+            errors: [itemError.message],
+          },
+        },
+      })
+      .eq("id", job.id);
+    throwDatabaseError(itemError, "Gagal membuat item transaksi Belanja Sync.");
+  }
+
+  const refreshedJob = await updateJobRollup(client, job.id);
+  const state = await getBelanjaProjectState(input.projectId);
+  return {
+    job: refreshedJob,
+    state,
+    message: `Job copy/reconcile dibuat: ${plan.transactionCount} transaksi dari template Maleber akan dikirim ke ${formatKdkmpIdentity(destination)}.`,
+  };
+}
+
 export async function getBelanjaSyncJob(jobId: string) {
   const client = clientOrThrow();
   const [jobResult, itemsResult] = await Promise.all([
@@ -791,6 +1123,7 @@ export async function retryFailedBelanjaSyncJob(jobId: string) {
   const job = await getJobRow(client, jobId);
   if (!job) throw new Error("Belanja Sync job tidak ditemukan.");
   if (job.status === "cancelled") throw new Error("Job yang sudah dibatalkan tidak bisa diretry.");
+  const timestamp = nowIso();
 
   const { data, error } = await client
     .from("belanja_sync_items")
@@ -800,7 +1133,48 @@ export async function retryFailedBelanjaSyncJob(jobId: string) {
   if (error) throwDatabaseError(error, "Gagal memuat item gagal.");
 
   const rows = (data ?? []) as BelanjaItemRow[];
-  if (rows.length === 0) return getBelanjaSyncJob(jobId);
+  if (rows.length === 0) {
+    const { data: activeRows, error: activeError } = await client
+      .from("belanja_sync_items")
+      .select("status")
+      .eq("job_id", jobId)
+      .in("status", ["pending", "processing"]);
+    if (activeError) throwDatabaseError(activeError, "Gagal memuat item aktif.");
+
+    const metadata = asRecord(job.metadata_json);
+    if ((activeRows ?? []).length > 0 && isCopyReconcileMetadata(metadata)) {
+      const retryStage: BelanjaCopyReconcileStage = "DESTINATION_COPIED";
+      const retryMessage = "Retry dipulihkan; melanjutkan rekonsiliasi tanpa copy ulang.";
+      const { error: resetError } = await client
+        .from("belanja_sync_jobs")
+        .update({
+          status: "pending",
+          started_at: null,
+          finished_at: null,
+          error_message: null,
+          metadata_json: {
+            ...metadata,
+            checkpoint_at: timestamp,
+            stage: retryStage,
+            stage_message: retryMessage,
+            progress: buildProgress(retryStage, {
+              ...asRecord(metadata.progress),
+              stage: retryStage,
+              message: retryMessage,
+            }),
+            report: {
+              ...asRecord(metadata.report),
+              status: retryStage,
+              errors: [],
+            },
+          },
+        })
+        .eq("id", jobId);
+      if (resetError) throwDatabaseError(resetError, "Gagal memulihkan status retry job.");
+      await updateJobRollup(client, jobId);
+    }
+    return getBelanjaSyncJob(jobId);
+  }
 
   const sourceIds = rows.map((row) => row.source_resume_item_id);
   const { data: successRows, error: successError } = await client
@@ -824,15 +1198,45 @@ export async function retryFailedBelanjaSyncJob(jobId: string) {
   if (skippedIds.length > 0) {
     const { error: skippedError } = await client
       .from("belanja_sync_items")
-      .update({ status: "skipped", error_message: "Item sudah SUCCESS pada job lain.", finished_at: nowIso() })
+      .update({ status: "skipped", error_message: "Item sudah SUCCESS pada job lain.", finished_at: timestamp })
       .in("id", skippedIds);
     if (skippedError) throwDatabaseError(skippedError, "Gagal skip item yang sudah berhasil.");
   }
 
-  await client
+  const metadata = asRecord(job.metadata_json);
+  const copyReconcileRetryStage: BelanjaCopyReconcileStage | null = isCopyReconcileMetadata(metadata)
+    ? "DESTINATION_COPIED"
+    : null;
+  const retryMessage = `Retry ${retryIds.length} item gagal; melanjutkan rekonsiliasi tanpa copy ulang.`;
+
+  const { error: retryJobError } = await client
     .from("belanja_sync_jobs")
-    .update({ status: retryIds.length > 0 ? "pending" : job.status, finished_at: retryIds.length > 0 ? null : job.finished_at })
+    .update({
+      status: retryIds.length > 0 ? "pending" : job.status,
+      started_at: retryIds.length > 0 ? null : job.started_at,
+      finished_at: retryIds.length > 0 ? null : job.finished_at,
+      error_message: retryIds.length > 0 ? null : job.error_message,
+      metadata_json: retryIds.length > 0 && copyReconcileRetryStage
+        ? {
+            ...metadata,
+            checkpoint_at: timestamp,
+            stage: copyReconcileRetryStage,
+            stage_message: retryMessage,
+            progress: buildProgress(copyReconcileRetryStage, {
+              ...asRecord(metadata.progress),
+              stage: copyReconcileRetryStage,
+              message: retryMessage,
+            }),
+            report: {
+              ...asRecord(metadata.report),
+              status: copyReconcileRetryStage,
+              errors: [],
+            },
+          }
+        : metadata,
+    })
     .eq("id", jobId);
+  if (retryJobError) throwDatabaseError(retryJobError, "Gagal menyimpan status retry job.");
   await updateJobRollup(client, jobId);
   return getBelanjaSyncJob(jobId);
 }
@@ -925,9 +1329,159 @@ async function markStaleProcessingItems(client: SupabaseClient) {
   await Promise.all(jobIds.map((jobId) => updateJobRollup(client, jobId)));
 }
 
+async function markStaleCopyReconcileJobs(client: SupabaseClient) {
+  const staleBefore = new Date(Date.now() - STALE_PROCESSING_WINDOW_MS).toISOString();
+  const { data, error } = await client
+    .from("belanja_sync_jobs")
+    .select(JOB_SELECT)
+    .eq("status", "processing")
+    .lt("updated_at", staleBefore)
+    .order("updated_at", { ascending: true })
+    .limit(25);
+  if (error) throwDatabaseError(error, "Gagal memeriksa stale job copy/reconcile.");
+
+  for (const row of (data ?? []) as BelanjaJobRow[]) {
+    if (!isCopyReconcileJobRow(row)) continue;
+    const metadata = asRecord(row.metadata_json);
+    const stage = asCopyStage(metadata.stage) ?? "PRE_FLIGHT";
+    await client
+      .from("belanja_sync_jobs")
+      .update({
+        status: "pending",
+        finished_at: null,
+        error_message: null,
+        metadata_json: {
+          ...metadata,
+          stage,
+          stage_message: "Runner berhenti saat job berjalan. Job akan dilanjutkan dari checkpoint terakhir.",
+          progress: buildProgress(stage, {
+            ...asRecord(metadata.progress),
+            message: "Runner berhenti saat job berjalan. Job akan dilanjutkan dari checkpoint terakhir.",
+          }),
+          stale_requeued_at: nowIso(),
+        },
+      })
+      .eq("id", row.id)
+      .eq("status", "processing");
+  }
+}
+
+function readKdkmpMetadata(value: unknown, fallback: { province?: string; regency: string; district: string; village: string }) {
+  const metadata = asRecord(value);
+  return {
+    province: asString(metadata.province, fallback.province ?? SOURCE_KDKMP.province),
+    regency: asString(metadata.regency, fallback.regency),
+    district: asString(metadata.district, fallback.district),
+    village: asString(metadata.village, fallback.village),
+    label: asOptionalString(metadata.label) ?? undefined,
+  };
+}
+
+async function loadBelanjaSyncItemsForJob(client: SupabaseClient, jobId: string) {
+  const { data, error } = await client
+    .from("belanja_sync_items")
+    .select(ITEM_SELECT)
+    .eq("job_id", jobId)
+    .order("created_at", { ascending: true });
+  if (error) throwDatabaseError(error, "Gagal memuat transaksi job Belanja Sync.");
+  return ((data ?? []) as BelanjaItemRow[]).map(rowToItem);
+}
+
+export async function claimNextBelanjaSyncJob(runnerId: string): Promise<ClaimedBelanjaSyncJob | null> {
+  const client = clientOrThrow();
+  await markStaleProcessingItems(client);
+  await markStaleCopyReconcileJobs(client);
+
+  const { data, error } = await client
+    .from("belanja_sync_jobs")
+    .select(JOB_SELECT)
+    .eq("status", "pending")
+    .order("created_at", { ascending: true })
+    .limit(25);
+  if (error) throwDatabaseError(error, "Gagal mengambil antrean job Belanja Sync.");
+
+  for (const candidate of (data ?? []) as BelanjaJobRow[]) {
+    const metadata = asRecord(candidate.metadata_json);
+    if (!isCopyReconcileMetadata(metadata)) continue;
+
+    const timestamp = nowIso();
+    const stage = asCopyStage(metadata.stage) ?? "PRE_FLIGHT";
+    const { data: updated, error: updateError } = await client
+      .from("belanja_sync_jobs")
+      .update({
+        status: "processing",
+        started_at: candidate.started_at ?? timestamp,
+        finished_at: null,
+        error_message: null,
+        metadata_json: {
+          ...metadata,
+          runner_id: runnerId,
+          claimed_at: timestamp,
+          stage,
+          stage_message: asString(metadata.stage_message, "Runner mengambil job copy/reconcile."),
+          progress: buildProgress(stage, {
+            ...asRecord(metadata.progress),
+            stage,
+            message: asString(metadata.stage_message, "Runner mengambil job copy/reconcile."),
+          }),
+        },
+      })
+      .eq("id", candidate.id)
+      .eq("status", "pending")
+      .select(JOB_SELECT)
+      .maybeSingle();
+    if (updateError) throwDatabaseError(updateError, "Gagal claim job Belanja Sync.");
+    if (!updated) continue;
+
+    let finalJob = rowToJob(updated as BelanjaJobRow);
+    const finalMetadata = asRecord(finalJob.metadataJson);
+    if (!finalJob.dryRun) {
+      const verified = finalMetadata.field_map_verified === true || await hasVerifiedFieldMapInHistory(client);
+      if (verified && finalMetadata.field_map_verified !== true) {
+        const { data: updatedJob, error: jobMetadataError } = await client
+          .from("belanja_sync_jobs")
+          .update({
+            metadata_json: {
+              ...finalMetadata,
+              field_map_verified: true,
+              field_map_verified_source: finalMetadata.field_map_verified_source ?? "project_history",
+            },
+          })
+          .eq("id", candidate.id)
+          .select(JOB_SELECT)
+          .single();
+        if (!jobMetadataError && updatedJob) finalJob = rowToJob(updatedJob as BelanjaJobRow);
+      }
+    }
+
+    const items = await loadBelanjaSyncItemsForJob(client, candidate.id);
+    const transactions = items
+      .map((item) => item.payload as unknown as BelanjaTransactionPayload)
+      .sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
+    return {
+      job: finalJob,
+      items,
+      transactions,
+      sourceKdkmp: readKdkmpMetadata(finalMetadata.source_kdkmp, SOURCE_KDKMP),
+      destinationKdkmp: readKdkmpMetadata(finalMetadata.destination_kdkmp, {
+        province: SOURCE_KDKMP.province,
+        regency: "",
+        district: "",
+        village: "",
+      }),
+      expectedTransactionCount: Number(finalMetadata.expected_transactions) || DEFAULT_BELANJA_BASE_TRANSACTION_COUNT,
+      stage: asCopyStage(finalMetadata.stage) ?? "PRE_FLIGHT",
+      completedTransactionIds: asStringArray(finalMetadata.completed_transaction_ids),
+    };
+  }
+
+  return null;
+}
+
 export async function claimNextBelanjaSyncItem(runnerId: string): Promise<ClaimedBelanjaSyncItem | null> {
   const client = clientOrThrow();
   await markStaleProcessingItems(client);
+  await markStaleCopyReconcileJobs(client);
 
   const { data, error } = await client
     .from("belanja_sync_items")
@@ -957,6 +1511,7 @@ export async function claimNextBelanjaSyncItem(runnerId: string): Promise<Claime
       if (job) await updateJobRollup(client, job.id);
       continue;
     }
+    if (isCopyReconcileJobRow(job)) continue;
 
     const timestamp = nowIso();
     const { data: updated, error: updateError } = await client
@@ -1018,6 +1573,102 @@ export async function claimNextBelanjaSyncItem(runnerId: string): Promise<Claime
   }
 
   return null;
+}
+
+export async function updateBelanjaSyncJobCheckpoint(jobId: string, input: {
+  runnerId: string;
+  stage?: BelanjaCopyReconcileStage;
+  stageMessage?: string | null;
+  progress?: Partial<BelanjaSyncJobProgress>;
+  report?: Partial<BelanjaSyncReport>;
+  completedTransactionIds?: string[];
+  copiedTransactionIds?: string[];
+  status?: BelanjaSyncJobStatus;
+  errorMessage?: string | null;
+}) {
+  const client = clientOrThrow();
+  const row = await getJobRow(client, jobId);
+  if (!row) throw new Error("Belanja Sync job tidak ditemukan.");
+  if (!isCopyReconcileJobRow(row)) throw new Error("Checkpoint job hanya berlaku untuk operasi copy/reconcile.");
+
+  const metadata = asRecord(row.metadata_json);
+  const stage = input.stage ?? asCopyStage(metadata.stage) ?? "PRE_FLIGHT";
+  const timestamp = nowIso();
+  const completedTransactionIds = [...new Set([
+    ...asStringArray(metadata.completed_transaction_ids),
+    ...asStringArray(input.completedTransactionIds),
+  ])];
+  const copiedTransactionIds = [...new Set([
+    ...asStringArray(metadata.copied_transaction_ids),
+    ...asStringArray(input.copiedTransactionIds),
+  ])];
+  const previousProgress = asRecord(metadata.progress);
+  const progressMessage = input.stageMessage
+    ?? input.progress?.message
+    ?? asOptionalString(previousProgress.message)
+    ?? undefined;
+  const nextReport = {
+    ...asRecord(metadata.report),
+    ...asRecord(input.report),
+    status: input.report?.status ?? stage,
+  };
+  const nextProgress = buildProgress(stage, {
+    ...previousProgress,
+    ...asRecord(input.progress),
+    stage,
+    message: progressMessage,
+  });
+  const status = input.status
+    ?? (stage === "COMPLETED"
+      ? "completed"
+      : stage === "FAILED"
+        ? "failed"
+        : row.status);
+
+  const { data, error } = await client
+    .from("belanja_sync_jobs")
+    .update({
+      status,
+      error_message: input.errorMessage ?? (stage === "FAILED" ? row.error_message : null),
+      finished_at: status === "completed" || status === "completed_with_errors" || status === "failed" || status === "cancelled"
+        ? row.finished_at ?? timestamp
+        : null,
+      metadata_json: {
+        ...metadata,
+        runner_id: input.runnerId,
+        checkpoint_at: timestamp,
+        stage,
+        stage_message: progressMessage ?? null,
+        progress: nextProgress,
+        report: nextReport,
+        completed_transaction_ids: completedTransactionIds,
+        copied_transaction_ids: copiedTransactionIds,
+      },
+    })
+    .eq("id", jobId)
+    .select(JOB_SELECT)
+    .single();
+  if (error) throwDatabaseError(error, "Gagal menyimpan checkpoint job Belanja Sync.");
+
+  if (status === "failed") {
+    const failureMessage = input.errorMessage
+      ?? progressMessage
+      ?? row.error_message
+      ?? "Job copy/reconcile gagal.";
+    const { error: itemError } = await client
+      .from("belanja_sync_items")
+      .update({
+        status: "failed",
+        error_message: failureMessage,
+        finished_at: timestamp,
+      })
+      .eq("job_id", jobId)
+      .in("status", ["pending", "processing", "needs_review"]);
+    if (itemError) throwDatabaseError(itemError, "Gagal menutup item Belanja Sync pada job gagal.");
+    return updateJobRollup(client, jobId);
+  }
+
+  return rowToJob(data as BelanjaJobRow);
 }
 
 export async function markBelanjaSyncItemSuccess(itemId: string, input: {

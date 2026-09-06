@@ -1,14 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { CalendarDays, FilePlus2, FileText, ReceiptText, Search } from "lucide-react";
+import { AlertTriangle, CalendarDays, FilePlus2, FileText, Loader2, ReceiptText, RefreshCcw, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { DateInput } from "@/components/ui/date-input";
 import { Input } from "@/components/ui/input";
 import { MotionPage } from "@/components/ui/motion-page";
+import { fetchBelanjaSyncOverview, readCachedBelanjaSyncOverview } from "@/lib/belanja-sync/client-overview";
 import { groupDocumentsForPresentation } from "@/lib/pln-document-groups";
 import { buildProjectSummary } from "@/lib/resume-calculations";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
@@ -29,47 +30,87 @@ function belanjaStatusClass(status: BelanjaSyncOverviewProject["status"] | undef
   return "bg-slate-100 text-slate-600";
 }
 
+function overviewMap(projects: BelanjaSyncOverviewProject[] | undefined) {
+  return Object.fromEntries((projects ?? []).map((project) => [project.projectId, project]));
+}
+
 export function HistoryView() {
-  const { projects, vendors, generatedNotas, customNotes, history, loading } = useKdkmpStore();
+  const {
+    projects,
+    vendors,
+    generatedNotas,
+    customNotes,
+    history,
+    loading,
+    syncError,
+    refresh,
+    dashboardProjectStats,
+    dashboardSummaryOnly,
+  } = useKdkmpStore();
   const [query, setQuery] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [visibleCount, setVisibleCount] = useState(12);
   const [belanjaOverview, setBelanjaOverview] = useState<Record<string, BelanjaSyncOverviewProject>>({});
+  const [belanjaOverviewLoading, setBelanjaOverviewLoading] = useState(false);
+  const [belanjaOverviewError, setBelanjaOverviewError] = useState<string | null>(null);
+
+  const loadBelanjaOverview = useCallback(async (options: { force?: boolean } = {}) => {
+    setBelanjaOverviewLoading(true);
+    try {
+      const payload = await fetchBelanjaSyncOverview({ force: options.force });
+      setBelanjaOverview(overviewMap(payload.projects));
+      setBelanjaOverviewError(payload.schemaReady ? null : payload.errorMessage ?? "Belanja Sync belum siap.");
+    } catch (error) {
+      const cached = readCachedBelanjaSyncOverview();
+      if (cached?.projects?.length) setBelanjaOverview(overviewMap(cached.projects));
+      setBelanjaOverviewError(error instanceof Error ? error.message : "Gagal memuat status Belanja Sync.");
+    } finally {
+      setBelanjaOverviewLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    fetch("/api/belanja-sync/overview", { cache: "no-store" })
-      .then((response) => response.ok ? response.json() : null)
-      .then((payload: { projects?: BelanjaSyncOverviewProject[] } | null) => {
-        if (cancelled || !payload?.projects) return;
-        setBelanjaOverview(Object.fromEntries(payload.projects.map((project) => [project.projectId, project])));
-      })
-      .catch(() => {
-        if (!cancelled) setBelanjaOverview({});
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    const cached = readCachedBelanjaSyncOverview();
+    if (cached?.projects?.length) setBelanjaOverview(overviewMap(cached.projects));
+    void loadBelanjaOverview();
+  }, [loadBelanjaOverview]);
+
+  const dashboardStatsByProject = useMemo(() => {
+    return new Map(dashboardProjectStats.map((row) => [row.projectId, row]));
+  }, [dashboardProjectStats]);
+
+  function retryDataLoad() {
+    void refresh();
+    void loadBelanjaOverview({ force: true });
+  }
 
   const rows = useMemo(() => {
     return projects
       .map((project) => {
-        const summary = buildProjectSummary(project, vendors);
+        const dashboardStats = dashboardStatsByProject.get(project.id);
+        const summary = dashboardSummaryOnly && project.items.length === 0 && dashboardStats
+          ? { grandTotal: dashboardStats.grandTotal }
+          : buildProjectSummary(project, vendors);
         const docs = groupDocumentsForPresentation(generatedNotas.filter((doc) => doc.projectId === project.id));
         const customs = customNotes.filter((doc) => doc.projectId === project.id);
+        const docCount = dashboardSummaryOnly && dashboardStats
+          ? dashboardStats.generatedNoteCount ?? Math.max((dashboardStats.notaCount ?? 0) - (dashboardStats.customNoteCount ?? 0), 0)
+          : docs.length;
+        const customCount = dashboardSummaryOnly && dashboardStats
+          ? dashboardStats.customNoteCount ?? customs.length
+          : customs.length;
         const lastHistory = history.find((entry) => entry.projectId === project.id);
-        return { project, summary, docs, customs, lastHistory };
+        return { project, summary, docs, customs, docCount, customCount, lastHistory };
       })
       .filter(({ project }) => `${project.villageName} ${project.projectName} ${project.districtName} ${project.regencyName}`.toLowerCase().includes(query.toLowerCase()))
       .filter(({ project }) => !dateFrom || (project.reportDate ?? project.projectDate) >= dateFrom)
       .filter(({ project }) => !dateTo || (project.reportDate ?? project.projectDate) <= dateTo)
       .sort((a, b) => new Date(b.project.updatedAt).getTime() - new Date(a.project.updatedAt).getTime());
-  }, [customNotes, dateFrom, dateTo, generatedNotas, history, projects, query, vendors]);
+  }, [customNotes, dashboardStatsByProject, dashboardSummaryOnly, dateFrom, dateTo, generatedNotas, history, projects, query, vendors]);
 
   if (loading && projects.length === 0) {
-    return <Card><CardContent className="p-8">Memuat history dari Supabase...</CardContent></Card>;
+    return <Card><CardContent className="p-8">Memuat ringkasan history dari Supabase...</CardContent></Card>;
   }
 
   return (
@@ -85,10 +126,25 @@ export function HistoryView() {
           </Button>
         </div>
 
+        {syncError || belanjaOverviewError ? (
+          <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30">
+            <CardContent className="flex flex-col gap-3 p-4 text-sm text-amber-900 dark:text-amber-100 md:flex-row md:items-center md:justify-between">
+              <div className="flex gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>Data cache tetap ditampilkan. Sinkronisasi terbaru gagal: {syncError ?? belanjaOverviewError}</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={retryDataLoad} disabled={loading || belanjaOverviewLoading}>
+                {loading || belanjaOverviewLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+                Refresh
+              </Button>
+            </CardContent>
+          </Card>
+        ) : null}
+
         <Card>
           <CardHeader>
             <CardTitle>Filter History</CardTitle>
-            <CardDescription>Data diambil dari tabel projects, generated_notes, kwitansi_edits, custom_notes, dan note_history.</CardDescription>
+            <CardDescription>Data diambil dari ringkasan Supabase yang dioptimalkan untuk history.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 lg:grid-cols-[1fr_190px_190px]">
@@ -109,7 +165,7 @@ export function HistoryView() {
         </Card>
 
         <div className="grid gap-4">
-          {rows.slice(0, visibleCount).map(({ project, summary, docs, customs, lastHistory }) => (
+          {rows.slice(0, visibleCount).map(({ project, summary, docCount, customCount, lastHistory }) => (
             <Card key={project.id}>
               <CardHeader className="gap-3">
                 <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -121,8 +177,8 @@ export function HistoryView() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Badge>{project.status}</Badge>
-                    <Badge className="bg-blue-50 text-blue-700">{docs.length} nota</Badge>
-                    <Badge className="bg-emerald-50 text-emerald-700">{customs.length} custom</Badge>
+                    <Badge className="bg-blue-50 text-blue-700">{docCount} nota</Badge>
+                    <Badge className="bg-emerald-50 text-emerald-700">{customCount} custom</Badge>
                     <Badge className={belanjaStatusClass(belanjaOverview[project.id]?.status)}>
                       Belanja: {belanjaStatusLabel(belanjaOverview[project.id]?.status)}
                     </Badge>

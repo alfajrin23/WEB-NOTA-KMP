@@ -1,6 +1,11 @@
 import type {
+  BelanjaCopyReconcileStage,
   BelanjaRunnerHeartbeat,
+  BelanjaSyncJobProgress,
+  BelanjaSyncJobStatus,
+  BelanjaSyncReport,
   ClaimedBelanjaSyncItem,
+  ClaimedBelanjaSyncJob,
 } from "../../src/lib/belanja-sync/types";
 import type { RunnerConfig } from "./config";
 
@@ -67,6 +72,7 @@ export class BelanjaSyncApiClient {
     dryRun: boolean;
     targetBaseUrl: string;
     message?: string | null;
+    metadataJson?: Record<string, unknown>;
   }) {
     return this.request<{ heartbeat: BelanjaRunnerHeartbeat }>("/api/belanja-runner/heartbeat", {
       method: "POST",
@@ -85,9 +91,28 @@ export class BelanjaSyncApiClient {
   }
 
   claim() {
-    return this.request<{ claim: ClaimedBelanjaSyncItem | null }>("/api/belanja-runner/claim", {
+    return this.request<{ claim: ClaimedBelanjaSyncItem | null; jobClaim: ClaimedBelanjaSyncJob | null }>("/api/belanja-runner/claim", {
       method: "POST",
       body: { runnerId: this.config.runnerId },
+    });
+  }
+
+  checkpointJob(jobId: string, input: {
+    stage?: BelanjaCopyReconcileStage;
+    stageMessage?: string | null;
+    progress?: Partial<BelanjaSyncJobProgress>;
+    report?: Partial<BelanjaSyncReport>;
+    completedTransactionIds?: string[];
+    copiedTransactionIds?: string[];
+    status?: BelanjaSyncJobStatus;
+    errorMessage?: string | null;
+  }) {
+    return this.request(`/api/belanja-runner/jobs/${jobId}/checkpoint`, {
+      method: "POST",
+      body: {
+        runnerId: this.config.runnerId,
+        ...input,
+      },
     });
   }
 

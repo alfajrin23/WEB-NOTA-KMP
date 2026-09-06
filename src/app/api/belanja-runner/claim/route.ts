@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { claimNextBelanjaSyncItem } from "@/lib/belanja-sync/server";
+import { claimNextBelanjaSyncItem, claimNextBelanjaSyncJob } from "@/lib/belanja-sync/server";
 import { jsonError, readJsonBody, requireRunnerToken } from "@/lib/belanja-sync/route-helpers";
 
 type ClaimInput = {
@@ -13,8 +13,10 @@ export async function POST(request: Request) {
   try {
     const input = await readJsonBody<ClaimInput>(request);
     if (!input.runnerId?.trim()) throw new Error("runnerId wajib diisi.");
+    const jobClaim = await claimNextBelanjaSyncJob(input.runnerId.trim());
+    if (jobClaim) return NextResponse.json({ claim: null, jobClaim });
     const claim = await claimNextBelanjaSyncItem(input.runnerId.trim());
-    return NextResponse.json({ claim });
+    return NextResponse.json({ claim, jobClaim: null });
   } catch (error) {
     return jsonError(error, "Gagal claim item Belanja Sync.", 400);
   }

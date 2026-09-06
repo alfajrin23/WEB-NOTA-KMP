@@ -171,7 +171,7 @@ async function pageSummary(page: Page): Promise<PageSummary> {
 }
 
 async function gotoTarget(page: Page, config: RunnerConfig, pathName: string) {
-  await page.goto(targetUrl(config, pathName), { waitUntil: "domcontentloaded", timeout: 20_000 });
+  await page.goto(targetUrl(config, pathName), { waitUntil: "domcontentloaded", timeout: config.targetNavigationTimeoutMs });
   await page.waitForSelector('input[name="tanggal"], textarea[name="tanggal"], select[name="tanggal"], body', {
     timeout: config.fastUiTimeoutMs,
   }).catch(() => {});

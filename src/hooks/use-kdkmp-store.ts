@@ -41,6 +41,7 @@ import {
   fetchProjectBundle,
   generateAndPersistKwitansi,
   generateAndPersistNotes,
+  isProjectBundleCacheFresh,
   isSupabaseConfigured,
   KwitansiEditInput,
   mergeBundleWithGenerated,
@@ -293,13 +294,17 @@ function applyBundle(bundle: ProjectBundle) {
 }
 
 function currentBundleTarget() {
-  if (typeof window === "undefined") return { projectId: undefined, dashboardOnly: false };
+  if (typeof window === "undefined") return { projectId: undefined, dashboardOnly: false, includeDashboardNotaStats: true };
   const pathname = window.location.pathname;
   const projectRouteMatch = /^\/projects\/([^/]+)/.exec(pathname);
   const projectId = projectRouteMatch?.[1] && projectRouteMatch[1] !== "new"
     ? decodeURIComponent(projectRouteMatch[1])
     : undefined;
-  return { projectId, dashboardOnly: pathname === "/" };
+  return {
+    projectId,
+    dashboardOnly: !projectId && (pathname === "/" || pathname === "/history" || pathname === "/belanja-sync"),
+    includeDashboardNotaStats: pathname === "/",
+  };
 }
 
 function buildShiftedKwitansiEditInput(doc: GeneratedNota, days: number) {
@@ -353,8 +358,8 @@ export function useKdkmpStore() {
     if (!options.background) setLoading(true);
     if (!options.background) setSyncError(null);
     try {
-      const { projectId, dashboardOnly } = currentBundleTarget();
-      const bundle = dashboardOnly ? await fetchDashboardBundle() : await fetchProjectBundle(projectId);
+      const { projectId, dashboardOnly, includeDashboardNotaStats } = currentBundleTarget();
+      const bundle = dashboardOnly ? await fetchDashboardBundle({ includeNotaStats: includeDashboardNotaStats }) : await fetchProjectBundle(projectId);
       const next = applyBundle(bundle);
       setProjects(next.projects);
       setGeneratedNotas(next.generatedNotas);
@@ -368,8 +373,8 @@ export function useKdkmpStore() {
       setSyncError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Gagal memuat data Supabase.";
-      const { projectId, dashboardOnly } = currentBundleTarget();
-      const cached = readCachedProjectBundleOrNull(projectId, dashboardOnly);
+      const { projectId, dashboardOnly, includeDashboardNotaStats } = currentBundleTarget();
+      const cached = readCachedProjectBundleOrNull(projectId, dashboardOnly, includeDashboardNotaStats);
       if (cached) {
         const cachedData = applyBundle(cached);
         setProjects(cachedData.projects);
@@ -394,10 +399,10 @@ export function useKdkmpStore() {
   }, []);
 
   useEffect(() => {
-    const { projectId, dashboardOnly } = currentBundleTarget();
-    const routeCache = readCachedProjectBundleOrNull(projectId, dashboardOnly);
+    const { projectId, dashboardOnly, includeDashboardNotaStats } = currentBundleTarget();
+    const routeCache = readCachedProjectBundleOrNull(projectId, dashboardOnly, includeDashboardNotaStats);
     if (routeCache || !supabaseReady) {
-      const cachedData = applyBundle(routeCache ?? readCachedProjectBundle(projectId, dashboardOnly));
+      const cachedData = applyBundle(routeCache ?? readCachedProjectBundle(projectId, dashboardOnly, includeDashboardNotaStats));
       setProjects(cachedData.projects);
       setGeneratedNotas(cachedData.generatedNotas);
       generatedNotasRef.current = cachedData.generatedNotas;
@@ -412,7 +417,9 @@ export function useKdkmpStore() {
     }
     setMasterItems(normalizePlnResumeItems(readStorage(MASTER_KEY, masterTemplateItems)));
     setTemplateAssignments(mergeTemplateAssignments(readStorage(TEMPLATE_ASSIGNMENTS_KEY, ALL_TEMPLATE_ASSIGNMENTS)));
-    void refresh({ background: Boolean(routeCache) });
+    if (!isProjectBundleCacheFresh(routeCache, dashboardOnly ? 45_000 : 20_000)) {
+      void refresh({ background: Boolean(routeCache) });
+    }
   }, [refresh, supabaseReady]);
 
   useEffect(() => {

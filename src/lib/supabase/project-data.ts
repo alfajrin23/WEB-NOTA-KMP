@@ -51,8 +51,8 @@ const CUSTOM_NOTE_SELECT = "id,project_id,tahap,vendor,vendor_id,template_id,doc
 const HISTORY_SELECT = "id,project_id,action,description,created_at";
 const DASHBOARD_SUMMARY_SELECT = "project_id,total_tahap_1,total_tahap_2,total_tahap_3,total_tahap_4,total_diluar_konstruksi,total_keseluruhan";
 const DASHBOARD_OUTSIDE_ITEM_SELECT = "project_id,tahap,category_code,kategori,uraian,qty,harga_satuan,jumlah,jumlah_override,is_jumlah_manual,is_included_in_resume_total";
-const DASHBOARD_NOTE_SELECT = "id,project_id,tahap,vendor,vendor_id,document_type,total";
-const DASHBOARD_CUSTOM_NOTE_SELECT = "id,project_id,tahap,vendor,vendor_id,document_type,total";
+const DASHBOARD_NOTE_STATS_SELECT = "project_id,tahap,vendor_id,vendor_name,document_count,total,generated_note_count,custom_note_count";
+const DASHBOARD_PROJECT_NOTE_COUNT_SELECT = "project_id,nota_count,generated_note_count,custom_note_count";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -185,14 +185,22 @@ type DashboardAmountRow = {
   is_included_in_resume_total: boolean | null;
 };
 
-type DashboardNoteRow = {
-  id: string;
+type DashboardNoteStatsRow = {
   project_id: string;
   tahap: string;
-  vendor: string;
-  vendor_id: string | null;
-  document_type: GeneratedNota["documentType"];
+  vendor_id: string;
+  vendor_name: string;
+  document_count: number | string;
   total: number | string;
+  generated_note_count: number | string;
+  custom_note_count: number | string;
+};
+
+type DashboardProjectNoteCountRow = {
+  project_id: string;
+  nota_count: number | string;
+  generated_note_count: number | string;
+  custom_note_count: number | string;
 };
 
 export type DashboardProjectStats = {
@@ -200,6 +208,8 @@ export type DashboardProjectStats = {
   stageTotals: Partial<Record<StageCode, number>>;
   grandTotal: number;
   notaCount: number;
+  generatedNoteCount?: number;
+  customNoteCount?: number;
 };
 
 export type DashboardNotaStats = {
@@ -219,9 +229,14 @@ export type ProjectBundle = {
   customNotes: CustomNote[];
   history: NoteHistoryEntry[];
   source: "supabase" | "cache" | "seed";
+  cachedAt?: string;
   dashboardProjectStats?: DashboardProjectStats[];
   dashboardNotaStats?: DashboardNotaStats[];
   dashboardSummaryOnly?: boolean;
+};
+
+type FetchDashboardBundleOptions = {
+  includeNotaStats?: boolean;
 };
 
 export type CustomNoteInput = {
@@ -804,7 +819,7 @@ function rowsToHistory(rows: NoteHistoryRow[]): NoteHistoryEntry[] {
   }));
 }
 
-type CacheScope = "all" | "dashboard" | `project:${string}`;
+type CacheScope = "all" | "dashboard" | "dashboard-summary" | `project:${string}`;
 
 function cacheStorageKey(scope: CacheScope) {
   return `${CACHE_KEY}.${scope}`;
@@ -840,6 +855,7 @@ function compactCacheBundle(bundle: ProjectBundle): ProjectBundle {
     customNotes: [],
     history: bundle.history.slice(0, 100),
     source: "cache",
+    cachedAt: bundle.cachedAt,
     dashboardProjectStats: bundle.dashboardProjectStats,
     dashboardNotaStats: bundle.dashboardNotaStats,
     dashboardSummaryOnly: bundle.dashboardSummaryOnly,
@@ -858,7 +874,7 @@ function writeCache(bundle: ProjectBundle, scope: CacheScope = "all") {
   if (typeof window === "undefined") return;
 
   try {
-    const serialized = serializeCacheBundle({ ...bundle, source: "cache" });
+    const serialized = serializeCacheBundle({ ...bundle, source: "cache", cachedAt: new Date().toISOString() });
     if (!serialized) {
       // Keep an older valid cache when a complete multi-project bundle is too
       // large for localStorage. Dashboard and single-project caches are scoped
@@ -871,14 +887,18 @@ function writeCache(bundle: ProjectBundle, scope: CacheScope = "all") {
   }
 }
 
-export function readCachedProjectBundleOrNull(projectId?: string, dashboardOnly = false): ProjectBundle | null {
-  const scope: CacheScope = dashboardOnly ? "dashboard" : projectId ? `project:${projectId}` : "all";
+function dashboardCacheScope(includeNotaStats: boolean): CacheScope {
+  return includeNotaStats ? "dashboard" : "dashboard-summary";
+}
+
+export function readCachedProjectBundleOrNull(projectId?: string, dashboardOnly = false, includeDashboardNotaStats = true): ProjectBundle | null {
+  const scope: CacheScope = dashboardOnly ? dashboardCacheScope(includeDashboardNotaStats) : projectId ? `project:${projectId}` : "all";
   const cached = readCache(scope);
   return cached ? { ...cached, source: "cache" } : null;
 }
 
-export function readCachedProjectBundle(projectId?: string, dashboardOnly = false): ProjectBundle {
-  return readCachedProjectBundleOrNull(projectId, dashboardOnly) ?? {
+export function readCachedProjectBundle(projectId?: string, dashboardOnly = false, includeDashboardNotaStats = true): ProjectBundle {
+  return readCachedProjectBundleOrNull(projectId, dashboardOnly, includeDashboardNotaStats) ?? {
     projects: initialProjects,
     generatedNotas: [],
     kwitansiEdits: [],
@@ -886,6 +906,11 @@ export function readCachedProjectBundle(projectId?: string, dashboardOnly = fals
     history: [],
     source: "seed",
   };
+}
+
+export function isProjectBundleCacheFresh(bundle: ProjectBundle | null | undefined, maxAgeMs: number) {
+  const timestamp = Date.parse(bundle?.cachedAt ?? "");
+  return Boolean(bundle && Number.isFinite(timestamp) && Date.now() - timestamp <= maxAgeMs);
 }
 
 function emptySupabaseBundle(): ProjectBundle {
@@ -907,6 +932,13 @@ function ensureClient(client: SupabaseClient | null): SupabaseClient {
 }
 
 function databaseErrorMessage(error: { code?: string; message?: string } | null | undefined, fallback: string) {
+  if (
+    error?.code === "PGRST205" ||
+    error?.code === "42P01" ||
+    /dashboard_note_stats_v1|dashboard_project_note_counts_v1|latest_note_history_v1|schema cache|relation .* does not exist/i.test(error?.message ?? "")
+  ) {
+    return `${error?.message ?? fallback}. Skema Supabase baru belum punya view ringkasan. Jalankan migration supabase/migrations/20260905_egress_optimized_overviews.sql lalu reload aplikasi.`;
+  }
   if (
     error?.code === "PGRST204" ||
     error?.code === "42703" ||
@@ -1001,53 +1033,20 @@ function dashboardRowStage(row: DashboardAmountRow) {
   return normalizeStoredStageCode(rawStage, row.category_code, row.uraian);
 }
 
-function buildDashboardNotaStats(rows: DashboardNoteRow[]): DashboardNotaStats[] {
-  const grouped = new Map<string, {
-    projectId: string;
-    stageCode: StageCode;
-    stageName: string;
-    vendorId: string;
-    vendorName: string;
-    notaCount: number;
-    kwitansiCount: number;
-    notaTotal: number;
-    kwitansiTotal: number;
-  }>();
-
-  for (const row of rows) {
+function rowsToDashboardNotaStats(rows: DashboardNoteStatsRow[]): DashboardNotaStats[] {
+  return rows.map((row) => {
     const stageCode = asStageCode(row.tahap);
-    const vendorId = row.vendor_id ?? vendorIdByName(row.vendor) ?? (row.vendor || "vendor-tanpa-id");
-    const key = `${row.project_id}:${stageCode}:${vendorId}`;
-    const current = grouped.get(key) ?? {
+    const vendorId = row.vendor_id || vendorIdByName(row.vendor_name) || row.vendor_name || "vendor-tanpa-id";
+    return {
       projectId: row.project_id,
       stageCode,
       stageName: getStageLabel(stageCode),
       vendorId,
-      vendorName: row.vendor || vendorById(vendorId)?.name || "Tanpa vendor",
-      notaCount: 0,
-      kwitansiCount: 0,
-      notaTotal: 0,
-      kwitansiTotal: 0,
+      vendorName: row.vendor_name || vendorById(vendorId)?.name || "Tanpa vendor",
+      count: toNumber(row.document_count),
+      total: toNumber(row.total),
     };
-    if (row.document_type === "nota") {
-      current.notaCount += 1;
-      current.notaTotal += toNumber(row.total);
-    } else {
-      current.kwitansiCount += 1;
-      current.kwitansiTotal += toNumber(row.total);
-    }
-    grouped.set(key, current);
-  }
-
-  return [...grouped.values()].map((row) => ({
-    projectId: row.projectId,
-    stageCode: row.stageCode,
-    stageName: row.stageName,
-    vendorId: row.vendorId,
-    vendorName: row.vendorName,
-    count: Math.max(row.notaCount, row.kwitansiCount),
-    total: row.notaCount > 0 ? row.notaTotal : row.kwitansiTotal,
-  }));
+  });
 }
 
 function withReadTimeout<T>(request: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -1088,10 +1087,11 @@ async function withReadRetry<T>(loader: () => Promise<T>, label: string, retries
   throw lastError instanceof Error ? lastError : new Error(`${label} gagal.`);
 }
 
-async function fetchDashboardBundleUncached(): Promise<ProjectBundle> {
+async function fetchDashboardBundleUncached(options: FetchDashboardBundleOptions = {}): Promise<ProjectBundle> {
+  const includeNotaStats = options.includeNotaStats ?? true;
   const client = supabase();
   if (!client) {
-    const cached = readCachedProjectBundle(undefined, true);
+    const cached = readCachedProjectBundle(undefined, true, includeNotaStats);
     return { ...cached, source: cached.source === "seed" ? "seed" : "cache" };
   }
 
@@ -1104,27 +1104,30 @@ async function fetchDashboardBundleUncached(): Promise<ProjectBundle> {
   const projectsData = (projectRows ?? []) as ProjectRow[];
   if (projectsData.length === 0) {
     const bundle = { ...emptySupabaseBundle(), dashboardProjectStats: [], dashboardNotaStats: [], dashboardSummaryOnly: true };
-    writeCache(bundle, "dashboard");
+    writeCache(bundle, dashboardCacheScope(includeNotaStats));
     return bundle;
   }
 
   const projectIds = projectsData.map((project) => project.id);
-  const [summariesResult, outsideResult, notesResult, customNotesResult] = await Promise.all([
+  const noteStatsRequest = includeNotaStats
+    ? client.from("dashboard_note_stats_v1").select(DASHBOARD_NOTE_STATS_SELECT).in("project_id", projectIds)
+    : client.from("dashboard_project_note_counts_v1").select(DASHBOARD_PROJECT_NOTE_COUNT_SELECT).in("project_id", projectIds);
+  const [summariesResult, outsideResult, noteStatsResult, historyResult] = await Promise.all([
     client.from("resume_summaries").select(DASHBOARD_SUMMARY_SELECT).in("project_id", projectIds),
     fetchDashboardAmountRows(client, projectIds, true),
-    client.from("generated_notes").select(DASHBOARD_NOTE_SELECT).in("project_id", projectIds),
-    client.from("custom_notes").select(DASHBOARD_CUSTOM_NOTE_SELECT).in("project_id", projectIds),
+    noteStatsRequest,
+    client.from("latest_note_history_v1").select(HISTORY_SELECT).in("project_id", projectIds),
   ]);
-  if (summariesResult.error) throw summariesResult.error;
-  if (outsideResult.error) throw outsideResult.error;
-  if (notesResult.error) throw notesResult.error;
-  if (customNotesResult.error) throw customNotesResult.error;
+  if (summariesResult.error) throwDatabaseError(summariesResult.error, "Gagal memuat ringkasan resume.");
+  if (outsideResult.error) throwDatabaseError(outsideResult.error, "Gagal memuat total item luar inti.");
+  if (noteStatsResult.error) throwDatabaseError(noteStatsResult.error, "Gagal memuat statistik nota.");
+  if (historyResult.error) throwDatabaseError(historyResult.error, "Gagal memuat history terbaru.");
 
   const summaryRows = (summariesResult.data ?? []) as DashboardSummaryRow[];
   const summaryByProject = new Map(summaryRows.map((row) => [row.project_id, row]));
   const missingSummaryIds = projectIds.filter((id) => !summaryByProject.has(id));
   const missingResult = await fetchDashboardAmountRows(client, missingSummaryIds, false);
-  if (missingResult.error) throw missingResult.error;
+  if (missingResult.error) throwDatabaseError(missingResult.error, "Gagal memuat fallback total resume.");
 
   const outsideByProject = new Map<string, Partial<Record<StageCode, number>>>();
   for (const row of outsideResult.data) {
@@ -1144,13 +1147,26 @@ async function fetchDashboardBundleUncached(): Promise<ProjectBundle> {
     missingByProject.set(row.project_id, totals);
   }
 
-  const dashboardNotaStats = buildDashboardNotaStats([
-    ...((notesResult.data ?? []) as DashboardNoteRow[]),
-    ...((customNotesResult.data ?? []) as DashboardNoteRow[]),
-  ]);
+  const noteStatsRows = includeNotaStats ? (noteStatsResult.data ?? []) as DashboardNoteStatsRow[] : [];
+  const projectNoteCountRows = includeNotaStats ? [] : (noteStatsResult.data ?? []) as DashboardProjectNoteCountRow[];
+  const dashboardNotaStats = rowsToDashboardNotaStats(noteStatsRows);
   const notaCountByProject = new Map<string, number>();
-  for (const row of dashboardNotaStats) {
-    notaCountByProject.set(row.projectId, (notaCountByProject.get(row.projectId) ?? 0) + row.count);
+  const generatedNoteCountByProject = new Map<string, number>();
+  const customNoteCountByProject = new Map<string, number>();
+  if (includeNotaStats) {
+    for (const row of dashboardNotaStats) {
+      notaCountByProject.set(row.projectId, (notaCountByProject.get(row.projectId) ?? 0) + row.count);
+    }
+    for (const row of noteStatsRows) {
+      generatedNoteCountByProject.set(row.project_id, (generatedNoteCountByProject.get(row.project_id) ?? 0) + toNumber(row.generated_note_count));
+      customNoteCountByProject.set(row.project_id, (customNoteCountByProject.get(row.project_id) ?? 0) + toNumber(row.custom_note_count));
+    }
+  } else {
+    for (const row of projectNoteCountRows) {
+      notaCountByProject.set(row.project_id, toNumber(row.nota_count));
+      generatedNoteCountByProject.set(row.project_id, toNumber(row.generated_note_count));
+      customNoteCountByProject.set(row.project_id, toNumber(row.custom_note_count));
+    }
   }
 
   const dashboardProjectStats = projectIds.map((projectId): DashboardProjectStats => {
@@ -1162,6 +1178,8 @@ async function fetchDashboardBundleUncached(): Promise<ProjectBundle> {
         stageTotals,
         grandTotal: Object.values(stageTotals).reduce((sum, value) => sum + (value ?? 0), 0),
         notaCount: notaCountByProject.get(projectId) ?? 0,
+        generatedNoteCount: generatedNoteCountByProject.get(projectId) ?? 0,
+        customNoteCount: customNoteCountByProject.get(projectId) ?? 0,
       };
     }
 
@@ -1185,7 +1203,14 @@ async function fetchDashboardBundleUncached(): Promise<ProjectBundle> {
       - (stageTotals.TAHAP_III ?? 0)
       - (stageTotals.TAHAP_IV ?? 0)
       - outsideTotal;
-    return { projectId, stageTotals, grandTotal, notaCount: notaCountByProject.get(projectId) ?? 0 };
+    return {
+      projectId,
+      stageTotals,
+      grandTotal,
+      notaCount: notaCountByProject.get(projectId) ?? 0,
+      generatedNoteCount: generatedNoteCountByProject.get(projectId) ?? 0,
+      customNoteCount: customNoteCountByProject.get(projectId) ?? 0,
+    };
   });
 
   const bundle: ProjectBundle = {
@@ -1193,18 +1218,18 @@ async function fetchDashboardBundleUncached(): Promise<ProjectBundle> {
     generatedNotas: [],
     kwitansiEdits: [],
     customNotes: [],
-    history: [],
+    history: rowsToHistory((historyResult.data ?? []) as NoteHistoryRow[]),
     source: "supabase",
     dashboardProjectStats,
     dashboardNotaStats,
     dashboardSummaryOnly: true,
   };
-  writeCache(bundle, "dashboard");
+  writeCache(bundle, dashboardCacheScope(includeNotaStats));
   return bundle;
 }
 
 const inFlightProjectBundles = new Map<string, Promise<ProjectBundle>>();
-let inFlightDashboardBundle: Promise<ProjectBundle> | null = null;
+const inFlightDashboardBundles = new Map<string, Promise<ProjectBundle>>();
 
 async function fetchProjectBundleUncached(projectId?: string): Promise<ProjectBundle> {
   const client = supabase();
@@ -1281,17 +1306,22 @@ export function fetchProjectBundle(projectId?: string): Promise<ProjectBundle> {
 }
 
 /** Lightweight dashboard load: project metadata, exact totals, and note counters. */
-export function fetchDashboardBundle(): Promise<ProjectBundle> {
-  if (inFlightDashboardBundle) return inFlightDashboardBundle;
-  inFlightDashboardBundle = withReadTimeout(
-    withReadRetry(() => fetchDashboardBundleUncached(), "Pemuatan dashboard"),
+export function fetchDashboardBundle(options: FetchDashboardBundleOptions = {}): Promise<ProjectBundle> {
+  const includeNotaStats = options.includeNotaStats ?? true;
+  const requestKey = includeNotaStats ? "with-nota-stats" : "project-counts-only";
+  const existingRequest = inFlightDashboardBundles.get(requestKey);
+  if (existingRequest) return existingRequest;
+
+  const request = withReadTimeout(
+    withReadRetry(() => fetchDashboardBundleUncached({ includeNotaStats }), "Pemuatan dashboard"),
     15_000,
     "Pemuatan dashboard",
   )
     .finally(() => {
-      inFlightDashboardBundle = null;
+      inFlightDashboardBundles.delete(requestKey);
     });
-  return inFlightDashboardBundle;
+  inFlightDashboardBundles.set(requestKey, request);
+  return request;
 }
 
 export async function createSupabaseProject(
@@ -1329,7 +1359,7 @@ export async function createSupabaseProject(
         target_grand_total_resume: null,
       },
     })
-    .select("*")
+    .select(PROJECT_SELECT)
     .single();
 
   if (projectError) throw projectError;
@@ -1340,7 +1370,7 @@ export async function createSupabaseProject(
     input.projectDate,
     options.historyItems,
   ).map((item) => resumeItemToRow(projectId, item));
-  const { data: itemRows, error: itemError } = await client.from("resume_items").insert(rows).select("*");
+  const { data: itemRows, error: itemError } = await client.from("resume_items").insert(rows).select(RESUME_ITEM_SELECT);
 
   if (itemError) {
     await client.from("projects").delete().eq("id", projectId);
@@ -1368,7 +1398,7 @@ export async function saveResumeItem(projectId: string, item: ResumeItem) {
 
 export async function createResumeItem(projectId: string, item: ResumeItem) {
   const client = ensureClient(supabase());
-  const { data, error } = await client.from("resume_items").insert(resumeItemToRow(projectId, item)).select("*").single();
+  const { data, error } = await client.from("resume_items").insert(resumeItemToRow(projectId, item)).select(RESUME_ITEM_SELECT).single();
   if (error) throw error;
   return rowToResumeItem(data as ResumeItemRow);
 }
@@ -1427,7 +1457,7 @@ export async function duplicateSupabaseProject(source: Project) {
   }));
 
   await client.from("resume_items").delete().eq("project_id", copy.id);
-  const { data, error } = await client.from("resume_items").insert(copiedItems.map((item) => resumeItemToRow(copy.id, item))).select("*");
+  const { data, error } = await client.from("resume_items").insert(copiedItems.map((item) => resumeItemToRow(copy.id, item))).select(RESUME_ITEM_SELECT);
   if (error) throw error;
 
   const project = {
@@ -1460,7 +1490,7 @@ export async function replaceSupabaseProjectResume(
   if (deleteItemsError) throw deleteItemsError;
 
   const rows = items.map((item, index) => resumeItemToRow(project.id, { ...item, sortOrder: index + 1, isGeneratedToNote: false, noteId: null }));
-  const { data, error } = await client.from("resume_items").insert(rows).select("*");
+  const { data, error } = await client.from("resume_items").insert(rows).select(RESUME_ITEM_SELECT);
   if (error) throw error;
 
   const nextProject: Project = {
@@ -1497,7 +1527,7 @@ async function generateAndPersistAutoDocuments(
 
   const { data: projectGeneratedData, error: oldError } = await client
     .from("generated_notes")
-    .select("*")
+    .select(GENERATED_NOTE_SELECT)
     .eq("project_id", project.id);
   if (oldError) throw oldError;
 
@@ -1513,7 +1543,7 @@ async function generateAndPersistAutoDocuments(
   if (documentKind === "nota") {
     const { data: legacyRows, error: legacyError } = await client
       .from("generated_notes")
-      .select("*")
+      .select(GENERATED_NOTE_SELECT)
       .eq("project_id", project.id)
       .eq("document_type", "kwitansi")
       .eq("vendor_id", "vendor-pln")
@@ -1526,7 +1556,7 @@ async function generateAndPersistAutoDocuments(
   const oldIds = oldGeneratedRows.map((row) => row.id);
   let oldEditRows: KwitansiEditRow[] = [];
   if (oldIds.length > 0) {
-    const { data: editData, error: editError } = await client.from("kwitansi_edits").select("*").in("note_id", oldIds);
+    const { data: editData, error: editError } = await client.from("kwitansi_edits").select(KWITANSI_EDIT_SELECT).in("note_id", oldIds);
     if (editError) throw editError;
     oldEditRows = (editData ?? []) as KwitansiEditRow[];
   }
@@ -1660,7 +1690,7 @@ async function generateAndPersistAutoDocuments(
     return [];
   }
 
-  const { data: insertedRows, error: insertError } = await client.from("generated_notes").insert(rows).select("*");
+  const { data: insertedRows, error: insertError } = await client.from("generated_notes").insert(rows).select(GENERATED_NOTE_SELECT);
   if (insertError) throw insertError;
 
   const inserted = (insertedRows ?? []) as GeneratedNoteRow[];
@@ -1762,7 +1792,7 @@ export async function backfillProjectKwitansiReceivers(projectId: string) {
   const client = ensureClient(supabase());
   const { data: noteData, error: notesError } = await client
     .from("generated_notes")
-    .select("*")
+    .select(GENERATED_NOTE_SELECT)
     .eq("project_id", projectId)
     .eq("document_type", "kwitansi");
   if (notesError) throw notesError;
@@ -1771,7 +1801,7 @@ export async function backfillProjectKwitansiReceivers(projectId: string) {
   const noteIds = rows.map((row) => row.id);
   let editRows: KwitansiEditRow[] = [];
   if (noteIds.length > 0) {
-    const { data: editData, error: editError } = await client.from("kwitansi_edits").select("*").in("note_id", noteIds);
+    const { data: editData, error: editError } = await client.from("kwitansi_edits").select(KWITANSI_EDIT_SELECT).in("note_id", noteIds);
     if (editError) throw editError;
     editRows = (editData ?? []) as KwitansiEditRow[];
   }
@@ -1854,7 +1884,7 @@ export async function upsertKwitansiEdit(projectId: string, noteId: string, inpu
   const client = ensureClient(supabase());
   const { data: existingData, error: existingError } = await client
     .from("kwitansi_edits")
-    .select("*")
+    .select(KWITANSI_EDIT_SELECT)
     .eq("note_id", noteId)
     .maybeSingle();
   if (existingError) throw existingError;
@@ -1893,7 +1923,7 @@ export async function upsertKwitansiEdit(projectId: string, noteId: string, inpu
       },
       { onConflict: "note_id" },
     )
-    .select("*")
+    .select(KWITANSI_EDIT_SELECT)
     .single();
   if (error) throw error;
   await logHistory(client, projectId, "kwitansi_edited", "Data edit kwitansi diperbarui.");
@@ -1968,7 +1998,7 @@ export async function createCustomNote(project: Project, input: CustomNoteInput)
       total,
       alasan: input.alasan ?? "",
     })
-    .select("*")
+    .select(CUSTOM_NOTE_SELECT)
     .single();
   if (error) throw error;
 

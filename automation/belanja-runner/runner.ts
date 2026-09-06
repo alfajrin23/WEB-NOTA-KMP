@@ -9,6 +9,7 @@ import type { ClaimedBelanjaSyncItem } from "../../src/lib/belanja-sync/types";
 import { BelanjaSyncApiClient } from "./api-client";
 import { createBelanjaContext, ensureAuthenticated } from "./auth";
 import { ensureRunnerDirs, targetUrl, type RunnerConfig } from "./config";
+import { processCopyReconcileJob } from "./copy-reconcile";
 import { resolveEffectiveDryRun, resolveEffectiveFieldMapVerified } from "./mode";
 import { compareBelanjaForm, fillBelanjaForm, inspectTargetBelanja, readBelanjaForm, saveDryRunScreenshot, submitBelanjaForm } from "./target";
 
@@ -41,6 +42,8 @@ function log(message: string) {
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+const JOB_TRANSIENT_RETRY_LIMIT = 2;
 
 function fetchErrorDetail(error: unknown) {
   if (!(error instanceof Error)) return "Unknown error.";
@@ -124,6 +127,36 @@ async function createSession(config: RunnerConfig) {
   const page = await context.newPage();
   await ensureAuthenticated(page, context, config);
   return { browser, context, page };
+}
+
+function startBusyHeartbeat(api: BelanjaSyncApiClient, config: RunnerConfig, job: { id: string }, dryRun: boolean) {
+  let inFlight = false;
+  const send = async () => {
+    if (inFlight) return;
+    inFlight = true;
+    try {
+      await api.heartbeat({
+        status: "busy",
+        targetStatus: "connected",
+        dryRun,
+        targetBaseUrl: config.targetBaseUrl,
+        message: `Runner sedang memproses job ${job.id}.`,
+        metadataJson: {
+          field_map_verified: config.fieldMapVerified,
+          base_transaction_count: config.baseTransactionCount,
+          active_job_id: job.id,
+          busy_heartbeat: true,
+        },
+      });
+    } catch (error) {
+      log(`Heartbeat busy gagal: ${error instanceof Error ? error.message : "unknown"}; job tetap diproses.`);
+    } finally {
+      inFlight = false;
+    }
+  };
+  const timer = setInterval(send, Math.max(5_000, config.heartbeatIntervalMs));
+  timer.unref?.();
+  return { send, stop: () => clearInterval(timer) };
 }
 
 async function processClaim(api: BelanjaSyncApiClient, config: RunnerConfig, page: Page, claim: ClaimedBelanjaSyncItem) {
@@ -229,6 +262,7 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
   let lastHeartbeatTargetStatus: TargetReachability["reachable"] | null = null;
   let lastStatusLogAt = 0;
   let cachedPendingCount = 0;
+  const jobTransientRetries = new Map<string, number>();
 
   console.log("================================");
   console.log("KDKMP BELANJA AUTOMATION RUNNER");
@@ -258,6 +292,10 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
           dryRun: config.dryRun,
           targetBaseUrl: config.targetBaseUrl,
           message,
+          metadataJson: {
+            field_map_verified: config.fieldMapVerified,
+            base_transaction_count: config.baseTransactionCount,
+          },
         }).then(() => {
           lastHeartbeatAt = Date.now();
           lastHeartbeatTargetStatus = reachable;
@@ -292,52 +330,115 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
       }
 
       let claim: ClaimedBelanjaSyncItem | null = null;
+      let jobClaim: Awaited<ReturnType<BelanjaSyncApiClient["claim"]>>["jobClaim"] = null;
       try {
-        ({ claim } = await api.claim());
+        ({ claim, jobClaim } = await api.claim());
       } catch (error) {
         log(`Koneksi WEB NOTA sementara gagal saat claim: ${error instanceof Error ? error.message : "unknown"}. Runner tetap hidup dan retry.`);
         if (options.once) break;
         await sleep(config.pollIntervalMs);
         continue;
       }
-      if (!claim) {
-        log("Tidak ada item pending.");
+      if (!claim && !jobClaim) {
+        log("Tidak ada job/item pending.");
         if (options.once) break;
         await sleep(config.pollIntervalMs);
         continue;
       }
 
-      await api.heartbeat({
-        status: "busy",
-        targetStatus: "connected",
-        dryRun: resolveEffectiveDryRun(config, claim.job),
-        targetBaseUrl: config.targetBaseUrl,
-      }).then(() => {
+      const activeJob = jobClaim?.job ?? claim?.job;
+      if (!activeJob) {
+        log("Claim kosong dari WEB NOTA.");
+        if (options.once) break;
+        await sleep(config.pollIntervalMs);
+        continue;
+      }
+
+      const busyHeartbeat = startBusyHeartbeat(api, config, activeJob, resolveEffectiveDryRun(config, activeJob));
+      await busyHeartbeat.send().then(() => {
         lastHeartbeatAt = Date.now();
         lastHeartbeatTargetStatus = true;
-      }).catch((error) => log(`Heartbeat busy gagal: ${error instanceof Error ? error.message : "unknown"}; item tetap diproses.`));
+      });
 
       try {
-        await processClaim(api, config, page, claim);
+        if (jobClaim) await processCopyReconcileJob(api, config, page, jobClaim);
+        else if (claim) await processClaim(api, config, page, claim);
+        if (jobClaim) jobTransientRetries.delete(jobClaim.job.id);
       } catch (error) {
-        const classified = error instanceof BelanjaAutomationItemError
-          ? error
-          : classifyBelanjaAutomationError(error, { dryRun: resolveEffectiveDryRun(config, claim.job) });
-        const message = classified.message;
-        log(`FAILED ${message}`);
-        await api.markFailed(claim.item.id, {
-          errorMessage: message,
-          retryable: classified.retryable,
-          metadataJson: classified.metadataJson,
-        }).catch((markError) => log(`Gagal update status failed: ${markError instanceof Error ? markError.message : "unknown"}`));
-        if (classified.resetSession) {
+        if (jobClaim) {
+          const message = error instanceof Error ? error.message : "Job copy/reconcile gagal.";
+          const classified = classifyBelanjaAutomationError(error, {
+            phase: "unknown",
+            dryRun: resolveEffectiveDryRun(config, jobClaim.job),
+          });
+          const retryCount = jobTransientRetries.get(jobClaim.job.id) ?? 0;
+          if (classified.retryable && retryCount < JOB_TRANSIENT_RETRY_LIMIT) {
+            const nextRetry = retryCount + 1;
+            jobTransientRetries.set(jobClaim.job.id, nextRetry);
+            const retryMessage = `Runner session terputus sementara; retry otomatis ${nextRetry}/${JOB_TRANSIENT_RETRY_LIMIT}. ${message}`;
+            log(`RETRY ${retryMessage}`);
+            await api.checkpointJob(jobClaim.job.id, {
+              status: "pending",
+              stageMessage: retryMessage,
+              progress: { message: retryMessage },
+              errorMessage: null,
+            }).catch((checkpointError) => log(`Gagal requeue job: ${checkpointError instanceof Error ? checkpointError.message : "unknown"}`));
+            await browser?.close().catch(() => {});
+            browser = null;
+            context = null;
+            page = null;
+            authenticated = false;
+            targetMonitor = null;
+            await sleep(1000 * nextRetry);
+            continue;
+          }
+          jobTransientRetries.delete(jobClaim.job.id);
+          log(`FAILED ${message}`);
+          await api.checkpointJob(jobClaim.job.id, {
+            stage: "FAILED",
+            stageMessage: message,
+            status: "failed",
+            errorMessage: message,
+            report: {
+              status: "FAILED",
+              errors: [message],
+            },
+          }).catch((checkpointError) => log(`Gagal update checkpoint failed: ${checkpointError instanceof Error ? checkpointError.message : "unknown"}`));
+          for (const item of jobClaim.items.filter((entry) => entry.status !== "success" && entry.status !== "skipped")) {
+            await api.markFailed(item.id, {
+              errorMessage: message,
+              retryable: false,
+              metadataJson: { job_failed: true },
+            }).catch((markError) => log(`Gagal update status failed: ${markError instanceof Error ? markError.message : "unknown"}`));
+          }
           await browser?.close().catch(() => {});
           browser = null;
           context = null;
           page = null;
           authenticated = false;
           targetMonitor = null;
+        } else if (claim) {
+          const classified = error instanceof BelanjaAutomationItemError
+          ? error
+          : classifyBelanjaAutomationError(error, { dryRun: resolveEffectiveDryRun(config, claim.job) });
+          const message = classified.message;
+          log(`FAILED ${message}`);
+          await api.markFailed(claim.item.id, {
+            errorMessage: message,
+            retryable: classified.retryable,
+            metadataJson: classified.metadataJson,
+          }).catch((markError) => log(`Gagal update status failed: ${markError instanceof Error ? markError.message : "unknown"}`));
+          if (classified.resetSession) {
+            await browser?.close().catch(() => {});
+            browser = null;
+            context = null;
+            page = null;
+            authenticated = false;
+            targetMonitor = null;
+          }
         }
+      } finally {
+        busyHeartbeat.stop();
       }
 
       if (options.once) break;

@@ -5,15 +5,21 @@ const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const BELANJA_TEXT_ALIAS_GROUPS = [
   ["cibinong", "cubinong"],
   ["stemper", "stamper"],
+  ["hebel10", "hebeul10", "hebeluk10x20x60cm"],
+  ["besipolos10mm", "besipolos10"],
   ["stemperkodok", "stamperkodok"],
+  ["besipolos8mm", "besipolos8", "besipolos8btg", "besipolos8batang", "besipolos8standar", "besipolos8standart"],
+  ["batubelah1520", "batubelah8kubik", "batubelah8kubiktruck"],
   ["honorariumtimsurveipengukuranpemetaan", "mandor"],
   ["jasapemasangantambahdayapln", "biayapekerjainstalasilistrik", "dayapln5500va", "instalasilistrik", "dayapln"],
-  ["jaborongsignagekdkmp", "jasa borong signage kdkmp", "signagekdkmp", "jasa borong"],
+  ["jasaborongsignagekdkmp", "jaborongsignagekdkmp", "jasa borong signage kdkmp", "pek signage kdkmp", "pek signage kdkmp standar", "pek signage kdkmp standard", "signagekdkmp", "jasa borong"],
   ["tukangboronganbaja", "boronganbaja"],
+  ["pekpoldinggatestandar", "pekpoldinggatestandard", "pekpoldinggatesetandar", "poldinggate", "foldinggate"],
+  ["pekfoldingdorstandar", "pekfoldingdorstandard", "pekfoldingdorsetandar", "foldingdor", "foldingdoor"],
   ["tukangboronganpekfoldingdoor", "jasaborongpekfoldingdoor", "boronganaluminumdankaca", "foldingdoor"],
-  ["tukangboronganpekpintukacaframeless", "boronganaluminumdankaca", "pintukacaframeless"],
-  ["tukangboronganpekdindingpartisikaca", "boronganaluminumdankaca", "partisikaca"],
-  ["tukangboronganpekpintubesi", "boronganpintubesi", "pintubesi"],
+  ["tukangboronganpekpintukacaframeless", "pekpintukacaframeless", "pekpintukacaframelessstandar", "pekpintukacaframelessstandard", "pekpintukacaframelesssetandar", "boronganaluminumdankaca", "pintukacaframeless"],
+  ["tukangboronganpekdindingpartisikaca", "pekdindingpartisikaca", "pekdindingpartisikacastandar", "pekdindingpartisikacastandard", "pekdindingpartisikacasetandar", "boronganaluminumdankaca", "partisikaca"],
+  ["tukangboronganpekpintubesi", "pekpintubesi", "pekpintubesistandar", "pekpintubesistandard", "pekpintubesisetandar", "boronganpintubesi", "pintubesi"],
   ["tukangboronganpekfoldinggate", "boronganfoldinggate", "foldinggate"],
   ["dukunganoperasionalbabinsa", "babinsa"],
   ["pekerjatebaslahanpembersihan", "tebaslahan", "pembersihanlahan"],
@@ -82,6 +88,7 @@ export function normalizeBelanjaNumber(value: number | string | null | undefined
   const raw = String(value ?? "").trim();
   if (!raw) return 0;
   const normalized = raw
+    .replace(/\b(?:rp|idr)\.?\s*/gi, "")
     .replace(/\s+/g, "")
     .replace(/[^\d,.-]/g, "")
     .replace(/\.(?=\d{3}(?:\D|$))/g, "")

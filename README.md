@@ -39,7 +39,7 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 
 Runner Belanja memakai token dinamis di Supabase, bukan token global Vercel.
 
-1. Jalankan migration Supabase sampai `supabase/migrations/20260902_belanja_sync_active_index.sql`.
+1. Jalankan migration Supabase sampai `supabase/migrations/20260905_belanja_copy_reconcile.sql`.
 2. Pastikan Vercel punya `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, dan `SUPABASE_SERVICE_ROLE_KEY`.
 3. Buka `Settings -> Playwright Runners`.
 4. Klik `Create Runner Token`, isi nama device, pilih expiry, lalu copy token yang muncul sekali.
@@ -53,3 +53,19 @@ RUNNER_TOKEN=kmp_runner_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 6. Jalankan ulang runner dengan `npm run belanja:runner`.
 
 Untuk mencabut akses device, buka `Settings -> Playwright Runners` lalu klik `Revoke`. Token yang direvoke langsung gagal pada request berikutnya tanpa redeploy Vercel.
+
+## Belanja Copy/Reconcile
+
+`Kirim ke Web Belanja` memakai local Playwright runner. Flow baru menyalin 43 transaksi template dari `Maleber / Karangtengah / Cianjur / Jawa Barat`, memilih KDKMP tujuan dari metadata project, lalu merekonsiliasi transaksi hasil copy memakai data Resume tujuan. Vercel tetap hanya menjadi UI, API queue, dan status polling; target Web Belanja tetap diakses dari PC runner yang tersambung VPN.
+
+Env runner tambahan:
+
+```env
+BELANJA_BASE_TRANSACTION_COUNT=43
+BELANJA_COPY_SUCCESS_WAIT_MS=5000
+BELANJA_TARGET_NAVIGATION_TIMEOUT_MS=60000
+```
+
+Dry-run tidak melakukan copy atau edit live. Live mode tetap membutuhkan mapping yang sudah verified melalui riwayat dry-run/success atau `BELANJA_FIELD_MAP_VERIFIED=true` pada runner yang memang sudah dicek.
+
+Runner menolak copy ulang jika destination sudah berisi transaksi, menampilkan ringkasan duplicate exact jika jumlah transaksi tidak sesuai, dan pada final verification membandingkan total Web Belanja dengan total Resume. Detail material/honorarium/sewa alat diverifikasi ulang per qty, harga satuan/tarif, subtotal, tanggal bayar, dan penyedia/penerima.

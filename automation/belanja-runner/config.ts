@@ -6,6 +6,7 @@ export type RunnerConfig = {
   targetBaseUrl: string;
   targetHealthPath: string;
   targetCheckTimeoutMs: number;
+  targetNavigationTimeoutMs: number;
   targetDashboardPath: string;
   targetBelanjaUrlPath: string;
   targetBelanjaCreateUrlPath: string;
@@ -26,6 +27,8 @@ export type RunnerConfig = {
   apiRequestTimeoutMs: number;
   apiRequestRetries: number;
   submitSuccessWaitMs: number;
+  copySuccessWaitMs: number;
+  baseTransactionCount: number;
   fastUiTimeoutMs: number;
   choiceSearchTimeoutMs: number;
   choiceSettleMs: number;
@@ -92,6 +95,7 @@ export function getRunnerConfig(): RunnerConfig {
     targetBaseUrl: process.env.TARGET_BASE_URL || "http://10.21.21.10:9023",
     targetHealthPath: process.env.TARGET_HEALTH_PATH || "/login",
     targetCheckTimeoutMs: numberEnv("TARGET_CHECK_TIMEOUT_MS", 3000),
+    targetNavigationTimeoutMs: numberEnv("BELANJA_TARGET_NAVIGATION_TIMEOUT_MS", 60000),
     targetDashboardPath: process.env.TARGET_DASHBOARD_PATH || "/home",
     targetBelanjaUrlPath: process.env.TARGET_BELANJA_URL_PATH || "/belanja",
     targetBelanjaCreateUrlPath: process.env.TARGET_BELANJA_CREATE_URL_PATH || "/belanja/create",
@@ -112,6 +116,8 @@ export function getRunnerConfig(): RunnerConfig {
     apiRequestTimeoutMs: numberEnv("BELANJA_API_REQUEST_TIMEOUT_MS", 15000),
     apiRequestRetries: integerEnv("BELANJA_API_REQUEST_RETRIES", 4),
     submitSuccessWaitMs: numberEnv("BELANJA_SUBMIT_SUCCESS_WAIT_MS", 2000),
+    copySuccessWaitMs: numberEnv("BELANJA_COPY_SUCCESS_WAIT_MS", 5000),
+    baseTransactionCount: integerEnv("BELANJA_BASE_TRANSACTION_COUNT", 43),
     fastUiTimeoutMs: numberEnv("BELANJA_FAST_UI_TIMEOUT_MS", 1200),
     choiceSearchTimeoutMs: numberEnv("BELANJA_CHOICE_SEARCH_TIMEOUT_MS", 2000),
     choiceSettleMs: numberEnv("BELANJA_CHOICE_SETTLE_MS", 50),

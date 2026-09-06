@@ -12,6 +12,21 @@ import {
   validateBelanjaPayload,
 } from "../src/lib/belanja-sync/payload.ts";
 import {
+  buildDestinationKdkmp,
+  findKdkmpOption,
+  formatKdkmpIdentity,
+  isMaleberSource,
+  parseKdkmpOptionText,
+  SOURCE_KDKMP,
+} from "../src/lib/belanja-sync/kdkmp.ts";
+import {
+  buildBelanjaIdempotencyKey,
+  buildBelanjaTransactionPlan,
+  DEFAULT_BELANJA_BASE_TRANSACTION_COUNT,
+  inferHonorariumRole,
+  resolveHonorariumRecipient,
+} from "../src/lib/belanja-sync/transaction-plan.ts";
+import {
   nextFailedBelanjaStatus,
   shouldQueueBelanjaItem,
 } from "../src/lib/belanja-sync/status.ts";
@@ -21,6 +36,18 @@ import {
 } from "../src/lib/belanja-sync/automation-errors.ts";
 import { getRunnerConfig, loadLocalEnv } from "../automation/belanja-runner/config.ts";
 import { resolveEffectiveDryRun, resolveEffectiveFieldMapVerified } from "../automation/belanja-runner/mode.ts";
+import {
+  diagnoseDestinationBudget,
+  assertSnapshotDestination,
+  compareTransactionSnapshot,
+  detailNamesMatch,
+  matchLine,
+  formatBudgetDiagnostics,
+  genericHonorariumNameMatches,
+  planDestinationBudgetRepairs,
+  planStageBudgetReconcile,
+  shouldReconcileTransactionForStageBudgetPlan,
+} from "../automation/belanja-runner/copy-reconcile.ts";
 
 function makeProject() {
   return {
@@ -63,8 +90,224 @@ function makeItem(patch = {}) {
   };
 }
 
+const templateRows = [
+  ["V", "V.03", "Pekerjaan Proteksi Petir", "material", "2026-03-11"],
+  ["VI", "VI.10", "Trafo dan Tiang Listrik", "labor", "2026-03-11"],
+  ["VI", "VI.07", "Sumur Bor", "labor", "2026-03-11"],
+  ["V", "V.02", "Instalasi Penerangan/Kotak", "material", "2026-03-10"],
+  ["IV", "IV.01", "Air Bersih", "labor", "2026-03-09"],
+  ["V", "V.01", "Distribusi listrik", "labor", "2026-03-09"],
+  ["IV", "IV.01", "Air Bersih", "material", "2026-03-09"],
+  ["IV", "IV.02", "Air Kotor/Bekas", "material", "2026-03-09"],
+  ["IV", "IV.01", "Air Bersih", "equipment", "2026-03-09"],
+  ["IV", "IV.03", "Pembuangan Air Hujan", "material", "2026-03-09"],
+  ["V", "V.01", "Distribusi listrik", "material", "2026-03-09"],
+  ["III", "III.05", "Kusen", "labor", "2026-02-20"],
+  ["III", "III.05", "Kusen", "material", "2026-02-18"],
+  ["III", "III.07", "Penutup Atap", "material", "2026-02-18"],
+  ["III", "III.08", "Facade", "labor", "2026-02-18"],
+  ["III", "III.06", "Sanitair", "material", "2026-02-18"],
+  ["III", "III.05", "Kusen", "labor", "2026-02-12"],
+  ["III", "III.04", "Finishing Cat", "material", "2026-02-11"],
+  ["III", "III.07", "Penutup Atap", "labor", "2026-02-09"],
+  ["III", "III.03", "Penutup Langit-Langit", "material", "2026-02-04"],
+  ["VII", "VII.01", "Biaya Operasional", "labor", "2026-02-03"],
+  ["III", "III.01", "Pasangan", "labor", "2026-02-03"],
+  ["III", "III.01", "Pasangan", "labor", "2026-02-02"],
+  ["III", "III.02", "Lantai dan Dinding", "material", "2026-02-02"],
+  ["III", "III.01", "Pasangan", "equipment", "2026-02-02"],
+  ["II", "II.02", "Struktur Atas Bangunan", "material", "2026-01-14"],
+  ["III", "III.01", "Pasangan", "material", "2026-01-07"],
+  ["II", "II.03", "Rangka Atap", "labor", "2026-01-03"],
+  ["II", "II.03", "Rangka Atap", "material", "2026-01-02"],
+  ["II", "II.02", "Struktur Atas Bangunan", "equipment", "2025-12-29"],
+  ["II", "II.01", "Struktur Bawah", "labor", "2025-12-29"],
+  ["I", "I.02", "Bouwplank", "labor", "2025-12-04"],
+  ["VI", "VI.06", "Cut and Fill", "equipment", "2025-12-02"],
+  ["VI", "VI.01", "Sosialisasi", "labor", "2025-12-01"],
+  ["I", "I.02", "Bouwplank", "equipment", "2025-12-01"],
+  ["I", "I.02", "Bouwplank", "labor", "2025-12-01"],
+  ["VI", "VI.04", "Penyiapan Lahan", "labor", "2025-12-01"],
+  ["VI", "VI.05", "Pematangan Lahan", "labor", "2025-12-01"],
+  ["VI", "VI.03", "Survei/Pengukuran Kelayakan", "labor", "2025-12-01"],
+  ["I", "I.01", "Pembersihan Lahan", "material", "2025-12-01"],
+  ["VI", "VI.02", "Rapat Koordinasi", "material", "2025-12-01"],
+  ["II", "II.01", "Struktur Bawah", "material", "2025-12-01"],
+  ["I", "I.02", "Bouwplank", "material", "2025-12-01"],
+];
+
+function makeTemplatePlanProject() {
+  const project = makeProject();
+  return {
+    ...project,
+    villageName: "Mekarsari",
+    districtName: "Cianjur",
+    regencyName: "Cianjur",
+    items: templateRows.map(([roman, code, name, type, date], index) => makeItem({
+      id: `33333333-3333-3333-3333-${String(index + 1).padStart(12, "0")}`,
+      stageCode: `TAHAP_${roman}`,
+      stageName: `${roman} - PEKERJAAN`,
+      category: `${code} ${name}`,
+      categoryCode: code,
+      categoryName: name,
+      expenseDate: date,
+      itemName: type === "labor" ? `${name} Mandor` : `${name} Item`,
+      volume: index + 1,
+      unit: type === "labor" ? "Orang-Hari" : type === "equipment" ? "Hari" : "Unit",
+      unitPrice: 1000 + index,
+      vendorName: type === "labor" ? "" : `Vendor ${index + 1}`,
+      sortOrder: index + 1,
+      expenseType: type,
+    })),
+  };
+}
+
+function makeTargetRowsFromPlan(plan) {
+  return plan.transactions.map((transaction, index) => ({
+    rowIndex: index + 1,
+    uuid: `target-${index + 1}`,
+    editHref: `/belanja/${index + 1}/edit`,
+    kdkmpText: "Koperasi Desa Mekarsari",
+    stageText: transaction.transactionIdentity.stageText,
+    itemText: `${transaction.transactionIdentity.categoryCode} ${transaction.transactionIdentity.categoryText}`,
+    belanjaCategoryText: transaction.transactionIdentity.belanjaCategoryText,
+    totalText: String(transaction.totalAmount),
+    dateText: transaction.transactionIdentity.transactionDate,
+    identityKey: "",
+  }));
+}
+
+function snapshotFor(transaction) {
+  return { destination: "Koperasi Desa Muka (Jawa Barat, Cianjur, Cianjur, Muka)",
+    stage: transaction.transactionIdentity.stageText,
+    category: `${transaction.transactionIdentity.categoryCode} ${transaction.transactionIdentity.categoryText}`,
+    kind: transaction.transactionIdentity.belanjaCategoryText, date: transaction.transactionIdentity.transactionDate,
+    lines: transaction.lines.map((line, index) => ({ index, name: line.namaItem, qty: line.qty,
+      unitPrice: line.hargaSatuan, subtotal: line.jumlah, paymentDate: line.tanggal, recipient: line.vendor })),
+  };
+}
+
+test("signature mendeteksi qty/harga tertukar meskipun subtotal tetap sama", () => {
+  const plan = buildBelanjaTransactionPlan(makeTemplatePlanProject());
+  const transaction = plan.transactions.find((t) => t.kind === "material");
+  const snapshot = snapshotFor(transaction);
+  const correct = compareTransactionSnapshot(transaction, snapshot);
+  assert.deepEqual(correct.differences, []);
+  assert.equal(correct.expectedSignature, correct.actualSignature);
+  snapshot.lines[0].qty *= 2;
+  snapshot.lines[0].unitPrice /= 2;
+  const diff = compareTransactionSnapshot(transaction, snapshot);
+  assert.equal(diff.differences.length, 2);
+  assert.notEqual(diff.expectedSignature, diff.actualSignature);
+});
+
+test("signature menerima skala qty ribuan target hanya jika subtotal tetap sama", () => {
+  const transaction = buildBelanjaTransactionPlan(makeTemplatePlanProject()).transactions.find((t) => t.kind === "material");
+  transaction.lines = [{
+    ...transaction.lines[0],
+    lineId: "batu-bata-line",
+    namaItem: "Batu Bata Merah",
+    qty: 1500,
+    satuan: "Buah",
+    hargaSatuan: 1200,
+    jumlah: 1800000,
+    tanggal: "2026-04-15",
+    vendor: "NOTA KOSONG",
+  }];
+  transaction.lineCount = 1;
+  transaction.totalAmount = 1800000;
+  const snapshot = snapshotFor(transaction);
+  snapshot.lines[0] = {
+    ...snapshot.lines[0],
+    name: "Batu Bata Merah",
+    qty: 1.5,
+    unit: "Buah",
+    unitPrice: 1200,
+    subtotal: 1800000,
+    paymentDate: "2026-04-15",
+    recipient: "NOTA KOSONG",
+  };
+  const accepted = compareTransactionSnapshot(transaction, snapshot);
+  assert.deepEqual(accepted.differences, []);
+  assert.equal(accepted.expectedSignature, accepted.actualSignature);
+
+  snapshot.lines[0].subtotal = 1799900;
+  const rejected = compareTransactionSnapshot(transaction, snapshot);
+  assert.match(rejected.differences.join(" "), /Batu Bata Merah qty|Batu Bata Merah subtotal/);
+  assert.notEqual(rejected.expectedSignature, rejected.actualSignature);
+});
+
+test("signature menolak penerima kosong dan memakai jabatan dari nama transaksi", () => {
+  const transaction = buildBelanjaTransactionPlan(makeTemplatePlanProject()).transactions.find((t) => t.kind === "honorarium");
+  transaction.lines[0].namaItem = "Lembur Mandor";
+  transaction.lines[0].recipient = "Nama Maleber";
+  const snapshot = snapshotFor(transaction);
+  snapshot.lines[0].recipient = "";
+  assert.match(compareTransactionSnapshot(transaction, snapshot).differences.join(" "), /penerima.*Mandor/);
+  snapshot.lines[0].recipient = "Mandor";
+  assert.deepEqual(compareTransactionSnapshot(transaction, snapshot).differences, []);
+});
+
+test("signature honorarium role other boleh mempertahankan penerima target existing", () => {
+  const transaction = buildBelanjaTransactionPlan(makeTemplatePlanProject()).transactions.find((t) => t.kind === "honorarium");
+  transaction.lines[0].namaItem = "Uang Jalan / Pengawalan Lapangan";
+  transaction.lines[0].role = "other";
+  transaction.lines[0].recipient = "Honorarium";
+  transaction.lines[0].vendor = "KWITANSI";
+  const snapshot = snapshotFor(transaction);
+  snapshot.lines[0].recipient = "Serma Andri Rolen";
+  assert.deepEqual(compareTransactionSnapshot(transaction, snapshot).differences, []);
+});
+
+test("budget mendeteksi selisih satu rupiah dan tahap di luar tujuh tahap", () => {
+  const plan = buildBelanjaTransactionPlan(makeTemplatePlanProject());
+  const transaction = plan.transactions[0];
+  transaction.transactionIdentity.stageText = "VIII - TAMBAHAN";
+  const rows = makeTargetRowsFromPlan(plan);
+  rows[0].totalText = String(transaction.totalAmount - 1);
+  const diagnostic = diagnoseDestinationBudget(rows, plan.transactions);
+  assert.equal(diagnostic.totalDifference, -1);
+  assert.equal(diagnostic.stages.find((stage) => stage.stageKey === "VIII").issues.length, 1);
+});
+
+test("guard destination menolak desa atau kecamatan yang berbeda", () => {
+  const transaction = buildBelanjaTransactionPlan(makeTemplatePlanProject()).transactions[0];
+  const snapshot = snapshotFor(transaction);
+  const expected = { village: "Muka", district: "Cianjur", regency: "Cianjur", province: "Jawa Barat" };
+  assert.doesNotThrow(() => assertSnapshotDestination(snapshot, expected));
+  assert.throws(() => assertSnapshotDestination(snapshot, { ...expected, district: "Karangtengah" }), /Destination salah/);
+  assert.throws(() => assertSnapshotDestination({ ...snapshot, destination: "" }, expected), /Destination salah/);
+});
+
+test("matching menolak ukuran berbeda dan kandidat ambigu", () => {
+  assert.equal(detailNamesMatch("Besi 18 mm", "Besi 8 mm"), false);
+  assert.equal(detailNamesMatch("Besi 10 mm", "Besi 8 mm"), false);
+  assert.equal(detailNamesMatch("Hebeul 10 (standard) - BH", "Hebel 10"), true);
+  const line = { namaItem: "Semen", qty: 10, hargaSatuan: 100, jumlah: 1000 };
+  assert.throws(() => matchLine(line, [{ index: 0, name: "Semen" }, { index: 1, name: "Semen" }], new Set()), /ambigu/);
+});
+
+test("matching memilih material duplicate berdasarkan tanggal bayar dan vendor", () => {
+  const line = {
+    namaItem: "Besi Polos 8 mm",
+    qty: 118,
+    hargaSatuan: 37000,
+    jumlah: 4366000,
+    tanggal: "2026-03-30",
+    vendor: "CBB",
+  };
+  const selected = matchLine(line, [
+    { index: 2, name: "Besi Polos 8 (-) - Btg", qty: 118, unitPrice: 37000, subtotal: 4366000, paymentDate: "2026-03-02", recipient: "CBB" },
+    { index: 24, name: "Besi Polos 8 (-) - Btg", qty: 118, unitPrice: 37000, subtotal: 4366000, paymentDate: "2026-03-30", recipient: "CBB" },
+  ], new Set());
+  assert.equal(selected.index, 24);
+});
+
 test("normalisasi angka dan tanggal untuk payload Belanja", () => {
   assert.equal(normalizeBelanjaNumber("1.250.000,50"), 1250000.5);
+  assert.equal(normalizeBelanjaNumber("Rp. 18.000.000,00"), 18000000);
+  assert.equal(normalizeBelanjaNumber("Rp. 600.000,00"), 600000);
+  assert.equal(normalizeBelanjaNumber("Rp. 1.387.618.000,00"), 1387618000);
   assert.equal(normalizeBelanjaIsoDate("03/11/2025"), "2025-11-03");
 
   const payload = buildBelanjaPayload(makeProject(), makeItem());
@@ -88,6 +331,14 @@ test("validasi menolak jumlah yang tidak sama dengan qty x harga satuan", () => 
 test("matching teks belanja menerima urutan kata berbeda pada item target", () => {
   assert.equal(belanjaTextMatches("Mandor Lembur", "lembur Mandor"), true);
   assert.equal(belanjaTextMatches("I.02 Pekerjaan Bouwplank", "I.02"), true);
+  assert.equal(belanjaTextMatches("PEK POLDING GATE (STANDAR)", "Tukang Borongan Pek. Folding Gate"), true);
+  assert.equal(belanjaTextMatches("PEK FOLDINGDOR (STANDAR)", "JASA BORONG Pek. Folding Door"), true);
+  assert.equal(belanjaTextMatches("Besi Polos 8 (-) - Btg", "Besi Polos 8 mm"), true);
+  assert.equal(belanjaTextMatches("Batu Belah (8 Kubik) - Truck", "batu belah 15/20"), true);
+  assert.equal(belanjaTextMatches("PEK SIGNAGE KDKMP (STANDAR)", "JASA BORONG SIGNAGE KDKMP"), true);
+  assert.equal(belanjaTextMatches("PEK PINTU BESI (SETANDAR)", "Tukang Borongan Pek. Pintu Besi"), true);
+  assert.equal(belanjaTextMatches("PEK DINDING PARTISI KACA (SETANDAR)", "Tukang Borongan Pek. Dinding Partisi Kaca"), true);
+  assert.equal(belanjaTextMatches("PEK PINTU KACA FRAMELESS (SETANDAR)", "Tukang Borongan Pek. Pintu Kaca Frameless"), true);
   assert.equal(
     belanjaTextMatches(
       "Koperasi Desa Batulawang (Jawa Barat, Cianjur, Cibinong, Batulawang)",
@@ -97,6 +348,176 @@ test("matching teks belanja menerima urutan kata berbeda pada item target", () =
   );
   assert.equal(belanjaTextMatches("lembur", "lembur Mandor"), false);
   assert.equal(belanjaTextMatches("Kepala Tukang Lembur", "lembur Mandor"), false);
+});
+
+test("matcher honorarium menerima label lembur target yang generik secara terbatas", () => {
+  assert.equal(genericHonorariumNameMatches("lembur (pekerjaan)", "lembur Mandor"), true);
+  assert.equal(genericHonorariumNameMatches("lembur (pekerjaan)", "lembur Kepala Tukang"), true);
+  assert.equal(genericHonorariumNameMatches("lembur (pekerjaan)", "JASA BORONG SIGNAGE KDKMP"), false);
+});
+
+test("KDKMP option wajib cocok exact normalized hierarchy", () => {
+  const parsed = parseKdkmpOptionText("Koperasi Desa Maleber (Jawa Barat, Kab. Cianjur, Kec. Karangtengah, Desa Maleber)");
+  assert.ok(parsed);
+  assert.equal(isMaleberSource(parsed), true);
+  assert.equal(formatKdkmpIdentity(buildDestinationKdkmp(makeTemplatePlanProject())), "Mekarsari / Cianjur / Cianjur / Jawa Barat");
+
+  const option = findKdkmpOption([
+    { value: "wrong", text: "Koperasi Desa Mekarsari (Jawa Barat, Cianjur, Karangtengah, Mekarsari)" },
+    { value: "right", text: "Koperasi Desa Mekarsari (Jawa Barat, Cianjur, Cianjur, Mekarsari)" },
+  ], {
+    province: SOURCE_KDKMP.province,
+    regency: "Kab. Cianjur",
+    district: "Kec. Cianjur",
+    village: "Desa Mekarsari",
+  });
+  assert.equal(option.value, "right");
+
+  assert.throws(() => findKdkmpOption([
+    { value: "a", text: "Koperasi Desa Mekarsari (Jawa Barat, Cianjur, Cianjur, Mekarsari)" },
+    { value: "b", text: "Koperasi Desa Mekarsari (Jawa Barat, Kab. Cianjur, Kec. Cianjur, Desa Mekarsari)" },
+  ], {
+    province: "Jawa Barat",
+    regency: "Cianjur",
+    district: "Cianjur",
+    village: "Mekarsari",
+  }), /ambigu/);
+});
+
+test("transaction plan membentuk 43 transaksi target dari grup resume", () => {
+  const project = makeTemplatePlanProject();
+  const plan = buildBelanjaTransactionPlan(project, project.items);
+  assert.equal(plan.transactionCount, DEFAULT_BELANJA_BASE_TRANSACTION_COUNT);
+  assert.equal(plan.lineCount, DEFAULT_BELANJA_BASE_TRANSACTION_COUNT);
+  assert.equal(plan.summary.material > 0, true);
+  assert.equal(plan.summary.honorarium > 0, true);
+  assert.equal(plan.summary.equipment > 0, true);
+  assert.equal(plan.transactions.every((transaction) => transaction.operationType === "copy_reconcile_v1"), true);
+});
+
+test("diagnostic final budget menunjuk tahap dan transaksi material yang selisih", () => {
+  const project = makeTemplatePlanProject();
+  const plan = buildBelanjaTransactionPlan(project, project.items);
+  const rows = makeTargetRowsFromPlan(plan);
+  const mismatchIndex = plan.transactions.findIndex((transaction) => (
+    transaction.kind === "material" && transaction.transactionIdentity.categoryCode.startsWith("I.")
+  ));
+  assert.notEqual(mismatchIndex, -1);
+  rows[mismatchIndex] = {
+    ...rows[mismatchIndex],
+    totalText: String(plan.transactions[mismatchIndex].totalAmount - 25000),
+  };
+
+  const diagnostic = diagnoseDestinationBudget(rows, plan.transactions);
+  const stageI = diagnostic.stages.find((stage) => stage.stageKey === "I");
+  assert.ok(stageI);
+  assert.equal(diagnostic.totalDifference, -25000);
+  assert.equal(stageI.difference, -25000);
+  assert.equal(stageI.issues[0].kind, "material");
+  assert.equal(stageI.issues[0].issue, "total_mismatch");
+
+  const message = formatBudgetDiagnostics(diagnostic);
+  assert.match(message, /Tahap I/);
+  assert.match(message, /material/);
+  assert.match(message, /selisih/);
+});
+
+test("repair planner final budget memilih transaksi target yang perlu diedit", () => {
+  const project = makeTemplatePlanProject();
+  const plan = buildBelanjaTransactionPlan(project, project.items);
+  const rows = makeTargetRowsFromPlan(plan);
+  const mismatchIndex = plan.transactions.findIndex((transaction) => (
+    transaction.kind === "material" && transaction.transactionIdentity.categoryCode.startsWith("I.")
+  ));
+  assert.notEqual(mismatchIndex, -1);
+  rows[mismatchIndex] = {
+    ...rows[mismatchIndex],
+    totalText: String(plan.transactions[mismatchIndex].totalAmount + 12500),
+  };
+
+  const diagnostic = diagnoseDestinationBudget(rows, plan.transactions);
+  const repairs = planDestinationBudgetRepairs(rows, plan.transactions, diagnostic);
+
+  assert.equal(repairs.length, 1);
+  assert.equal(repairs[0].transactionId, plan.transactions[mismatchIndex].transactionId);
+  assert.equal(repairs[0].rowIndex, rows[mismatchIndex].rowIndex);
+  assert.equal(repairs[0].kind, "material");
+  assert.equal(repairs[0].difference, 12500);
+});
+
+test("stage budget planner hanya mengedit transaksi pada tahap yang selisih", () => {
+  const project = makeTemplatePlanProject();
+  const plan = buildBelanjaTransactionPlan(project, project.items);
+  const rows = makeTargetRowsFromPlan(plan);
+  const mismatchIndex = plan.transactions.findIndex((transaction) => (
+    transaction.kind === "material" && transaction.transactionIdentity.categoryCode.startsWith("I.")
+  ));
+  assert.notEqual(mismatchIndex, -1);
+  rows[mismatchIndex] = {
+    ...rows[mismatchIndex],
+    totalText: String(plan.transactions[mismatchIndex].totalAmount + 12500),
+  };
+
+  const diagnostic = diagnoseDestinationBudget(rows, plan.transactions);
+  const stagePlan = planStageBudgetReconcile(rows, plan.transactions, diagnostic);
+  const edited = plan.transactions.filter((transaction) => (
+    shouldReconcileTransactionForStageBudgetPlan(transaction, stagePlan)
+  ));
+
+  assert.equal(stagePlan.mode, "targeted");
+  assert.deepEqual(stagePlan.mismatchedStageKeys, ["I"]);
+  assert.equal(stagePlan.balancedStageKeys.includes("II"), true);
+  assert.equal(edited.length, 1);
+  assert.equal(edited[0].transactionId, plan.transactions[mismatchIndex].transactionId);
+});
+
+test("diagnostic final budget mendeteksi transaksi target duplicate exact", () => {
+  const project = makeTemplatePlanProject();
+  const plan = buildBelanjaTransactionPlan(project, project.items);
+  const rows = makeTargetRowsFromPlan(plan);
+  rows.push({ ...rows[0], rowIndex: rows.length + 1, uuid: "duplicate-row" });
+
+  const diagnostic = diagnoseDestinationBudget(rows, plan.transactions);
+  assert.equal(diagnostic.duplicateGroups.length, 1);
+  assert.equal(diagnostic.duplicateGroups[0].length, 2);
+  assert.match(formatBudgetDiagnostics(diagnostic), /Duplicate exact 1 grup/);
+});
+
+test("idempotency key stabil dan berubah saat resume berubah", () => {
+  const project = makeTemplatePlanProject();
+  const plan = buildBelanjaTransactionPlan(project, project.items);
+  const destination = buildDestinationKdkmp(project);
+  const first = buildBelanjaIdempotencyKey({ projectId: project.id, destination, resumeHash: plan.resumeHash });
+  const second = buildBelanjaIdempotencyKey({ projectId: project.id, destination, resumeHash: plan.resumeHash });
+  assert.equal(first, second);
+
+  const changedProject = {
+    ...project,
+    items: project.items.map((item, index) => index === 0 ? { ...item, unitPrice: item.unitPrice + 1 } : item),
+  };
+  const changedPlan = buildBelanjaTransactionPlan(changedProject, changedProject.items);
+  const changed = buildBelanjaIdempotencyKey({ projectId: changedProject.id, destination, resumeHash: changedPlan.resumeHash });
+  assert.notEqual(first, changed);
+});
+
+test("honorarium role dan recipient memakai data existing tanpa mengarang nama", () => {
+  const mandorPayload = buildBelanjaPayload(makeProject(), makeItem({
+    itemName: "Honorarium Tim Survei Pengukuran Pemetaan",
+    unit: "Orang-Hari",
+    vendorName: "",
+    expenseType: "labor",
+  }));
+  assert.equal(inferHonorariumRole(mandorPayload), "mandor");
+  assert.equal(resolveHonorariumRecipient(mandorPayload), "Mandor");
+
+  const namedPayload = buildBelanjaPayload(makeProject(), makeItem({
+    itemName: "Kepala Tukang Lembur",
+    unit: "Orang-Hari",
+    vendorName: "Dian",
+    expenseType: "labor",
+  }));
+  assert.equal(inferHonorariumRole(namedPayload), "kepala_tukang");
+  assert.equal(resolveHonorariumRecipient(namedPayload), "Dian");
 });
 
 test("anti-duplikasi default tidak queue item success atau active", () => {
@@ -182,6 +603,8 @@ test("runner memakai default polling cepat dan health-check periodik", () => {
     "BELANJA_API_REQUEST_TIMEOUT_MS",
     "BELANJA_API_REQUEST_RETRIES",
     "BELANJA_SUBMIT_SUCCESS_WAIT_MS",
+    "BELANJA_COPY_SUCCESS_WAIT_MS",
+    "BELANJA_BASE_TRANSACTION_COUNT",
     "BELANJA_FAST_UI_TIMEOUT_MS",
     "BELANJA_CHOICE_SEARCH_TIMEOUT_MS",
     "BELANJA_CHOICE_SETTLE_MS",
@@ -201,6 +624,8 @@ test("runner memakai default polling cepat dan health-check periodik", () => {
     assert.equal(config.apiRequestTimeoutMs, 15000);
     assert.equal(config.apiRequestRetries, 4);
     assert.equal(config.submitSuccessWaitMs, 2000);
+    assert.equal(config.copySuccessWaitMs, 5000);
+    assert.equal(config.baseTransactionCount, 43);
     assert.equal(config.fastUiTimeoutMs, 1200);
     assert.equal(config.choiceSearchTimeoutMs, 2000);
     assert.equal(config.choiceSettleMs, 50);

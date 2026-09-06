@@ -16,8 +16,47 @@ export const BELANJA_ITEM_STATUSES = [
   "needs_review",
 ] as const;
 
+export const BELANJA_COPY_RECONCILE_STAGES = [
+  "PRE_FLIGHT",
+  "SOURCE_OPENED",
+  "SOURCE_SELECTED",
+  "COPY_STARTED",
+  "COPY_CONFIRMED",
+  "DESTINATION_COPIED",
+  "RECONCILING",
+  "VERIFYING",
+  "COMPLETED",
+  "FAILED",
+] as const;
+
 export type BelanjaSyncJobStatus = (typeof BELANJA_JOB_STATUSES)[number];
 export type BelanjaSyncItemStatus = (typeof BELANJA_ITEM_STATUSES)[number];
+export type BelanjaCopyReconcileStage = (typeof BELANJA_COPY_RECONCILE_STAGES)[number];
+export type BelanjaSyncOperationType = "legacy_item_submit" | "copy_reconcile_v1";
+
+export type KdkmpIdentity = {
+  province?: string;
+  regency: string;
+  district: string;
+  village: string;
+  label?: string;
+};
+
+export type BelanjaTransactionKind = "material" | "honorarium" | "equipment";
+
+export type BelanjaTransactionIdentity = {
+  key: string;
+  stageKey: string;
+  stageText: string;
+  categoryCode: string;
+  categoryText: string;
+  categoryKey: string;
+  belanjaCategoryText: string;
+  belanjaCategoryKey: string;
+  transactionDate: string;
+  kind: BelanjaTransactionKind;
+  occurrence: number;
+};
 
 export type BelanjaPayload = {
   sourceItemId: string;
@@ -40,11 +79,79 @@ export type BelanjaPayload = {
   keterangan?: string;
 };
 
+export type BelanjaTransactionLine = BelanjaPayload & {
+  lineId: string;
+  sequence: number;
+  role?: "mandor" | "kepala_tukang" | "tukang" | "kuli_kenek" | "other";
+  recipient?: string;
+};
+
+export type BelanjaTransactionPayload = BelanjaPayload & {
+  operationType: "copy_reconcile_v1";
+  transactionId: string;
+  transactionKey: string;
+  sequence: number;
+  kind: BelanjaTransactionKind;
+  lineCount: number;
+  sourceResumeItemIds: string[];
+  transactionIdentity: BelanjaTransactionIdentity;
+  lines: BelanjaTransactionLine[];
+  totalAmount: number;
+  recipientMap?: Record<string, string>;
+};
+
 export type BelanjaPayloadValidation = {
   valid: boolean;
   errors: string[];
   computedJumlah: number;
   difference: number;
+};
+
+export type BelanjaSyncJobProgress = {
+  stage: BelanjaCopyReconcileStage;
+  message?: string;
+  current?: number;
+  total?: number;
+  copiedTransactions?: number;
+  verifiedTransactions?: number;
+  materialCompleted?: number;
+  materialTotal?: number;
+  honorariumCompleted?: number;
+  honorariumTotal?: number;
+  equipmentCompleted?: number;
+  equipmentTotal?: number;
+  updatedAt?: string;
+};
+
+export type BelanjaSyncReport = {
+  source?: KdkmpIdentity;
+  destination?: KdkmpIdentity;
+  expectedTransactions?: number;
+  copiedTransactions?: number;
+  verifiedTransactions?: number;
+  expectedTotalAmount?: number;
+  actualTotalAmount?: number;
+  totalDifference?: number;
+  materialsUpdated?: number;
+  honorariumUpdated?: number;
+  equipmentUpdated?: number;
+  budgetRepairAttempts?: number;
+  budgetRepairedTransactions?: number;
+  budgetRepairDetails?: string[];
+  reconciliation?: {
+    initialExpectedTotal?: number;
+    initialActualTotal?: number;
+    initialDifference?: number;
+    mismatchedStages?: string[];
+    updatedTransactions?: number;
+    scanMs?: number;
+    editMs?: number;
+    verifyMs?: number;
+    stages?: Array<{ stageKey: string; expectedTotal: number; actualTotal: number; difference: number; signatureMatches: boolean }>;
+    finalStatus: "RECONCILING" | "VERIFIED";
+  };
+  errors?: string[];
+  status?: BelanjaCopyReconcileStage | BelanjaSyncJobStatus;
 };
 
 export type BelanjaSyncJob = {
@@ -61,6 +168,11 @@ export type BelanjaSyncJob = {
   finishedAt?: string | null;
   errorMessage?: string | null;
   metadataJson?: Record<string, unknown>;
+  operationType?: BelanjaSyncOperationType | string | null;
+  stage?: BelanjaCopyReconcileStage | null;
+  stageMessage?: string | null;
+  progress?: BelanjaSyncJobProgress | null;
+  report?: BelanjaSyncReport | null;
 };
 
 export type BelanjaSyncItem = {
@@ -90,6 +202,7 @@ export type BelanjaRunnerHeartbeat = {
   online: boolean;
   targetBaseUrl?: string | null;
   message?: string | null;
+  metadataJson?: Record<string, unknown>;
 };
 
 export type BelanjaProjectSyncState = {
@@ -99,6 +212,7 @@ export type BelanjaProjectSyncState = {
   items: BelanjaSyncItem[];
   latestBySourceItemId: Record<string, BelanjaSyncItem>;
   runner: BelanjaRunnerHeartbeat | null;
+  activeJob?: BelanjaSyncJob | null;
   errorMessage?: string | null;
 };
 
@@ -109,6 +223,7 @@ export type BelanjaSyncOverviewProject = {
   successItems: number;
   failedItems: number;
   pendingItems: number;
+  latestJob?: BelanjaSyncJob | null;
   failedDetails?: Array<{
     sourceResumeItemId: string;
     itemName: string;
@@ -125,9 +240,22 @@ export type CreateBelanjaSyncJobInput = {
   itemIds: string[];
   dryRun?: boolean;
   forceResend?: boolean;
+  operationType?: BelanjaSyncOperationType;
+  expectedTransactionCount?: number;
 };
 
 export type ClaimedBelanjaSyncItem = {
   job: BelanjaSyncJob;
   item: BelanjaSyncItem;
+};
+
+export type ClaimedBelanjaSyncJob = {
+  job: BelanjaSyncJob;
+  items: BelanjaSyncItem[];
+  transactions: BelanjaTransactionPayload[];
+  sourceKdkmp: KdkmpIdentity;
+  destinationKdkmp: KdkmpIdentity;
+  expectedTransactionCount: number;
+  stage: BelanjaCopyReconcileStage;
+  completedTransactionIds: string[];
 };

@@ -20,8 +20,8 @@ export async function createBelanjaContext(browser: Browser, config: RunnerConfi
 }
 
 export async function ensureAuthenticated(page: Page, context: BrowserContext, config: RunnerConfig) {
-  await page.goto(targetUrl(config, "/login"), { waitUntil: "domcontentloaded", timeout: 20_000 });
-  await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+  await page.goto(targetUrl(config, "/login"), { waitUntil: "domcontentloaded", timeout: config.targetNavigationTimeoutMs });
+  await page.waitForLoadState("networkidle", { timeout: Math.min(config.targetNavigationTimeoutMs, 15_000) }).catch(() => {});
   if (!await isLoginPage(page) || !await hasLoginForm(page)) return true;
 
   if (!config.targetEmail || !config.targetPassword) {
@@ -44,10 +44,10 @@ export async function ensureAuthenticated(page: Page, context: BrowserContext, c
 
   const submit = page.getByRole("button", { name: new RegExp(targetFieldMap.login.submitTexts.join("|"), "i") }).first();
   await Promise.all([
-    page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => {}),
+    page.waitForLoadState("networkidle", { timeout: config.targetNavigationTimeoutMs }).catch(() => {}),
     submit.click(),
   ]);
-  await page.waitForURL((url) => !url.pathname.includes("/login"), { timeout: 30_000 }).catch(() => {});
+  await page.waitForURL((url) => !url.pathname.includes("/login"), { timeout: config.targetNavigationTimeoutMs }).catch(() => {});
   if (await isLoginPage(page)) {
     throw new Error("Login belum berhasil. Jika ada captcha, login manual sekali lalu simpan ulang auth state dengan runner headed.");
   }

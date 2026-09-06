@@ -9,7 +9,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { buildDestinationKdkmp, formatKdkmpIdentity, SOURCE_KDKMP } from "@/lib/belanja-sync/kdkmp";
 import { buildBelanjaPayload, summarizeBelanjaPayloads, validateBelanjaPayload } from "@/lib/belanja-sync/payload";
+import { buildBelanjaTransactionPlan, DEFAULT_BELANJA_BASE_TRANSACTION_COUNT, summarizeBelanjaTransactionPlan } from "@/lib/belanja-sync/transaction-plan";
 import type { BelanjaProjectSyncState, BelanjaSyncItem, BelanjaSyncJob } from "@/lib/belanja-sync/types";
 import { cn } from "@/lib/utils";
 import { getResumeItemAmount } from "@/lib/resume-calculations";
@@ -145,6 +147,21 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
   }, [filter, query, rows]);
   const selectedRows = useMemo(() => rows.filter((row) => selectedIds.has(row.item.id)), [rows, selectedIds]);
   const selectedSummary = useMemo(() => summarizeBelanjaPayloads(selectedRows.map((row) => row.payload)), [selectedRows]);
+  const selectedTransactionPlan = useMemo(() => {
+    try {
+      const plan = buildBelanjaTransactionPlan(project, selectedRows.map((row) => row.item));
+      return { plan, summary: summarizeBelanjaTransactionPlan(plan), error: null as string | null };
+    } catch (error) {
+      return { plan: null, summary: null, error: error instanceof Error ? error.message : "Rencana transaksi tidak valid." };
+    }
+  }, [project, selectedRows]);
+  const destinationLabel = useMemo(() => {
+    try {
+      return formatKdkmpIdentity(buildDestinationKdkmp(project));
+    } catch {
+      return `${project.villageName} / ${project.districtName} / ${project.regencyName}`;
+    }
+  }, [project]);
   const latestJob = state?.jobs[0] ?? null;
   const progressValue = latestJob && latestJob.totalItems > 0
     ? Math.round(((latestJob.successItems + latestJob.failedItems + latestJob.skippedItems) / latestJob.totalItems) * 100)
@@ -192,12 +209,20 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
       toast.error(`${invalidRows.length} item belum valid untuk dikirim.`);
       return;
     }
+    if (selectedTransactionPlan.error || !selectedTransactionPlan.summary) {
+      toast.error(selectedTransactionPlan.error ?? "Rencana transaksi tidak valid.");
+      return;
+    }
+    if (selectedTransactionPlan.summary.transactionCount !== DEFAULT_BELANJA_BASE_TRANSACTION_COUNT) {
+      toast.error(`Resume terpilih membentuk ${selectedTransactionPlan.summary.transactionCount} transaksi, expected ${DEFAULT_BELANJA_BASE_TRANSACTION_COUNT}.`);
+      return;
+    }
     const confirmed = window.confirm(
       resend
-        ? `Kirim ulang ${selectedIds.size} item ke Web Belanja? Aksi ini bisa membuat transaksi duplikat jika item sudah pernah sukses.`
+        ? `Kirim ulang ${DEFAULT_BELANJA_BASE_TRANSACTION_COUNT} transaksi copy/reconcile ke Web Belanja? Aksi ini bisa membuat transaksi duplikat jika job lama belum dicek.`
         : dryRun
-          ? `Buat DRY RUN untuk ${selectedIds.size} item Resume? Data hanya divalidasi, belum tersimpan ke web target.`
-          : `KIRIM LIVE ${selectedIds.size} item Resume ke Web Belanja? Data akan disubmit ke web target.`,
+          ? `Buat DRY RUN copy ${DEFAULT_BELANJA_BASE_TRANSACTION_COUNT} transaksi template Maleber ke ${destinationLabel}? Tidak ada copy atau edit live.`
+          : `${DEFAULT_BELANJA_BASE_TRANSACTION_COUNT} transaksi template Maleber akan disalin ke:\n\n${destinationLabel}\n\nSetelah disalin, transaksi akan disesuaikan menggunakan data Resume tujuan. Lanjutkan?`,
     );
     if (!confirmed) return;
 
@@ -211,6 +236,8 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
           itemIds: [...selectedIds],
           dryRun,
           forceResend: resend,
+          operationType: "copy_reconcile_v1",
+          expectedTransactionCount: DEFAULT_BELANJA_BASE_TRANSACTION_COUNT,
         }),
       });
       const result = await response.json();
@@ -281,7 +308,7 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
           <div>
             <CardTitle>Sinkronisasi Web Belanja</CardTitle>
             <CardDescription>
-              Preview payload dari Resume. Runner lokal tetap harus dijalankan di PC yang tersambung VPN.
+              Copy 43 transaksi template Maleber lalu reconcile ke Resume tujuan. Runner lokal tetap berjalan di PC yang tersambung VPN.
             </CardDescription>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -319,12 +346,28 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
           </div>
         ) : null}
 
-        <div className="grid gap-3 md:grid-cols-5">
+        <div className="grid gap-3 md:grid-cols-6">
           <SyncMetric label="Total Resume" value={rows.length.toString()} />
           <SyncMetric label="Terkirim Web" value={successCount.toString()} tone="ok" />
+          <SyncMetric label="Transaksi Target" value={(selectedTransactionPlan.summary?.transactionCount ?? DEFAULT_BELANJA_BASE_TRANSACTION_COUNT).toString()} tone={selectedTransactionPlan.summary?.transactionCount === DEFAULT_BELANJA_BASE_TRANSACTION_COUNT ? "ok" : "bad"} />
           <SyncMetric label="Pending" value={pendingCount.toString()} />
           <SyncMetric label="Gagal" value={failedCount.toString()} tone={failedCount > 0 ? "bad" : "default"} />
-          <SyncMetric label="Terpilih" value={`${selectedIds.size} / ${formatRupiah(selectedSummary.totalAmount)}`} />
+          <SyncMetric label="Terpilih" value={`${selectedIds.size} baris / ${formatRupiah(selectedSummary.totalAmount)}`} />
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          <div className="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-800">
+            <p className="text-xs font-semibold text-slate-500">Tujuan</p>
+            <p className="mt-1 font-semibold">{destinationLabel}</p>
+          </div>
+          <div className="rounded-lg border border-slate-200 p-3 text-sm dark:border-slate-800">
+            <p className="text-xs font-semibold text-slate-500">Rencana Transaksi</p>
+            <p className="mt-1 font-semibold">
+              {selectedTransactionPlan.summary
+                ? `${selectedTransactionPlan.summary.transactionCount} transaksi dari template ${SOURCE_KDKMP.village}, ${selectedTransactionPlan.summary.lineCount} baris resume`
+                : selectedTransactionPlan.error}
+            </p>
+          </div>
         </div>
 
         {latestJob ? (
@@ -333,8 +376,9 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
               <div>
                 <p className="font-semibold">Job terakhir: {jobLabel(latestJob.status)}</p>
                 <p className="text-slate-500">
-                  {latestJob.successItems} sukses, {latestJob.failedItems} gagal, {latestJob.skippedItems} skipped dari {latestJob.totalItems} item
+                  {latestJob.stageMessage ?? latestJob.progress?.message ?? `${latestJob.successItems} sukses, ${latestJob.failedItems} gagal, ${latestJob.skippedItems} skipped dari ${latestJob.totalItems} transaksi`}
                 </p>
+                {latestJob.stage ? <p className="text-xs text-slate-500">Stage: {latestJob.stage}</p> : null}
               </div>
               <div className="flex flex-wrap gap-2">
                 {latestJob.failedItems > 0 ? <Button variant="outline" size="sm" onClick={() => retryJob(latestJob.id)} disabled={submitting}>Retry Gagal</Button> : null}
@@ -411,7 +455,7 @@ export function BelanjaSyncPanel({ project }: { project: Project }) {
             </label>
             <Button onClick={() => createJob(false)} disabled={submitting || selectedIds.size === 0}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-              {dryRun ? `Buat Dry Run ${selectedIds.size} Item` : `Kirim LIVE ${selectedIds.size} Item`}
+              {dryRun ? `Buat Dry Run ${DEFAULT_BELANJA_BASE_TRANSACTION_COUNT} Transaksi` : `Kirim LIVE ${DEFAULT_BELANJA_BASE_TRANSACTION_COUNT} Transaksi`}
             </Button>
             {forceResend ? (
               <Button variant="destructive" onClick={() => createJob(true)} disabled={submitting || selectedIds.size === 0}>
