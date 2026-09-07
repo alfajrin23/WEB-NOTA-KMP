@@ -99,6 +99,13 @@ export type DestinationBudgetRepairCandidate = {
   row: TargetTransactionRow;
 };
 
+type TargetTransactionMatch = {
+  transaction: BelanjaTransactionPayload;
+  row: TargetTransactionRow;
+  remapRequired?: boolean;
+  remapReason?: string;
+};
+
 export type StageBudgetReconcilePlan = {
   mode: "targeted" | "full";
   reason?: string;
@@ -150,13 +157,17 @@ function transactionIdentityKey(input: {
   ].join("|");
 }
 
-function planIdentityKey(transaction: BelanjaTransactionPayload) {
+function planIdentityKeyForKind(transaction: BelanjaTransactionPayload, kind: BelanjaTransactionKind) {
   const categoryCode = transaction.transactionIdentity.categoryCode;
   return [
     normalizeIdentityPart(transactionStageKey(transaction)),
     normalizeIdentityPart(categoryCode),
-    normalizeIdentityPart(transaction.kind),
+    normalizeIdentityPart(kind),
   ].join("|");
+}
+
+function planIdentityKey(transaction: BelanjaTransactionPayload) {
+  return planIdentityKeyForKind(transaction, transaction.kind);
 }
 
 function stageBefore(stage: BelanjaCopyReconcileStage, target: BelanjaCopyReconcileStage) {
@@ -482,6 +493,22 @@ function targetRowIdentityKey(row: TargetTransactionRow) {
   });
 }
 
+function rowReferenceKey(row: TargetTransactionRow) {
+  return row.editHref ?? row.uuid ?? `row-${row.rowIndex}`;
+}
+
+function rowCategoryCode(row: TargetTransactionRow) {
+  return /\b([IVX]+\.\d+)\b/i.exec(normalizeBelanjaText(row.itemText))?.[1] ?? "";
+}
+
+function transactionCategoryText(transaction: BelanjaTransactionPayload) {
+  return `${transaction.transactionIdentity.categoryCode} ${transaction.transactionIdentity.categoryText}`.trim();
+}
+
+function transactionCategoryCodeMatchesRow(transaction: BelanjaTransactionPayload, row: TargetTransactionRow) {
+  return normalizeIdentityPart(rowCategoryCode(row)) === normalizeIdentityPart(transaction.transactionIdentity.categoryCode);
+}
+
 function transactionBudgetIssue(
   transaction: BelanjaTransactionPayload,
   row: TargetTransactionRow | null,
@@ -653,6 +680,17 @@ function destinationBudgetIsBalanced(diagnostic: DestinationBudgetDiagnostic) {
     && diagnostic.duplicateGroups.length === 0;
 }
 
+function destinationComparisonIsBalanced(comparison: {
+  diagnostic: DestinationBudgetDiagnostic;
+  stages: Array<{ difference: number }>;
+  entries: Array<{ differences: string[]; expectedSignature: string; actualSignature: string }>;
+}) {
+  return comparison.diagnostic.totalDifference === 0
+    && comparison.diagnostic.duplicateGroups.length === 0
+    && comparison.stages.every((stage) => stage.difference === 0)
+    && comparison.entries.every((entry) => entry.differences.length === 0 && entry.expectedSignature === entry.actualSignature);
+}
+
 function stageNeedsBudgetReconcile(stage: BudgetStageDiagnostic) {
   return stage.difference !== 0 || stage.expectedCount !== stage.actualCount || stage.issues.length > 0;
 }
@@ -722,27 +760,97 @@ export function shouldReconcileTransactionForStageBudgetPlan(
   return plan.transactionIdsToEdit.includes(transaction.transactionId);
 }
 
-function pairBudgetRows(transactions: BelanjaTransactionPayload[], rows: TargetTransactionRow[]) {
-  const rowsByKey = new Map<string, TargetTransactionRow[]>();
-  const transactionsByKey = new Map<string, BelanjaTransactionPayload[]>();
-  for (const row of rows) {
-    const key = targetRowIdentityKey(row);
-    rowsByKey.set(key, [...(rowsByKey.get(key) ?? []), row]);
+function snapshotLineMatchCount(transaction: BelanjaTransactionPayload, snapshot: TransactionSnapshot | undefined) {
+  if (!snapshot) return 0;
+  return transaction.lines.filter((line) => (
+    snapshot.lines.some((actual) => detailNamesMatch(actual.name, line.namaItem, transaction.kind === "honorarium"))
+  )).length;
+}
+
+function transactionRowMatchScore(transaction: BelanjaTransactionPayload, row: TargetTransactionRow, snapshots?: Map<string, TransactionSnapshot>) {
+  const snapshot = snapshots?.get(row.editHref ?? "");
+  const lineCount = Math.max(transaction.lines.length, 1);
+  const rowTotal = rowTotalAmount(row);
+  const totalDelta = Math.abs(rowTotal - transaction.totalAmount);
+  const normalizedDelta = Math.min(totalDelta / Math.max(Math.abs(transaction.totalAmount), 1), 1);
+  return (snapshotLineMatchCount(transaction, snapshot) / lineCount) * 1000
+    + (snapshot?.date === transaction.transactionIdentity.transactionDate ? 120 : 0)
+    + (normalizeBelanjaIsoDate(row.dateText) === transaction.transactionIdentity.transactionDate ? 60 : 0)
+    + (totalDelta <= 1 ? 300 : Math.max(0, 120 - normalizedDelta * 120));
+}
+
+function rankRowsForTransaction(transaction: BelanjaTransactionPayload, rows: TargetTransactionRow[], snapshots?: Map<string, TransactionSnapshot>) {
+  return rows
+    .map((row) => ({ row, score: transactionRowMatchScore(transaction, row, snapshots) }))
+    .sort((left, right) => right.score - left.score || left.row.rowIndex - right.row.rowIndex);
+}
+
+function chooseExactTargetRow(
+  transaction: BelanjaTransactionPayload,
+  rows: TargetTransactionRow[],
+  snapshots: Map<string, TransactionSnapshot> | undefined,
+) {
+  if (!rows.length) return null;
+  const ranked = rankRowsForTransaction(transaction, rows, snapshots);
+  if (snapshots && ranked.length > 1 && ranked[0].score === ranked[1].score) {
+    throw new Error(`Mapping transaksi ambigu: ${transaction.namaItem}, tahap ${transactionStageKey(transaction)}. Dua target memiliki identitas yang sama.`);
   }
-  for (const transaction of transactions) {
-    const key = planIdentityKey(transaction);
-    transactionsByKey.set(key, [...(transactionsByKey.get(key) ?? []), transaction]);
+  return ranked[0].row;
+}
+
+function remapCandidateRank(transaction: BelanjaTransactionPayload, row: TargetTransactionRow, snapshots?: Map<string, TransactionSnapshot>) {
+  const snapshot = snapshots?.get(row.editHref ?? "");
+  const categoryMatches = transactionCategoryCodeMatchesRow(transaction, row);
+  const categoryTextMatches = belanjaTextMatches(row.itemText, transactionCategoryText(transaction));
+  const totalMatches = Math.abs(rowTotalAmount(row) - transaction.totalAmount) <= 1;
+  const kindMatches = transactionKindFromBelanjaCategory(row.belanjaCategoryText) === transaction.kind;
+  const lineMatches = snapshotLineMatchCount(transaction, snapshot);
+  const signals = [
+    categoryMatches ? "kode kategori sama" : "",
+    !categoryMatches && categoryTextMatches ? "nama kategori mirip" : "",
+    totalMatches ? "total sama" : "",
+    kindMatches ? "jenis belanja sama" : "",
+    lineMatches > 0 ? `${lineMatches} detail mirip` : "",
+  ].filter(Boolean);
+
+  const totalDelta = Math.abs(rowTotalAmount(row) - transaction.totalAmount);
+  const normalizedDelta = Math.min(totalDelta / Math.max(Math.abs(transaction.totalAmount), 1), 1);
+  const score = 10_000
+    + (categoryMatches ? 8_000 : categoryTextMatches ? 3_000 : 0)
+    + (totalMatches ? 2_000 : Math.max(0, 500 - normalizedDelta * 500))
+    + (kindMatches ? 700 : 0)
+    + lineMatches * 1_200
+    + (snapshot?.date === transaction.transactionIdentity.transactionDate ? 250 : 0)
+    + (normalizeBelanjaIsoDate(row.dateText) === transaction.transactionIdentity.transactionDate ? 120 : 0);
+
+  return { row, score, signals };
+}
+
+function chooseRemapTargetRow(
+  transaction: BelanjaTransactionPayload,
+  rows: TargetTransactionRow[],
+  snapshots?: Map<string, TransactionSnapshot>,
+) {
+  const sameStageRows = rows.filter((row) => rowStageKey(row) === transactionStageKey(transaction));
+  if (!sameStageRows.length) return null;
+
+  const ranked = sameStageRows
+    .map((row) => remapCandidateRank(transaction, row, snapshots))
+    .sort((left, right) => right.score - left.score || left.row.rowIndex - right.row.rowIndex);
+  const best = ranked[0];
+  const second = ranked[1];
+  const hasStrongSignal = best.signals.some((signal) => /kategori|total|detail/i.test(signal));
+
+  if (second && (best.score === second.score || (!hasStrongSignal && sameStageRows.length > 1))) {
+    throw new Error(`Mapping transaksi ambigu untuk key ${planIdentityKey(transaction)}. Resume membentuk 1, target kandidat remap seri: ${ranked.slice(0, 5).map((candidate) => `row #${candidate.row.rowIndex} ${candidate.row.itemText} / ${candidate.row.belanjaCategoryText}`).join(" | ")}.`);
   }
 
-  const pairs: Array<{ transaction: BelanjaTransactionPayload; row: TargetTransactionRow }> = [];
-  for (const [key, keyTransactions] of transactionsByKey.entries()) {
-    const keyRows = sortedRowsForBudget(rowsByKey.get(key) ?? []);
-    const sortedTransactions = sortedTransactionsForBudget(keyTransactions);
-    for (let index = 0; index < sortedTransactions.length; index += 1) {
-      if (keyRows[index]) pairs.push({ transaction: sortedTransactions[index], row: keyRows[index] });
-    }
-  }
-  return pairs;
+  const reason = `row #${best.row.rowIndex} ${best.row.itemText} / ${best.row.belanjaCategoryText} -> ${transactionCategoryText(transaction)} / ${transaction.transactionIdentity.belanjaCategoryText}; ${best.signals.join(", ") || "satu-satunya row cadangan tahap"}`;
+  return { row: best.row, reason };
+}
+
+function pairBudgetRows(transactions: BelanjaTransactionPayload[], rows: TargetTransactionRow[]) {
+  return matchResumeToTargetTransaction(transactions, rows);
 }
 
 function makeBudgetRepairCandidate(transaction: BelanjaTransactionPayload, row: TargetTransactionRow): DestinationBudgetRepairCandidate {
@@ -1187,9 +1295,10 @@ async function destinationAlreadyHasExpectedTransactions(page: Page, config: Run
 export function matchResumeToTargetTransaction(transactions: BelanjaTransactionPayload[], targetRows: TargetTransactionRow[], snapshots?: Map<string, TransactionSnapshot>) {
   const byKey = new Map<string, TargetTransactionRow[]>();
   for (const row of targetRows) {
-    const list = byKey.get(row.identityKey) ?? [];
+    const key = targetRowIdentityKey(row);
+    const list = byKey.get(key) ?? [];
     list.push(row);
-    byKey.set(row.identityKey, list);
+    byKey.set(key, list);
   }
 
   const planByKey = new Map<string, BelanjaTransactionPayload[]>();
@@ -1200,35 +1309,36 @@ export function matchResumeToTargetTransaction(transactions: BelanjaTransactionP
     planByKey.set(key, list);
   }
 
-  const matches: Array<{ transaction: BelanjaTransactionPayload; row: TargetTransactionRow }> = [];
-  for (const [key, planRows] of planByKey.entries()) {
-    const rows = (byKey.get(key) ?? []).sort((left, right) => left.dateText.localeCompare(right.dateText) || left.rowIndex - right.rowIndex);
-    const sortedPlan = planRows.sort((left, right) => left.transactionIdentity.transactionDate.localeCompare(right.transactionIdentity.transactionDate) || left.sequence - right.sequence);
-    if (rows.length !== sortedPlan.length) {
-      throw new Error(`Mapping transaksi ambigu untuk key ${key}. Resume membentuk ${sortedPlan.length}, target menemukan ${rows.length}.`);
-    }
-    for (let index = 0; index < sortedPlan.length; index += 1) {
-      const transaction = sortedPlan[index];
-      let chosen = rows[index];
-      if (snapshots) {
-        const available = rows.filter((row) => !matches.some((entry) => entry.row.editHref === row.editHref));
-        const ranked = available.map((row) => {
-          const snapshot = snapshots.get(row.editHref ?? "");
-          if (!snapshot) throw new Error("Snapshot identitas transaksi tidak ditemukan.");
-          const names = transaction.lines.filter((line) => snapshot.lines.some((actual) => detailNamesMatch(actual.name, line.namaItem, transaction.kind === "honorarium"))).length;
-          const score = names / transaction.lines.length * 1000
-            + (snapshot.date === transaction.transactionIdentity.transactionDate ? 10 : 0)
-            + (rowTotalAmount(row) === transaction.totalAmount ? 20 : 0);
-          return { row, score };
-        }).sort((a, b) => b.score - a.score);
-        if (ranked.length > 1 && ranked[0].score === ranked[1].score) {
-          throw new Error(`Mapping transaksi ambigu: ${transaction.namaItem}, tahap ${transactionStageKey(transaction)}. Dua target memiliki identitas yang sama.`);
-        }
-        chosen = ranked[0].row;
+  const matches: TargetTransactionMatch[] = [];
+  const consumedRows = new Set<string>();
+  const missingTransactions: BelanjaTransactionPayload[] = [];
+
+  const sortedKeys = [...planByKey.keys()].sort((left, right) => left.localeCompare(right));
+  for (const key of sortedKeys) {
+    const rows = sortedRowsForBudget(byKey.get(key) ?? []);
+    const sortedPlan = sortedTransactionsForBudget(planByKey.get(key) ?? []);
+    for (const transaction of sortedPlan) {
+      const available = rows.filter((row) => !consumedRows.has(rowReferenceKey(row)));
+      const chosen = chooseExactTargetRow(transaction, available, snapshots);
+      if (!chosen) {
+        missingTransactions.push(transaction);
+        continue;
       }
+      consumedRows.add(rowReferenceKey(chosen));
       matches.push({ transaction, row: chosen });
     }
   }
+
+  const unconsumedRows = () => targetRows.filter((row) => !consumedRows.has(rowReferenceKey(row)));
+  for (const transaction of [...missingTransactions].sort((left, right) => left.sequence - right.sequence)) {
+    const remap = chooseRemapTargetRow(transaction, unconsumedRows(), snapshots);
+    if (!remap) {
+      throw new Error(`Mapping transaksi target belum ada untuk key ${planIdentityKey(transaction)}. Resume membentuk 1, target menemukan 0, dan tidak ada row cadangan pada tahap ${transactionStageKey(transaction)}.`);
+    }
+    consumedRows.add(rowReferenceKey(remap.row));
+    matches.push({ transaction, row: remap.row, remapRequired: true, remapReason: remap.reason });
+  }
+
   if (matches.length !== transactions.length) {
     throw new Error(`Mapping transaksi belum lengkap. Expected ${transactions.length}, berhasil dicocokkan ${matches.length}.`);
   }
@@ -1259,6 +1369,19 @@ async function replaceIndexedValueByKeyboard(locator: Locator, value: string | n
   await dispatchIndexedFieldEvents(locator);
 }
 
+async function setNativeSelectValueByText(locator: Locator, value: string | number) {
+  const expected = normalizeBelanjaText(String(value));
+  const options = (await nativeOptions(locator)).filter((option) => option.value && option.text);
+  const option = options.find((entry) => belanjaTextMatches(entry.text, expected) || belanjaTextMatches(entry.value, expected));
+  if (!option) {
+    throw new Error(`Pilihan "${expected}" tidak ditemukan. Opsi terlihat: ${options.map((entry) => entry.text || entry.value).slice(0, 12).join(" | ") || "-"}.`);
+  }
+  await locator.selectOption({ value: option.value }, { timeout: 1_000 }).catch(async () => {
+    await locator.selectOption({ label: option.text }, { timeout: 1_000 });
+  });
+  await dispatchIndexedFieldEvents(locator);
+}
+
 async function setIndexedValue(page: Page, name: string, index: number, value: string | number) {
   const locator = page.locator(`${name.endsWith("[]") ? "#item-container " : ""}[name="${attr(name)}"]`).nth(index);
   await locator.waitFor({ state: "attached", timeout: 5_000 });
@@ -1273,9 +1396,14 @@ async function setIndexedValue(page: Page, name: string, index: number, value: s
       disabled: field.disabled,
       readOnly: (field instanceof HTMLInputElement || field instanceof HTMLTextAreaElement) && field.readOnly,
       visible: Boolean(field.offsetParent || field.getClientRects().length > 0),
+      tag: field.tagName.toLowerCase(),
     };
-  }).catch(() => ({ disabled: false, readOnly: false, visible: false }));
+  }).catch(() => ({ disabled: false, readOnly: false, visible: false, tag: "" }));
   const isMaskedMoneyField = /harga|tarif/i.test(name);
+  if (state.tag === "select") {
+    await setNativeSelectValueByText(locator, value);
+    return;
+  }
   if (/harga|tarif|subtotal/.test(name)) {
     const applied = await locator.evaluate((element, nextValue) => {
       const autoNumeric = (window as unknown as { AutoNumeric?: { getAutoNumericElement: (element: Element) => { set: (value: string) => void } | undefined } }).AutoNumeric;
@@ -1313,6 +1441,96 @@ async function setIndexedValue(page: Page, name: string, index: number, value: s
 
 async function setTopDate(page: Page, date: string) {
   await setIndexedValue(page, "tanggal", 0, date);
+}
+
+function selectOptionScore(optionText: string, expectedText: string, expectedKind?: BelanjaTransactionKind) {
+  const optionIdentity = normalizeIdentityPart(optionText);
+  const expectedIdentity = normalizeIdentityPart(expectedText);
+  const optionStage = normalizeIdentityPart(budgetStageKey(optionText) ?? "");
+  const expectedStage = normalizeIdentityPart(budgetStageKey(expectedText) ?? "");
+  const optionCategory = normalizeIdentityPart(/\b([IVX]+\.\d+)\b/i.exec(optionText)?.[1] ?? "");
+  const expectedCategory = normalizeIdentityPart(/\b([IVX]+\.\d+)\b/i.exec(expectedText)?.[1] ?? "");
+  let score = 0;
+  if (optionIdentity && optionIdentity === expectedIdentity) score += 10_000;
+  else if (belanjaTextMatches(optionText, expectedText)) score += 4_000;
+  if (expectedStage && optionStage === expectedStage) score += 1_500;
+  if (expectedCategory && optionCategory === expectedCategory) score += 3_000;
+  if (expectedKind && transactionKindFromBelanjaCategory(optionText) === expectedKind) score += 5_000;
+  return score;
+}
+
+async function waitForSelectOptions(page: Page, selectId: string, config: RunnerConfig) {
+  await page.waitForFunction((id) => {
+    const select = document.getElementById(id);
+    return select instanceof HTMLSelectElement && [...select.options].some((option) => option.value && !/pilih|select/i.test(option.textContent || ""));
+  }, selectId, { timeout: Math.max(5_000, config.choiceSearchTimeoutMs + 3_000) });
+}
+
+async function setTopSelectByText(page: Page, config: RunnerConfig, selectId: string, expectedText: string, expectedKind?: BelanjaTransactionKind) {
+  const select = page.locator(`#${selectId}`).first();
+  await select.waitFor({ state: "attached", timeout: 5_000 });
+  await waitForSelectOptions(page, selectId, config);
+  const current = await selectedText(page, `#${selectId}`, 0).catch(() => "");
+  if (selectOptionScore(current, expectedText, expectedKind) >= 5_000) return;
+
+  const options = (await nativeOptions(select)).filter((option) => option.value && option.text && !/pilih|select/i.test(option.text));
+  const ranked = options
+    .map((option) => ({ option, score: selectOptionScore(option.text, expectedText, expectedKind) }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => right.score - left.score || left.option.text.localeCompare(right.option.text));
+  if (!ranked.length) {
+    throw new Error(`Opsi "${expectedText}" tidak ditemukan pada dropdown ${selectId}. Opsi terlihat: ${options.slice(0, 10).map((option) => option.text).join(" | ") || "-"}.`);
+  }
+  if (ranked.length > 1 && ranked[0].score === ranked[1].score && ranked[0].option.value !== ranked[1].option.value) {
+    throw new Error(`Opsi "${expectedText}" ambigu pada dropdown ${selectId}: ${ranked.slice(0, 5).map((entry) => entry.option.text).join(" | ")}.`);
+  }
+
+  await select.selectOption({ value: ranked[0].option.value }, { timeout: 2_000 });
+  await select.evaluate((element) => {
+    element.dispatchEvent(new Event("input", { bubbles: true }));
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await page.waitForTimeout(250);
+}
+
+async function selectedEditContextKey(page: Page, fallback: TargetTransactionRow) {
+  return transactionIdentityKey({
+    stageText: (await page.locator("#tahapan option:checked").textContent().catch(() => fallback.stageText)) ?? fallback.stageText,
+    itemText: (await page.locator("#item_pekerjaan option:checked").textContent().catch(() => fallback.itemText)) ?? fallback.itemText,
+    belanjaCategoryText: (await page.locator("#kategori_belanja option:checked").textContent().catch(() => fallback.belanjaCategoryText)) ?? fallback.belanjaCategoryText,
+  });
+}
+
+async function ensureEditContext(page: Page, config: RunnerConfig, transaction: BelanjaTransactionPayload, row: TargetTransactionRow) {
+  const expectedKey = planIdentityKey(transaction);
+  if (await selectedEditContextKey(page, row) === expectedKey) {
+    return { formKind: transaction.kind };
+  }
+
+  await setTopSelectByText(page, config, "tahapan", transaction.transactionIdentity.stageText);
+  await setTopSelectByText(page, config, "item_pekerjaan", transactionCategoryText(transaction));
+  let formKind = transaction.kind;
+  let fallbackReason: string | undefined;
+  try {
+    await setTopSelectByText(page, config, "kategori_belanja", transaction.transactionIdentity.belanjaCategoryText, transaction.kind);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!/tidak ditemukan pada dropdown kategori_belanja/i.test(message)) throw error;
+    const selectedKindText = await page.locator("#kategori_belanja option:checked").textContent().catch(() => row.belanjaCategoryText);
+    formKind = transactionKindFromBelanjaCategory(selectedKindText ?? row.belanjaCategoryText);
+    if (formKind === transaction.kind) throw error;
+    fallbackReason = `kategori target tidak menyediakan ${transaction.transactionIdentity.belanjaCategoryText}; memakai ${normalizeBelanjaText(selectedKindText ?? row.belanjaCategoryText)} untuk ${transactionCategoryText(transaction)}`;
+  }
+  await page.waitForFunction((selector) => {
+    return Boolean(document.querySelector(selector) || document.querySelector("#add-item-button button"));
+  }, detailSelectSelector(formKind), { timeout: Math.max(8_000, config.choiceSearchTimeoutMs + 5_000) });
+
+  const actualKey = await selectedEditContextKey(page, row);
+  const fallbackKey = planIdentityKeyForKind(transaction, formKind);
+  if (actualKey !== expectedKey && actualKey !== fallbackKey) {
+    throw new Error(`Context edit transaksi tidak cocok setelah remap. Expected ${transaction.transactionKey}, detected ${actualKey}.`);
+  }
+  return { formKind, fallbackReason };
 }
 
 function honorariumBreakdown(line: BelanjaTransactionLine) {
@@ -1690,6 +1908,25 @@ async function openEditPage(page: Page, config: RunnerConfig, row: TargetTransac
   })()`, null, { timeout: Math.max(20_000, config.choiceSearchTimeoutMs + 10_000) });
 }
 
+async function readSnapshotForReconcile(page: Page, config: RunnerConfig, transaction: BelanjaTransactionPayload, row: TargetTransactionRow) {
+  const rowKind = transactionKindFromBelanjaCategory(row.belanjaCategoryText);
+  const kinds = [transaction.kind, rowKind].filter((kind, index, list) => list.indexOf(kind) === index);
+  let lastError: unknown;
+  for (const kind of kinds) {
+    try {
+      return await readTransactionSnapshot(page, config, row.editHref!, kind);
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : "";
+      const canRetryWithRowKind = kind === transaction.kind
+        && rowKind !== transaction.kind
+        && /Snapshot transaksi target tidak lengkap|Qty target tidak valid/i.test(message);
+      if (!canRetryWithRowKind) throw error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("Snapshot transaksi target tidak dapat dibaca.");
+}
+
 async function reconcileOneTransaction(page: Page, config: RunnerConfig, transaction: BelanjaTransactionPayload, row: TargetTransactionRow) {
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try { return await reconcileTransactionAttempt(page, config, transaction, row); }
@@ -1702,24 +1939,22 @@ async function reconcileOneTransaction(page: Page, config: RunnerConfig, transac
 }
 
 async function reconcileTransactionAttempt(page: Page, config: RunnerConfig, transaction: BelanjaTransactionPayload, row: TargetTransactionRow) {
-  const before = await readTransactionSnapshot(page, config, row.editHref!, transaction.kind);
+  const before = await readSnapshotForReconcile(page, config, transaction, row);
   const expectedDestination: KdkmpIdentity = { village: transaction.desa ?? "", district: transaction.kecamatan ?? "", regency: transaction.kabupaten ?? "" };
+  const expectedKey = planIdentityKey(transaction);
   assertSnapshotDestination(before, expectedDestination);
-  if (!compareTransactionSnapshot(transaction, before).differences.length && rowTotalAmount(row) === transaction.totalAmount) return;
+  const beforeKey = transactionIdentityKey({ stageText: before.stage, itemText: before.category, belanjaCategoryText: before.kind });
+  if (beforeKey === expectedKey && !compareTransactionSnapshot(transaction, before).differences.length && rowTotalAmount(row) === transaction.totalAmount) return;
   await openEditPage(page, config, row);
   const selectedDestination = await page.locator("#gerai option:checked").textContent();
   assertSnapshotDestination({ ...before, destination: selectedDestination ?? "" }, expectedDestination);
-  const actualKey = transactionIdentityKey({
-    stageText: (await page.locator("#tahapan option:checked").textContent().catch(() => row.stageText)) ?? row.stageText,
-    itemText: (await page.locator("#item_pekerjaan option:checked").textContent().catch(() => row.itemText)) ?? row.itemText,
-    belanjaCategoryText: (await page.locator("#kategori_belanja option:checked").textContent().catch(() => row.belanjaCategoryText)) ?? row.belanjaCategoryText,
-  });
-  if (actualKey !== planIdentityKey(transaction)) {
-    throw new Error(`Context edit transaksi tidak cocok. Expected ${transaction.transactionKey}, detected ${actualKey}.`);
+  const editContext = await ensureEditContext(page, config, transaction, row);
+  if (editContext.fallbackReason) {
+    logJob("edit", `kind_fallback transaction=${transaction.transactionId} reason="${editContext.fallbackReason}"`);
   }
 
-  if (transaction.kind === "material") await reconcileMaterialTransaction(page, transaction);
-  else if (transaction.kind === "honorarium") await reconcileHonorariumTransaction(page, transaction);
+  if (editContext.formKind === "material") await reconcileMaterialTransaction(page, transaction);
+  else if (editContext.formKind === "honorarium") await reconcileHonorariumTransaction(page, transaction);
   else await reconcileEquipmentTransaction(page, transaction);
 
   await page.evaluate("updateGrandTotal()");
@@ -1733,9 +1968,11 @@ async function reconcileTransactionAttempt(page: Page, config: RunnerConfig, tra
     if (!/Bukti transaksi berhasil tidak ditemukan/i.test(message)) throw error;
     await page.waitForLoadState("domcontentloaded", { timeout: 2_000 }).catch(() => {});
   }
-  const saved = await readTransactionSnapshot(page, config, row.editHref!, transaction.kind);
+  const saved = await readTransactionSnapshot(page, config, row.editHref!, editContext.formKind);
   assertSnapshotDestination(saved, expectedDestination);
-  const verification = compareTransactionSnapshot(transaction, saved);
+  const verification = compareTransactionSnapshot(transaction, saved, {
+    targetKindFallback: editContext.formKind !== transaction.kind ? editContext.formKind : undefined,
+  });
   if (verification.differences.length) throw new Error(`Hasil simpan belum sesuai: ${verification.differences.join("; ")}`);
 }
 
@@ -1746,10 +1983,16 @@ export function assertSnapshotDestination(snapshot: TransactionSnapshot, expecte
   }
 }
 
-export function compareTransactionSnapshot(transaction: BelanjaTransactionPayload, snapshot: TransactionSnapshot) {
+export function compareTransactionSnapshot(
+  transaction: BelanjaTransactionPayload,
+  snapshot: TransactionSnapshot,
+  options: { targetKindFallback?: BelanjaTransactionKind } = {},
+) {
   const differences: string[] = [];
   const actualKey = transactionIdentityKey({ stageText: snapshot.stage, itemText: snapshot.category, belanjaCategoryText: snapshot.kind });
-  if (actualKey !== planIdentityKey(transaction)) throw new Error(`Identitas transaksi salah: ${transaction.namaItem}.`);
+  const expectedKey = planIdentityKey(transaction);
+  const fallbackKey = options.targetKindFallback ? planIdentityKeyForKind(transaction, options.targetKindFallback) : null;
+  if (actualKey !== expectedKey && actualKey !== fallbackKey) throw new Error(`Identitas transaksi salah: ${transaction.namaItem}.`);
   if (snapshot.date !== transaction.transactionIdentity.transactionDate) differences.push(`tanggal: ${snapshot.date} -> ${transaction.transactionIdentity.transactionDate}`);
   if (snapshot.lines.length !== transaction.lines.length) differences.push(`jumlah detail: ${snapshot.lines.length} -> ${transaction.lines.length}`);
   const used = new Set<number>();
@@ -1798,10 +2041,28 @@ export async function compareDestinationTransactions(page: Page, config: RunnerC
   }
   fs.writeFileSync(path.join(config.artifactsDir, `snapshots-${claim.job.id}.json`), JSON.stringify([...snapshots]));
   const matches = matchResumeToTargetTransaction(claim.transactions, rows, snapshots);
-  const entries = matches.map(({ transaction, row }) => {
+  const entries = matches.map((match) => {
+    const { transaction, row } = match;
+    if (match.remapRequired) {
+      const targetKind = transactionKindFromBelanjaCategory(row.belanjaCategoryText);
+      const snapshot = snapshots.get(row.editHref ?? "");
+      if (snapshot && targetKind !== transaction.kind && transactionCategoryCodeMatchesRow(transaction, row)) {
+        const diff = compareTransactionSnapshot(transaction, snapshot, { targetKindFallback: targetKind });
+        if (rowTotalAmount(row) !== transaction.totalAmount) diff.differences.push(`total transaksi: ${rowTotalAmount(row)} -> ${transaction.totalAmount}`);
+        return { ...match, targetKindFallback: targetKind, ...diff };
+      }
+      const expectedSignature = createHash("sha256").update(JSON.stringify([transaction.transactionIdentity, transaction.lines])).digest("hex");
+      const actualSignature = createHash("sha256").update(JSON.stringify([targetRowIdentityKey(row), row.totalText, row.dateText, snapshots.get(row.editHref ?? "")])).digest("hex");
+      return {
+        ...match,
+        differences: [`context transaksi target perlu remap: ${match.remapReason ?? `${targetRowIdentityKey(row)} -> ${planIdentityKey(transaction)}`}`],
+        expectedSignature,
+        actualSignature,
+      };
+    }
     const diff = compareTransactionSnapshot(transaction, snapshots.get(row.editHref!)!);
     if (rowTotalAmount(row) !== transaction.totalAmount) diff.differences.push(`total transaksi: ${rowTotalAmount(row)} -> ${transaction.totalAmount}`);
-    return { transaction, row, ...diff };
+    return { ...match, ...diff };
   });
   const stages = diagnostic.stages.map((stage) => {
     const entriesInStage = entries.filter((entry) => transactionStageKey(entry.transaction) === stage.stageKey);
@@ -1871,7 +2132,8 @@ export async function reconcileTransactions(page: Page, config: RunnerConfig, ap
     logJob(claim.job.id, `stage=RECONCILING action=stage_budget_plan mode=full reason="${stageBudgetPlan.reason ?? "-"}"`);
   }
 
-  for (const { transaction, row, differences } of [...matches].sort((a, b) => transactionStageKey(a.transaction).localeCompare(transactionStageKey(b.transaction)) || a.transaction.sequence - b.transaction.sequence)) {
+  for (const entry of [...matches].sort((a, b) => transactionStageKey(a.transaction).localeCompare(transactionStageKey(b.transaction)) || a.transaction.sequence - b.transaction.sequence)) {
+    const { transaction, row, differences } = entry;
     if (completed.has(transaction.transactionId)) {
       incrementTotals(transaction);
       continue;
@@ -1889,6 +2151,8 @@ export async function reconcileTransactions(page: Page, config: RunnerConfig, ap
           transaction_id: transaction.transactionId,
           transaction_key: transaction.transactionKey,
           target_row_uuid: row.uuid,
+          remap_required: entry.remapRequired === true,
+          remap_reason: entry.remapReason,
           stage_budget_already_balanced: true,
           detail_signature_verified: true,
           skipped_edit: true,
@@ -1936,6 +2200,8 @@ export async function reconcileTransactions(page: Page, config: RunnerConfig, ap
           transaction_id: transaction.transactionId,
           transaction_key: transaction.transactionKey,
           target_row_uuid: row.uuid,
+          remap_required: entry.remapRequired === true,
+          remap_reason: entry.remapReason,
           detail_signature_verified: true,
           verified_at: new Date().toISOString(),
         },
@@ -2012,6 +2278,7 @@ export async function verifyDestinationTransactions(page: Page, config: RunnerCo
   let diagnostic = diagnoseDestinationBudget(rows, claim.transactions);
   let budgetRepairAttempts = 0;
   let budgetRepairDetails: string[] = [];
+  let acceptedComparison: Awaited<ReturnType<typeof compareDestinationTransactions>> | null = null;
   if (rows.length !== claim.expectedTransactionCount) {
     const detailText = await inspectMismatchedStageDetails(page, config, claim, rows, diagnostic);
     const screenshotPath = await saveJobScreenshot(page, config, claim.job.id, "final-row-count-mismatch");
@@ -2022,11 +2289,18 @@ export async function verifyDestinationTransactions(page: Page, config: RunnerCo
     throw new Error(`Final verification gagal. Ada transaksi duplikat. ${formatBudgetDiagnostics(diagnostic)} Screenshot: ${screenshotPath}`);
   }
   if (!destinationBudgetIsBalanced(diagnostic)) {
-    const repair = await repairDestinationBudgetMismatches(page, config, api, claim, rows, diagnostic);
-    rows = repair.rows;
-    diagnostic = repair.diagnostic;
-    budgetRepairAttempts = repair.repairPasses;
-    budgetRepairDetails = repair.repairedTransactions;
+    const comparisonBeforeRepair = await compareDestinationTransactions(page, config, claim);
+    if (destinationComparisonIsBalanced(comparisonBeforeRepair)) {
+      acceptedComparison = comparisonBeforeRepair;
+      rows = comparisonBeforeRepair.rows;
+      diagnostic = comparisonBeforeRepair.diagnostic;
+    } else {
+      const repair = await repairDestinationBudgetMismatches(page, config, api, claim, rows, diagnostic);
+      rows = repair.rows;
+      diagnostic = repair.diagnostic;
+      budgetRepairAttempts = repair.repairPasses;
+      budgetRepairDetails = repair.repairedTransactions;
+    }
 
     if (rows.length !== claim.expectedTransactionCount) {
       const detailText = await inspectMismatchedStageDetails(page, config, claim, rows, diagnostic);
@@ -2037,7 +2311,7 @@ export async function verifyDestinationTransactions(page: Page, config: RunnerCo
       const screenshotPath = await saveJobScreenshot(page, config, claim.job.id, "final-duplicate-detected-after-repair");
       throw new Error(`Final verification gagal setelah repair otomatis. Ada transaksi duplikat. ${formatBudgetDiagnostics(diagnostic)} Screenshot: ${screenshotPath}`);
     }
-    if (!destinationBudgetIsBalanced(diagnostic)) {
+    if (!acceptedComparison && !destinationBudgetIsBalanced(diagnostic)) {
       const detailText = await inspectMismatchedStageDetails(page, config, claim, rows, diagnostic);
       const screenshotPath = await saveJobScreenshot(page, config, claim.job.id, "final-budget-mismatch-after-repair");
       throw new Error(`Final budget verification masih selisih setelah repair otomatis ${budgetRepairAttempts} pass. ${formatBudgetDiagnostics(diagnostic)}${detailText} Screenshot: ${screenshotPath}`);
@@ -2045,9 +2319,9 @@ export async function verifyDestinationTransactions(page: Page, config: RunnerCo
   }
   const actualTotal = diagnostic.actualTotal;
   const expectedTotal = diagnostic.expectedTotal;
-  const finalComparison = await compareDestinationTransactions(page, config, claim);
+  const finalComparison = acceptedComparison ?? await compareDestinationTransactions(page, config, claim);
   const mismatches = finalComparison.entries.filter((entry) => entry.differences.length > 0 || entry.expectedSignature !== entry.actualSignature);
-  if (!destinationBudgetIsBalanced(finalComparison.diagnostic) || mismatches.length) {
+  if (!destinationComparisonIsBalanced(finalComparison) || mismatches.length) {
     throw new Error(`Final verification gagal: ${formatBudgetDiagnostics(finalComparison.diagnostic)} ${mismatches.map((entry) => entry.differences.join("; ")).join(" | ")}`);
   }
   await api.checkpointJob(claim.job.id, {

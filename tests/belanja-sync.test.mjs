@@ -42,6 +42,7 @@ import {
   compareTransactionSnapshot,
   detailNamesMatch,
   matchLine,
+  matchResumeToTargetTransaction,
   formatBudgetDiagnostics,
   genericHonorariumNameMatches,
   planDestinationBudgetRepairs,
@@ -443,6 +444,71 @@ test("repair planner final budget memilih transaksi target yang perlu diedit", (
   assert.equal(repairs[0].rowIndex, rows[mismatchIndex].rowIndex);
   assert.equal(repairs[0].kind, "material");
   assert.equal(repairs[0].difference, 12500);
+});
+
+test("matcher meremap row template saat resume mengubah VI.10 honorarium menjadi material", () => {
+  const project = makeTemplatePlanProject();
+  const plan = buildBelanjaTransactionPlan(project, project.items);
+  const vi10Index = plan.transactions.findIndex((transaction) => transaction.transactionIdentity.categoryCode === "VI.10");
+  assert.notEqual(vi10Index, -1);
+
+  const transactions = plan.transactions.map((transaction, index) => {
+    if (index !== vi10Index) return transaction;
+    return {
+      ...transaction,
+      kind: "material",
+      transactionKey: transaction.transactionKey.replace(/upahhonorarium/g, "bahanmaterial"),
+      transactionIdentity: {
+        ...transaction.transactionIdentity,
+        kind: "material",
+        belanjaCategoryText: "Bahan / Material",
+        belanjaCategoryKey: "bahanmaterial",
+      },
+      lines: transaction.lines.map((line) => ({
+        ...line,
+        namaItem: "Jasa Pemasangan & Tambah Daya PLN",
+        satuan: "Ls",
+        vendor: "PLN",
+        recipient: "PLN",
+      })),
+    };
+  });
+  const rows = makeTargetRowsFromPlan(plan);
+  const snapshots = new Map(rows.map((row, index) => [row.editHref, snapshotFor(plan.transactions[index])]));
+
+  const matches = matchResumeToTargetTransaction(transactions, rows, snapshots);
+  const vi10Match = matches.find((entry) => entry.transaction.transactionIdentity.categoryCode === "VI.10");
+
+  assert.ok(vi10Match);
+  assert.equal(vi10Match.remapRequired, true);
+  assert.equal(vi10Match.row.rowIndex, rows[vi10Index].rowIndex);
+  assert.equal(vi10Match.row.belanjaCategoryText, "Upah / Honorarium");
+  assert.match(vi10Match.remapReason, /kode kategori sama/);
+  assert.equal(new Set(matches.map((entry) => entry.row.editHref)).size, matches.length);
+});
+
+test("compare menerima fallback jenis target jika kategori sama dan detail cocok", () => {
+  const project = makeTemplatePlanProject();
+  const plan = buildBelanjaTransactionPlan(project, project.items);
+  const honorariumTransaction = plan.transactions.find((transaction) => transaction.transactionIdentity.categoryCode === "VI.10");
+  assert.ok(honorariumTransaction);
+  const materialTransaction = {
+    ...honorariumTransaction,
+    kind: "material",
+    transactionIdentity: {
+      ...honorariumTransaction.transactionIdentity,
+      kind: "material",
+      belanjaCategoryText: "Bahan / Material",
+      belanjaCategoryKey: "bahanmaterial",
+    },
+  };
+
+  const comparison = compareTransactionSnapshot(materialTransaction, snapshotFor(honorariumTransaction), {
+    targetKindFallback: "honorarium",
+  });
+
+  assert.deepEqual(comparison.differences, []);
+  assert.equal(comparison.expectedSignature, comparison.actualSignature);
 });
 
 test("stage budget planner hanya mengedit transaksi pada tahap yang selisih", () => {
