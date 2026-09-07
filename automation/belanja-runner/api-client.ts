@@ -7,6 +7,7 @@ import type {
   ClaimedBelanjaSyncItem,
   ClaimedBelanjaSyncJob,
 } from "../../src/lib/belanja-sync/types";
+import { BELANJA_RUNNER_VERSION } from "../../src/lib/belanja-sync/runner-version";
 import type { RunnerConfig } from "./config";
 
 export class BelanjaSyncApiClient {
@@ -93,7 +94,10 @@ export class BelanjaSyncApiClient {
   claim() {
     return this.request<{ claim: ClaimedBelanjaSyncItem | null; jobClaim: ClaimedBelanjaSyncJob | null }>("/api/belanja-runner/claim", {
       method: "POST",
-      body: { runnerId: this.config.runnerId },
+      body: {
+        runnerId: this.config.runnerId,
+        runnerVersion: BELANJA_RUNNER_VERSION,
+      },
     });
   }
 

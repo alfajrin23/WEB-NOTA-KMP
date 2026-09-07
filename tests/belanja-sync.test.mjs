@@ -34,6 +34,11 @@ import {
   classifyBelanjaAutomationError,
   isPlaywrightTargetClosedError,
 } from "../src/lib/belanja-sync/automation-errors.ts";
+import {
+  BELANJA_RUNNER_VERSION,
+  MIN_COPY_RECONCILE_RUNNER_VERSION,
+  isBelanjaRunnerVersionSupported,
+} from "../src/lib/belanja-sync/runner-version.ts";
 import { getRunnerConfig, loadLocalEnv } from "../automation/belanja-runner/config.ts";
 import { resolveEffectiveDryRun, resolveEffectiveFieldMapVerified } from "../automation/belanja-runner/mode.ts";
 import {
@@ -674,6 +679,8 @@ test("runner memakai default polling cepat dan health-check periodik", () => {
     "BELANJA_FAST_UI_TIMEOUT_MS",
     "BELANJA_CHOICE_SEARCH_TIMEOUT_MS",
     "BELANJA_CHOICE_SETTLE_MS",
+    "BELANJA_DESTINATION_ROWS_WAIT_MS",
+    "BELANJA_DESTINATION_READ_ATTEMPTS",
   ];
   const previous = new Map(keys.map((key) => [key, process.env[key]]));
 
@@ -695,12 +702,21 @@ test("runner memakai default polling cepat dan health-check periodik", () => {
     assert.equal(config.fastUiTimeoutMs, 1200);
     assert.equal(config.choiceSearchTimeoutMs, 2000);
     assert.equal(config.choiceSettleMs, 50);
+    assert.equal(config.destinationRowsWaitMs, 30000);
+    assert.equal(config.destinationReadAttempts, 5);
   } finally {
     for (const [key, value] of previous) {
       if (value == null) delete process.env[key];
       else process.env[key] = value;
     }
   }
+});
+
+test("gate versi runner copy/reconcile menolak runner lama atau tanpa versi", () => {
+  assert.equal(isBelanjaRunnerVersionSupported(BELANJA_RUNNER_VERSION), true);
+  assert.equal(isBelanjaRunnerVersionSupported(MIN_COPY_RECONCILE_RUNNER_VERSION), true);
+  assert.equal(isBelanjaRunnerVersionSupported("playwright-v2.3.9"), false);
+  assert.equal(isBelanjaRunnerVersionSupported(null), false);
 });
 
 test("runner memuat env lokal dari folder induk walau cwd ada di subfolder", () => {

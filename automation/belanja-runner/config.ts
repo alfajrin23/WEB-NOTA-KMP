@@ -32,6 +32,8 @@ export type RunnerConfig = {
   fastUiTimeoutMs: number;
   choiceSearchTimeoutMs: number;
   choiceSettleMs: number;
+  destinationRowsWaitMs: number;
+  destinationReadAttempts: number;
   rootDir: string;
   authStatePath: string;
   artifactsDir: string;
@@ -121,6 +123,8 @@ export function getRunnerConfig(): RunnerConfig {
     fastUiTimeoutMs: numberEnv("BELANJA_FAST_UI_TIMEOUT_MS", 1200),
     choiceSearchTimeoutMs: numberEnv("BELANJA_CHOICE_SEARCH_TIMEOUT_MS", 2000),
     choiceSettleMs: numberEnv("BELANJA_CHOICE_SETTLE_MS", 50),
+    destinationRowsWaitMs: numberEnv("BELANJA_DESTINATION_ROWS_WAIT_MS", 30000),
+    destinationReadAttempts: integerEnv("BELANJA_DESTINATION_READ_ATTEMPTS", 5),
     rootDir,
     artifactsDir,
     authStatePath: path.join(authDir, "belanja.json"),

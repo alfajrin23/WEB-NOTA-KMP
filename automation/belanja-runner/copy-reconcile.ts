@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { createHash } from "node:crypto";
 import type { Locator, Page } from "playwright";
-import { findKdkmpOption, formatKdkmpIdentity, parseKdkmpOptionText, sameKdkmpIdentity } from "../../src/lib/belanja-sync/kdkmp";
+import { findKdkmpOption, formatKdkmpIdentity, normalizeKdkmpPart, parseKdkmpOptionText, sameKdkmpIdentity } from "../../src/lib/belanja-sync/kdkmp";
 import { classifyBelanjaAutomationError } from "../../src/lib/belanja-sync/automation-errors";
 import {
   belanjaTextMatches,
@@ -43,6 +43,17 @@ export type TargetTransactionRow = {
   totalText: string;
   dateText: string;
   identityKey: string;
+};
+
+type TransactionTableStatus = {
+  tableFound: boolean;
+  processingVisible: boolean;
+  loadingVisible: boolean;
+  emptyVisible: boolean;
+  selectedKdkmpText: string;
+  dataRowCount: number;
+  matchingRowCount: number;
+  sampleRows: string[];
 };
 
 export type BudgetStageKey = string;
@@ -364,7 +375,7 @@ async function waitForDataTableSettled(page: Page, config: RunnerConfig) {
       .filter(Boolean);
     if (!table || processingVisible || rowTexts.length === 0) return false;
     return rowTexts.every((text) => !/loading|memuat|processing|mohon tunggu/i.test(text));
-  })()`, null, { timeout: config.choiceSearchTimeoutMs + 5_000 });
+  })()`, null, { timeout: Math.max(10_000, config.choiceSearchTimeoutMs + 5_000) });
 }
 
 async function waitForTransactionRows(page: Page, expectedCount: number, config: RunnerConfig) {
@@ -380,25 +391,112 @@ async function waitForTransactionRows(page: Page, expectedCount: number, config:
 }
 
 async function waitForRowsToMatchKdkmp(page: Page, expected: KdkmpIdentity, config: RunnerConfig) {
-  const expectedVillage = normalizeBelanjaText(expected.village).toLowerCase();
-  await page.waitForFunction(`(() => {
+  const expectedVillage = normalizeKdkmpPart(expected.village);
+  const timeout = Math.max(config.destinationRowsWaitMs, config.choiceSearchTimeoutMs + 20_000);
+  try {
+    await page.waitForFunction(`(() => {
     const village = ${JSON.stringify(expectedVillage)};
+    const compact = (value) => String(value || "")
+      .replace(/\\s+/g, " ")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "");
+    const textContent = (element) => (element?.textContent || "").trim().replace(/\\s+/g, " ");
     const processingVisible = Array.from(document.querySelectorAll(".dataTables_processing, [id$='_processing']")).some((element) => {
       const style = window.getComputedStyle(element);
       const text = (element.textContent || "").trim();
       return Boolean(text) && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || "1") !== 0;
     });
     const rows = Array.from(document.querySelectorAll("table tbody tr"));
-    const rowTexts = rows
-      .map((row) => (row.textContent || "").trim().replace(/\\s+/g, " "))
-      .filter(Boolean);
+    const rowTexts = rows.map((row) => textContent(row)).filter(Boolean);
     if (processingVisible || rowTexts.length === 0) return false;
     if (rowTexts.some((text) => /loading|memuat|processing|mohon tunggu/i.test(text))) return false;
     const emptyMarker = rowTexts.some((text) => /tidak ditemukan|tidak ada data|no matching|no data|kosong/i.test(text));
-    const meaningfulRows = rowTexts.filter((text) => !/tidak ditemukan|tidak ada data|no matching|no data|kosong/i.test(text));
-    if (meaningfulRows.length === 0) return emptyMarker;
-    return meaningfulRows.every((text) => text.toLowerCase().includes(village));
-  })()`, null, { timeout: Math.max(8_000, config.choiceSearchTimeoutMs + 5_000) });
+    const dataRows = rows.map((row) => {
+      const cells = Array.from(row.querySelectorAll("td")).map((cell) => textContent(cell));
+      const hasSelectionCell = cells.length >= 9;
+      const offset = hasSelectionCell ? 2 : 1;
+      return {
+        fullText: textContent(row),
+        kdkmpText: cells[offset] || "",
+      };
+    }).filter((row) => row.fullText && !/tidak ditemukan|tidak ada data|no matching|no data|kosong|loading|memuat|processing|mohon tunggu/i.test(row.fullText));
+    if (dataRows.length === 0) return emptyMarker;
+    return dataRows.every((row) => {
+      const kdkmp = compact(row.kdkmpText);
+      const full = compact(row.fullText);
+      return !village || kdkmp.includes(village) || full.includes(village);
+    });
+  })()`, null, { timeout });
+  } catch (error) {
+    const status = await readTransactionTableStatus(page, expected).catch(() => null);
+    const detail = status ? summarizeTransactionTableStatus(status, expected) : "";
+    const message = error instanceof Error ? error.message : "unknown";
+    throw new Error(`Timeout menunggu tabel destination ${formatKdkmpIdentity(expected)}. ${detail} ${message}`.trim());
+  }
+}
+
+async function readTransactionTableStatus(page: Page, expected: KdkmpIdentity): Promise<TransactionTableStatus> {
+  const expectedVillage = normalizeKdkmpPart(expected.village);
+  return page.evaluate<TransactionTableStatus>(`(() => {
+    const village = ${JSON.stringify(expectedVillage)};
+    const compact = (value) => String(value || "")
+      .replace(/\\s+/g, " ")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "");
+    const textContent = (element) => (element?.textContent || "").trim().replace(/\\s+/g, " ");
+    const processingVisible = Array.from(document.querySelectorAll(".dataTables_processing, [id$='_processing']")).some((element) => {
+      const style = window.getComputedStyle(element);
+      const text = (element.textContent || "").trim();
+      return Boolean(text) && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || "1") !== 0;
+    });
+    const rows = Array.from(document.querySelectorAll("table tbody tr"));
+    const rowTexts = rows.map((row) => textContent(row)).filter(Boolean);
+    const loadingVisible = rowTexts.some((text) => /loading|memuat|processing|mohon tunggu/i.test(text));
+    const emptyVisible = rowTexts.some((text) => /tidak ditemukan|tidak ada data|no matching|no data|kosong/i.test(text));
+    const dataRows = rows.map((row) => {
+      const cells = Array.from(row.querySelectorAll("td")).map((cell) => textContent(cell));
+      const hasSelectionCell = cells.length >= 9;
+      const offset = hasSelectionCell ? 2 : 1;
+      return {
+        fullText: textContent(row),
+        kdkmpText: cells[offset] || "",
+      };
+    }).filter((row) => row.fullText && !/tidak ditemukan|tidak ada data|no matching|no data|kosong|loading|memuat|processing|mohon tunggu/i.test(row.fullText));
+    const matchingRowCount = dataRows.filter((row) => {
+      const kdkmp = compact(row.kdkmpText);
+      const full = compact(row.fullText);
+      return !village || kdkmp.includes(village) || full.includes(village);
+    }).length;
+    const gerai = document.querySelector("#gerai");
+    const choice = gerai?.closest(".choices")?.querySelector(".choices__list--single");
+    return {
+      tableFound: Boolean(document.querySelector("table")),
+      processingVisible,
+      loadingVisible,
+      emptyVisible,
+      selectedKdkmpText: textContent(document.querySelector("#gerai option:checked")) || textContent(choice),
+      dataRowCount: dataRows.length,
+      matchingRowCount,
+      sampleRows: dataRows.slice(0, 3).map((row) => row.fullText).concat(rowTexts.filter((text) => /tidak ditemukan|tidak ada data|no matching|no data|kosong|loading|memuat|processing|mohon tunggu/i.test(text)).slice(0, 2)),
+    };
+  })()`);
+}
+
+function summarizeTransactionTableStatus(status: TransactionTableStatus, expected: KdkmpIdentity) {
+  const markers = [
+    status.tableFound ? "table=ada" : "table=tidak_ada",
+    status.processingVisible ? "processing=ya" : "processing=tidak",
+    status.loadingVisible ? "loading=ya" : "loading=tidak",
+    status.emptyVisible ? "empty=ya" : "empty=tidak",
+    `rows=${status.dataRowCount}`,
+    `rows_cocok=${status.matchingRowCount}`,
+    `selected="${normalizeBelanjaText(status.selectedKdkmpText) || "-"}"`,
+    `expected="${formatKdkmpIdentity(expected)}"`,
+  ];
+  const sample = status.sampleRows.length ? ` sample="${status.sampleRows.map(normalizeBelanjaText).join(" | ").slice(0, 240)}"` : "";
+  return `${markers.join(" ")}.${sample}`;
 }
 
 async function readTransactionRows(page: Page): Promise<TargetTransactionRow[]> {
@@ -1263,7 +1361,8 @@ async function openDestinationTransactions(page: Page, config: RunnerConfig, cla
 
 export async function readDestinationTransactionRows(page: Page, config: RunnerConfig, claim: ClaimedBelanjaSyncJob) {
   let lastError: unknown;
-  for (let attempt = 1; attempt <= TARGET_NAVIGATION_ATTEMPTS; attempt += 1) {
+  const attempts = Math.max(TARGET_NAVIGATION_ATTEMPTS, config.destinationReadAttempts);
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
       await gotoBelanjaList(page, config);
       await selectKdkmpChoice(page, config, "gerai", claim.destinationKdkmp);
@@ -1274,13 +1373,28 @@ export async function readDestinationTransactionRows(page: Page, config: RunnerC
       return rows;
     } catch (error) {
       lastError = error;
-      if (attempt >= TARGET_NAVIGATION_ATTEMPTS) break;
-      logJob(claim.job.id, `stage=${claim.stage} action=retry_destination_rows attempt=${attempt + 1}/${TARGET_NAVIGATION_ATTEMPTS}`);
-      await page.waitForTimeout(1_000 * attempt);
+      const message = error instanceof Error ? error.message : "";
+      if (/Timeout menunggu tabel destination|page\.waitForFunction|Timeout \d+ms exceeded/i.test(message)) {
+        const rows = await readTransactionRows(page).catch(() => []);
+        if (rows.length >= claim.expectedTransactionCount) {
+          try {
+            assertRowsBelongToKdkmp(rows, claim.destinationKdkmp, "Destination");
+            logJob(claim.job.id, `stage=${claim.stage} action=accept_destination_rows_after_wait_timeout rows=${rows.length} expected=${claim.expectedTransactionCount}`);
+            return rows;
+          } catch {
+            // Continue through the normal retry path; the final error includes a table snapshot.
+          }
+        }
+      }
+      if (attempt >= attempts) break;
+      logJob(claim.job.id, `stage=${claim.stage} action=retry_destination_rows attempt=${attempt + 1}/${attempts}`);
+      await page.waitForTimeout(Math.min(1_500 * attempt, 6_000));
     }
   }
   const message = lastError instanceof Error ? lastError.message : "unknown";
-  throw new Error(`Gagal membaca transaksi destination setelah ${TARGET_NAVIGATION_ATTEMPTS} percobaan. ${message}`);
+  const status = await readTransactionTableStatus(page, claim.destinationKdkmp).catch(() => null);
+  const detail = status ? ` ${summarizeTransactionTableStatus(status, claim.destinationKdkmp)}` : "";
+  throw new Error(`Gagal membaca transaksi destination setelah ${attempts} percobaan.${detail} ${message}`.trim());
 }
 
 async function destinationAlreadyHasExpectedTransactions(page: Page, config: RunnerConfig, claim: ClaimedBelanjaSyncJob) {

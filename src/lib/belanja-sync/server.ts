@@ -5,6 +5,11 @@ import { formatProjectRecipientAddress, formatProjectRecipientName, normalizeWil
 import { createSupabaseAdminClient } from "../supabase/admin";
 import { buildDestinationKdkmp, formatKdkmpIdentity, isMaleberSource, SOURCE_KDKMP } from "./kdkmp";
 import { buildBelanjaPayload, validateBelanjaPayload } from "./payload";
+import {
+  MIN_COPY_RECONCILE_RUNNER_VERSION,
+  isBelanjaRunnerVersionSupported,
+  unsupportedBelanjaRunnerVersionMessage,
+} from "./runner-version";
 import { isBelanjaItemActive, nextFailedBelanjaStatus, shouldQueueBelanjaItem } from "./status";
 import {
   BELANJA_COPY_RECONCILE_OPERATION,
@@ -506,6 +511,25 @@ async function getLatestRunnerHeartbeat(client: SupabaseClient) {
   return rowToHeartbeat(data as BelanjaHeartbeatRow | null);
 }
 
+async function getLatestCompatibleCopyRunnerHeartbeat(client: SupabaseClient) {
+  const onlineSince = new Date(Date.now() - RUNNER_ONLINE_WINDOW_MS).toISOString();
+  const { data, error } = await client
+    .from("belanja_runner_heartbeats")
+    .select(HEARTBEAT_SELECT)
+    .gte("last_seen_at", onlineSince)
+    .order("last_seen_at", { ascending: false })
+    .limit(20);
+  if (error) throwDatabaseError(error, "Gagal memuat heartbeat runner.");
+
+  return ((data ?? []) as BelanjaHeartbeatRow[])
+    .map(rowToHeartbeat)
+    .find((runner): runner is BelanjaRunnerHeartbeat => Boolean(
+      runner?.online
+      && runner.targetStatus === "connected"
+      && isBelanjaRunnerVersionSupported(runnerVersionFromMetadata(asRecord(runner.metadataJson))),
+    )) ?? null;
+}
+
 async function loadProjectWithItems(client: SupabaseClient, projectId: string, itemIds?: string[]) {
   const { data: projectRow, error: projectError } = await client
     .from("projects")
@@ -856,6 +880,18 @@ function runnerFieldMapVerified(runner: BelanjaRunnerHeartbeat | null) {
     || metadata.belanja_field_map_verified === true;
 }
 
+function runnerVersionFromMetadata(metadata: JsonRecord) {
+  return asOptionalString(metadata.runner_version)
+    ?? asOptionalString(metadata.runnerVersion)
+    ?? asOptionalString(metadata.belanja_runner_version);
+}
+
+function assertCopyReconcileRunnerVersion(version: string | null | undefined, runnerId?: string) {
+  if (!isBelanjaRunnerVersionSupported(version)) {
+    throw new Error(unsupportedBelanjaRunnerVersionMessage(version, runnerId));
+  }
+}
+
 function activeCopyJobError(job: BelanjaSyncJob, idempotencyKey: string) {
   const metadata = asRecord(job.metadataJson);
   if (metadata.idempotency_key === idempotencyKey) {
@@ -880,7 +916,13 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
 
   const runner = await getLatestRunnerHeartbeat(client);
   if (!runner?.online) throw new Error("Runner lokal belum online. Jalankan `npm run belanja:runner` pada PC yang tersambung VPN.");
-  if (runner.targetStatus !== "connected") throw new Error("Runner tidak dapat mengakses Web Belanja. Cek VPN, TARGET_BASE_URL, dan login runner.");
+  const copyRunner = await getLatestCompatibleCopyRunnerHeartbeat(client);
+  const runnerForJob = copyRunner ?? runner;
+  if (runnerForJob.targetStatus !== "connected") throw new Error("Runner tidak dapat mengakses Web Belanja. Cek VPN, TARGET_BASE_URL, dan login runner.");
+  if (!copyRunner) {
+    const runnerVersion = runnerVersionFromMetadata(asRecord(runner.metadataJson));
+    assertCopyReconcileRunnerVersion(runnerVersion, runner.runnerId);
+  }
 
   const project = await loadProjectWithItems(client, input.projectId, uniqueItemIds);
   const foundItemIds = new Set(project.items.map((item) => item.id));
@@ -900,7 +942,7 @@ export async function createBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
 
   const fieldMapVerifiedFromHistory = input.dryRun === false ? await hasVerifiedFieldMapInHistory(client) : false;
   const fieldMapVerified = input.dryRun === false
-    ? fieldMapVerifiedFromHistory || runnerFieldMapVerified(runner)
+    ? fieldMapVerifiedFromHistory || runnerFieldMapVerified(runnerForJob)
     : false;
   if (input.dryRun === false && !fieldMapVerified) {
     throw new Error("Mapping Web Belanja belum diverifikasi. Jalankan dry run sampai DRY_RUN_OK, atau set BELANJA_FIELD_MAP_VERIFIED=true hanya pada runner yang sudah dicek.");
@@ -1276,6 +1318,8 @@ export async function recordBelanjaRunnerHeartbeat(input: {
   metadataJson?: Record<string, unknown>;
 }) {
   const client = clientOrThrow();
+  const metadata = asRecord(input.metadataJson);
+  const runnerVersion = runnerVersionFromMetadata(metadata);
   const { data, error } = await client
     .from("belanja_runner_heartbeats")
     .upsert({
@@ -1286,7 +1330,11 @@ export async function recordBelanjaRunnerHeartbeat(input: {
       target_base_url: input.targetBaseUrl ?? null,
       message: input.message ?? null,
       last_seen_at: nowIso(),
-      metadata_json: input.metadataJson ?? {},
+      metadata_json: {
+        ...metadata,
+        min_copy_reconcile_runner_version: MIN_COPY_RECONCILE_RUNNER_VERSION,
+        runner_version_supported: isBelanjaRunnerVersionSupported(runnerVersion),
+      },
     }, { onConflict: "runner_id" })
     .select(HEARTBEAT_SELECT)
     .single();
@@ -1387,7 +1435,10 @@ async function loadBelanjaSyncItemsForJob(client: SupabaseClient, jobId: string)
   return ((data ?? []) as BelanjaItemRow[]).map(rowToItem);
 }
 
-export async function claimNextBelanjaSyncJob(runnerId: string): Promise<ClaimedBelanjaSyncJob | null> {
+export async function claimNextBelanjaSyncJob(
+  runnerId: string,
+  options: { runnerVersion?: string | null } = {},
+): Promise<ClaimedBelanjaSyncJob | null> {
   const client = clientOrThrow();
   await markStaleProcessingItems(client);
   await markStaleCopyReconcileJobs(client);
@@ -1403,6 +1454,7 @@ export async function claimNextBelanjaSyncJob(runnerId: string): Promise<Claimed
   for (const candidate of (data ?? []) as BelanjaJobRow[]) {
     const metadata = asRecord(candidate.metadata_json);
     if (!isCopyReconcileMetadata(metadata)) continue;
+    assertCopyReconcileRunnerVersion(options.runnerVersion, runnerId);
 
     const timestamp = nowIso();
     const stage = asCopyStage(metadata.stage) ?? "PRE_FLIGHT";
@@ -1416,6 +1468,8 @@ export async function claimNextBelanjaSyncJob(runnerId: string): Promise<Claimed
         metadata_json: {
           ...metadata,
           runner_id: runnerId,
+          runner_version: options.runnerVersion ?? null,
+          min_runner_version: MIN_COPY_RECONCILE_RUNNER_VERSION,
           claimed_at: timestamp,
           stage,
           stage_message: asString(metadata.stage_message, "Runner mengambil job copy/reconcile."),

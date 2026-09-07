@@ -4,6 +4,7 @@ import { jsonError, readJsonBody, requireRunnerToken } from "@/lib/belanja-sync/
 
 type ClaimInput = {
   runnerId: string;
+  runnerVersion?: string | null;
 };
 
 export async function POST(request: Request) {
@@ -13,7 +14,9 @@ export async function POST(request: Request) {
   try {
     const input = await readJsonBody<ClaimInput>(request);
     if (!input.runnerId?.trim()) throw new Error("runnerId wajib diisi.");
-    const jobClaim = await claimNextBelanjaSyncJob(input.runnerId.trim());
+    const jobClaim = await claimNextBelanjaSyncJob(input.runnerId.trim(), {
+      runnerVersion: input.runnerVersion ?? null,
+    });
     if (jobClaim) return NextResponse.json({ claim: null, jobClaim });
     const claim = await claimNextBelanjaSyncItem(input.runnerId.trim());
     return NextResponse.json({ claim, jobClaim: null });

@@ -5,6 +5,7 @@ import {
   type BelanjaAutomationPhase,
 } from "../../src/lib/belanja-sync/automation-errors";
 import { validateBelanjaPayload } from "../../src/lib/belanja-sync/payload";
+import { BELANJA_RUNNER_VERSION } from "../../src/lib/belanja-sync/runner-version";
 import type { ClaimedBelanjaSyncItem } from "../../src/lib/belanja-sync/types";
 import { BelanjaSyncApiClient } from "./api-client";
 import { createBelanjaContext, ensureAuthenticated } from "./auth";
@@ -142,6 +143,8 @@ function startBusyHeartbeat(api: BelanjaSyncApiClient, config: RunnerConfig, job
         targetBaseUrl: config.targetBaseUrl,
         message: `Runner sedang memproses job ${job.id}.`,
         metadataJson: {
+          runner_version: BELANJA_RUNNER_VERSION,
+          runnerVersion: BELANJA_RUNNER_VERSION,
           field_map_verified: config.fieldMapVerified,
           base_transaction_count: config.baseTransactionCount,
           active_job_id: job.id,
@@ -293,6 +296,8 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
           targetBaseUrl: config.targetBaseUrl,
           message,
           metadataJson: {
+            runner_version: BELANJA_RUNNER_VERSION,
+            runnerVersion: BELANJA_RUNNER_VERSION,
             field_map_verified: config.fieldMapVerified,
             base_transaction_count: config.baseTransactionCount,
           },
@@ -324,7 +329,7 @@ export async function runBelanjaRunner(config: RunnerConfig, options: { once?: b
         console.log(`VPN/Website   : reachable`);
         console.log(`Login         : ${authenticated ? "authenticated" : "not authenticated"}`);
         console.log(`Queue         : ${cachedPendingCount} pending`);
-        console.log(`Runner        : READY`);
+        console.log(`Runner        : READY (${BELANJA_RUNNER_VERSION})`);
         console.log("=====================");
         lastStatusLogAt = Date.now();
       }
