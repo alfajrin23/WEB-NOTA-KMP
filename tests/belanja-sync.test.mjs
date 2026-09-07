@@ -50,6 +50,7 @@ import {
   matchResumeToTargetTransaction,
   formatBudgetDiagnostics,
   genericHonorariumNameMatches,
+  shouldPreserveTemplateHonorariumDetails,
   planDestinationBudgetRepairs,
   planStageBudgetReconcile,
   shouldReconcileTransactionForStageBudgetPlan,
@@ -263,6 +264,56 @@ test("signature honorarium role other boleh mempertahankan penerima target exist
   const snapshot = snapshotFor(transaction);
   snapshot.lines[0].recipient = "Serma Andri Rolen";
   assert.deepEqual(compareTransactionSnapshot(transaction, snapshot).differences, []);
+});
+
+test("honorarium operasional VII.01 mempertahankan rincian Maleber dan hanya wajib tanggal sesuai resume", () => {
+  const plan = buildBelanjaTransactionPlan(makeTemplatePlanProject());
+  const base = plan.transactions.find((transaction) => transaction.transactionIdentity.categoryCode === "VII.01");
+  assert.ok(base);
+  const transaction = {
+    ...base,
+    totalAmount: 18400000,
+    hargaSatuan: 18400000,
+    jumlah: 18400000,
+    transactionIdentity: {
+      ...base.transactionIdentity,
+      categoryText: "Biaya Operasional Lapangan",
+      transactionDate: "2026-02-10",
+    },
+    lines: [{
+      ...base.lines[0],
+      namaItem: "Upah Honorium",
+      qty: 1,
+      hargaSatuan: 18400000,
+      jumlah: 18400000,
+      tanggal: "2026-02-10",
+      recipient: "Honorarium",
+      vendor: "",
+    }],
+    lineCount: 1,
+  };
+  const snapshot = {
+    ...snapshotFor(transaction),
+    date: "2026-02-10",
+    lines: [
+      { index: 0, name: "Mandor Lapangan", qty: 10, unitPrice: 500000, subtotal: 5000000, paymentDate: "2026-02-03", recipient: "Mandor" },
+      { index: 1, name: "Pengawas Operasional", qty: 8, unitPrice: 800000, subtotal: 6400000, paymentDate: "2026-02-03", recipient: "Pengawas" },
+      { index: 2, name: "Administrasi Gerai", qty: 7, unitPrice: 1000000, subtotal: 7000000, paymentDate: "2026-02-03", recipient: "Admin" },
+    ],
+  };
+
+  assert.equal(shouldPreserveTemplateHonorariumDetails(transaction), true);
+  const needsDateEdit = compareTransactionSnapshot(transaction, snapshot);
+  assert.match(needsDateEdit.differences.join(" "), /Tanggal bayar honorarium template/);
+  assert.notEqual(needsDateEdit.expectedSignature, needsDateEdit.actualSignature);
+
+  const saved = {
+    ...snapshot,
+    lines: snapshot.lines.map((line) => ({ ...line, paymentDate: "2026-02-10" })),
+  };
+  const accepted = compareTransactionSnapshot(transaction, saved);
+  assert.deepEqual(accepted.differences, []);
+  assert.equal(accepted.expectedSignature, accepted.actualSignature);
 });
 
 test("budget mendeteksi selisih satu rupiah dan tahap di luar tujuh tahap", () => {

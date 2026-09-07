@@ -129,6 +129,8 @@ export type StageBudgetReconcilePlan = {
 const CHOICE_ROOT_XPATH = "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' choices ')]";
 const FINAL_BUDGET_REPAIR_MAX_PASSES = 2;
 const TARGET_NAVIGATION_ATTEMPTS = 3;
+const MAX_DATATABLE_PAGES_TO_SCAN = 12;
+const PRESERVED_HONORARIUM_OPERASIONAL_TOTAL = 18_400_000;
 const EDIT_PAGE_READY_SELECTOR = 'input[name="tanggal"], select#tahapan, select#item_pekerjaan, select#kategori_belanja';
 
 type TargetNavigationOptions = {
@@ -151,6 +153,10 @@ function attr(value: string) {
 
 function normalizeIdentityPart(value: string | null | undefined) {
   return normalizeBelanjaText(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function transactionSignature(values: unknown[]) {
+  return createHash("sha256").update(JSON.stringify(values)).digest("hex");
 }
 
 function transactionIdentityKey(input: {
@@ -531,6 +537,60 @@ async function readTransactionRows(page: Page): Promise<TargetTransactionRow[]> 
   })));
 }
 
+async function transactionTableFingerprint(page: Page) {
+  return page.evaluate(`(() => Array.from(document.querySelectorAll("table tbody tr"))
+    .map((row) => (row.textContent || "").trim().replace(/\\s+/g, " "))
+    .join("\\n"))()`).catch(() => "");
+}
+
+async function clickNextTransactionTablePage(page: Page, config: RunnerConfig) {
+  const next = page.locator([
+    "#table-1_next:not(.disabled):not([aria-disabled='true'])",
+    ".dataTables_paginate .paginate_button.next:not(.disabled):not([aria-disabled='true'])",
+    ".dataTables_paginate a.next:not(.disabled):not([aria-disabled='true'])",
+    ".pagination .page-item:not(.disabled) a[rel='next']",
+  ].join(", ")).first();
+  if ((await next.count().catch(() => 0)) === 0) return false;
+  const disabled = await next.evaluate((element) => {
+    const className = String(element.getAttribute("class") || "");
+    const ariaDisabled = String(element.getAttribute("aria-disabled") || "").toLowerCase();
+    return /\bdisabled\b/.test(className) || ariaDisabled === "true";
+  }).catch(() => true);
+  if (disabled) return false;
+
+  const before = await transactionTableFingerprint(page);
+  await next.click({ timeout: 2_000 });
+  await page.waitForFunction((previous) => {
+    const processingVisible = Array.from(document.querySelectorAll(".dataTables_processing, [id$='_processing']")).some((element) => {
+      const style = window.getComputedStyle(element);
+      const text = (element.textContent || "").trim();
+      return Boolean(text) && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || "1") !== 0;
+    });
+    const current = Array.from(document.querySelectorAll("table tbody tr"))
+      .map((row) => (row.textContent || "").trim().replace(/\s+/g, " "))
+      .join("\n");
+    return !processingVisible && current && current !== previous;
+  }, before, { timeout: Math.max(5_000, config.choiceSearchTimeoutMs + 3_000) }).catch(() => {});
+  await waitForDataTableSettled(page, config).catch(() => {});
+  return true;
+}
+
+async function readTransactionRowsAcrossPages(page: Page, config: RunnerConfig, expectedCount?: number) {
+  const collected = new Map<string, TargetTransactionRow>();
+  for (let pageIndex = 0; pageIndex < MAX_DATATABLE_PAGES_TO_SCAN; pageIndex += 1) {
+    const rows = await readTransactionRows(page);
+    for (const row of rows) {
+      const key = row.editHref ?? row.uuid ?? `${pageIndex}-${row.rowIndex}-${rowExactDuplicateKey(row)}`;
+      if (!collected.has(key)) {
+        collected.set(key, { ...row, rowIndex: collected.size + 1 });
+      }
+    }
+    if (expectedCount && collected.size >= expectedCount) break;
+    if (!(await clickNextTransactionTablePage(page, config))) break;
+  }
+  return [...collected.values()];
+}
+
 function assertRowsBelongToKdkmp(rows: TargetTransactionRow[], expected: KdkmpIdentity, label: string) {
   const mismatches = rows.filter((row) => {
     const parsed = parseKdkmpOptionText(`${row.kdkmpText} (${expected.province ?? "Jawa Barat"}, ${expected.regency}, ${expected.district}, ${expected.village})`);
@@ -593,6 +653,30 @@ function targetRowIdentityKey(row: TargetTransactionRow) {
 
 function rowReferenceKey(row: TargetTransactionRow) {
   return row.editHref ?? row.uuid ?? `row-${row.rowIndex}`;
+}
+
+function snapshotTotalAmount(snapshot: TransactionSnapshot) {
+  return roundBelanjaMoney(snapshot.lines.reduce((sum, line) => sum + (line.subtotal ?? 0), 0));
+}
+
+export function shouldPreserveTemplateHonorariumDetails(transaction: BelanjaTransactionPayload) {
+  const stageKey = normalizeIdentityPart(transactionStageKey(transaction));
+  const categoryCode = normalizeIdentityPart(transaction.transactionIdentity.categoryCode);
+  const categoryText = normalizeBelanjaText([
+    transaction.transactionIdentity.categoryText,
+    transaction.namaItem,
+    ...transaction.lines.map((line) => line.namaItem),
+  ].join(" ")).toLowerCase();
+
+  return transaction.kind === "honorarium"
+    && stageKey === "vii"
+    && categoryCode === "vii01"
+    && /operasional/.test(categoryText)
+    && Math.abs(roundBelanjaMoney(transaction.totalAmount) - PRESERVED_HONORARIUM_OPERASIONAL_TOTAL) <= 1;
+}
+
+function preservedHonorariumPaymentDate(transaction: BelanjaTransactionPayload) {
+  return transaction.lines.find((line) => line.tanggal)?.tanggal || transaction.transactionIdentity.transactionDate;
 }
 
 function rowCategoryCode(row: TargetTransactionRow) {
@@ -860,6 +944,9 @@ export function shouldReconcileTransactionForStageBudgetPlan(
 
 function snapshotLineMatchCount(transaction: BelanjaTransactionPayload, snapshot: TransactionSnapshot | undefined) {
   if (!snapshot) return 0;
+  if (shouldPreserveTemplateHonorariumDetails(transaction) && Math.abs(snapshotTotalAmount(snapshot) - transaction.totalAmount) <= 1) {
+    return Math.max(transaction.lines.length, 1);
+  }
   return transaction.lines.filter((line) => (
     snapshot.lines.some((actual) => detailNamesMatch(actual.name, line.namaItem, transaction.kind === "honorarium"))
   )).length;
@@ -1014,8 +1101,33 @@ function pushNumericIssue(issues: string[], label: string, itemName: string, exp
   }
 }
 
+function comparePreservedHonorariumTemplateLines(transaction: BelanjaTransactionPayload, actualLines: DetailLine[]) {
+  const issues: string[] = [];
+  const expectedDate = preservedHonorariumPaymentDate(transaction);
+  const expectedTotal = roundBelanjaMoney(transaction.totalAmount);
+  const actualTotal = roundBelanjaMoney(actualLines.reduce((sum, line) => sum + (line.subtotal ?? 0), 0));
+
+  if (actualLines.length === 0) {
+    issues.push("Rincian honorarium template Maleber tidak ditemukan.");
+  }
+  if (Math.abs(actualTotal - expectedTotal) > 1) {
+    issues.push(`Total rincian honorarium template expected ${formattedNumber(expectedTotal)} target ${formattedNumber(actualTotal)}`);
+  }
+  for (const line of actualLines) {
+    if ((line.paymentDate ?? "") !== expectedDate) {
+      issues.push(`Tanggal bayar honorarium template row #${line.index + 1} expected ${expectedDate} target ${line.paymentDate || "kosong"}`);
+    }
+  }
+
+  return issues;
+}
+
 function compareDetailLines(transaction: BelanjaTransactionPayload, actualLines: DetailLine[]) {
   const issues: string[] = [];
+
+  if (shouldPreserveTemplateHonorariumDetails(transaction)) {
+    return comparePreservedHonorariumTemplateLines(transaction, actualLines);
+  }
 
   if (actualLines.length !== transaction.lines.length) {
     issues.push(`Jumlah detail expected ${transaction.lines.length} target ${actualLines.length}`);
@@ -1368,14 +1480,14 @@ export async function readDestinationTransactionRows(page: Page, config: RunnerC
       await selectKdkmpChoice(page, config, "gerai", claim.destinationKdkmp);
       await setEntries100(page, config);
       await waitForRowsToMatchKdkmp(page, claim.destinationKdkmp, config);
-      const rows = await readTransactionRows(page);
+      const rows = await readTransactionRowsAcrossPages(page, config, claim.expectedTransactionCount);
       if (rows.length > 0) assertRowsBelongToKdkmp(rows, claim.destinationKdkmp, "Destination");
       return rows;
     } catch (error) {
       lastError = error;
       const message = error instanceof Error ? error.message : "";
       if (/Timeout menunggu tabel destination|page\.waitForFunction|Timeout \d+ms exceeded/i.test(message)) {
-        const rows = await readTransactionRows(page).catch(() => []);
+        const rows = await readTransactionRowsAcrossPages(page, config, claim.expectedTransactionCount).catch(() => []);
         if (rows.length >= claim.expectedTransactionCount) {
           try {
             assertRowsBelongToKdkmp(rows, claim.destinationKdkmp, "Destination");
@@ -1384,6 +1496,8 @@ export async function readDestinationTransactionRows(page: Page, config: RunnerC
           } catch {
             // Continue through the normal retry path; the final error includes a table snapshot.
           }
+        } else if (rows.length > 0) {
+          logJob(claim.job.id, `stage=${claim.stage} action=partial_destination_rows_after_timeout rows=${rows.length} expected=${claim.expectedTransactionCount}`);
         }
       }
       if (attempt >= attempts) break;
@@ -1979,7 +2093,27 @@ async function reconcileEquipmentTransaction(page: Page, transaction: BelanjaTra
   }
 }
 
+async function reconcilePreservedHonorariumTemplateTransaction(page: Page, transaction: BelanjaTransactionPayload) {
+  await setTopDate(page, transaction.transactionIdentity.transactionDate);
+  const actualLines = await readDetailLines(page, "honorarium");
+  const issues = comparePreservedHonorariumTemplateLines(transaction, actualLines)
+    .filter((issue) => !/^Tanggal bayar honorarium template/i.test(issue));
+  if (issues.length > 0) {
+    throw new Error(`Rincian honorarium template tidak aman untuk dipertahankan: ${issues.join("; ")}`);
+  }
+
+  const paymentDate = preservedHonorariumPaymentDate(transaction);
+  for (const line of actualLines) {
+    await setIndexedValue(page, "tanggal_bayar[]", line.index, paymentDate);
+  }
+}
+
 async function reconcileHonorariumTransaction(page: Page, transaction: BelanjaTransactionPayload) {
+  if (shouldPreserveTemplateHonorariumDetails(transaction)) {
+    await reconcilePreservedHonorariumTemplateTransaction(page, transaction);
+    return;
+  }
+
   await setTopDate(page, transaction.transactionIdentity.transactionDate);
   const actualLines = await normalizeDetailLineCount(page, "honorarium", transaction, { allowDuplicateNames: true });
   if (actualLines.length !== transaction.lines.length) {
@@ -2108,6 +2242,29 @@ export function compareTransactionSnapshot(
   const fallbackKey = options.targetKindFallback ? planIdentityKeyForKind(transaction, options.targetKindFallback) : null;
   if (actualKey !== expectedKey && actualKey !== fallbackKey) throw new Error(`Identitas transaksi salah: ${transaction.namaItem}.`);
   if (snapshot.date !== transaction.transactionIdentity.transactionDate) differences.push(`tanggal: ${snapshot.date} -> ${transaction.transactionIdentity.transactionDate}`);
+  if (shouldPreserveTemplateHonorariumDetails(transaction)) {
+    differences.push(...comparePreservedHonorariumTemplateLines(transaction, snapshot.lines));
+    const actualValues = [
+      "preserve-template-honorarium",
+      transaction.transactionId,
+      snapshot.date,
+      snapshotTotalAmount(snapshot),
+      snapshot.lines.map((line) => [
+        normalizeBelanjaText(line.name),
+        line.qty,
+        line.unitPrice,
+        line.subtotal,
+        line.paymentDate,
+        normalizeBelanjaText(line.recipient),
+      ]),
+    ];
+    const acceptedSignature = transactionSignature(actualValues);
+    return {
+      differences,
+      expectedSignature: differences.length ? transactionSignature(["expected", transaction.transactionId, transaction.transactionIdentity.transactionDate, transaction.totalAmount]) : acceptedSignature,
+      actualSignature: acceptedSignature,
+    };
+  }
   if (snapshot.lines.length !== transaction.lines.length) differences.push(`jumlah detail: ${snapshot.lines.length} -> ${transaction.lines.length}`);
   const used = new Set<number>();
   const expectedValues: unknown[] = [];
@@ -2132,11 +2289,10 @@ export function compareTransactionSnapshot(
     expectedValues.push([line.lineId, ...expected]);
     actualValues.push([line.lineId, ...detected]);
   }
-  const signature = (values: unknown[]) => createHash("sha256").update(JSON.stringify(values)).digest("hex");
   return {
     differences,
-    expectedSignature: signature([transaction.transactionIdentity.transactionDate, transaction.lines.length, expectedValues]),
-    actualSignature: signature([snapshot.date, snapshot.lines.length, actualValues]),
+    expectedSignature: transactionSignature([transaction.transactionIdentity.transactionDate, transaction.lines.length, expectedValues]),
+    actualSignature: transactionSignature([snapshot.date, snapshot.lines.length, actualValues]),
   };
 }
 
