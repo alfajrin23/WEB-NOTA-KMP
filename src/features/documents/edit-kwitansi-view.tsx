@@ -426,11 +426,6 @@ export function EditKwitansiView() {
       );
       return;
     }
-    if (!draft.receiver.trim()) {
-      toast.error("Nama penerima wajib diisi sebelum menyimpan kwitansi.");
-      return;
-    }
-
     setSaving(true);
     try {
       const receiverName = draft.receiver.trim();
@@ -453,7 +448,7 @@ export function EditKwitansiView() {
         warnaTemplate: draft.templateColor,
       };
       const receiverChanged = receiverName !== (editingDoc.kwitansiReceiverName ?? "").trim();
-      const sourceSyncKey = receiverChanged
+      const sourceSyncKey = receiverName && receiverChanged
         ? syncKeysByDocId.get(editingDoc.id) ?? kwitansiSyncKeyForDoc(editingDoc, roleName)
         : null;
       const receiverSyncStages = sourceSyncKey === "mandor" ? MANDOR_KWITANSI_SYNC_STAGES : CORE_KWITANSI_SYNC_STAGES;
@@ -559,8 +554,8 @@ export function EditKwitansiView() {
         ) : null}
 
         {missingReceiverDocs.length > 0 ? (
-          <div className="no-print rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-semibold text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-200">
-            Nama penerima kwitansi belum diisi. Masih ada {missingReceiverDocs.length} kwitansi yang perlu dilengkapi melalui tombol Edit.
+          <div className="no-print rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm font-semibold text-slate-600 dark:border-slate-800 dark:bg-slate-900/30 dark:text-slate-300">
+            {missingReceiverDocs.length} kwitansi belum memiliki nama penerima. Field ini boleh dikosongkan jika datanya belum tersedia.
           </div>
         ) : null}
 
@@ -666,7 +661,7 @@ export function EditKwitansiView() {
                   <EditField label="No. kwitansi" value={draft.number} onChange={(value) => setDraft((current) => current ? { ...current, number: value } : current)} />
                   <EditField label="Tanggal kwitansi" type="date" value={draft.date} onChange={updateDraftDate} required />
                   <EditField label="Telah terima dari" value={draft.payer} onChange={(value) => setDraft((current) => current ? { ...current, payer: value } : current)} required={!canKwitansiPayerBeBlank(editingDoc)} />
-                  <EditField label="Nama penerima" value={draft.receiver} onChange={(value) => setDraft((current) => current ? { ...current, receiver: value } : current)} required />
+                  <EditField label="Nama penerima" value={draft.receiver} onChange={(value) => setDraft((current) => current ? { ...current, receiver: value } : current)} />
                   <EditField label="Nominal" type="currency" min="0" step="1" value={draft.amount} onChange={(value) => setDraft((current) => current ? { ...current, amount: value } : current)} required />
                   <EditField label="Nama desa / lokasi pekerjaan" value={draft.location} onChange={(value) => setDraft((current) => current ? { ...current, location: value } : current)} />
                   <EditField label="Jenis pekerjaan / jabatan" value={draft.role} onChange={updateDraftRole} />
