@@ -15,38 +15,45 @@ function safeFolderSegment(value: string) {
     .slice(0, 80) || "Tanpa_Kecamatan";
 }
 
-const outputDir = path.resolve("resume-export-all");
-await fs.rm(outputDir, { recursive: true, force: true });
-await fs.mkdir(outputDir, { recursive: true });
+async function main() {
+  const outputDir = path.resolve("resume-export-all");
+  await fs.rm(outputDir, { recursive: true, force: true });
+  await fs.mkdir(outputDir, { recursive: true });
 
-const bundle = await fetchProjectBundle();
-const projects = [...bundle.projects].sort((left, right) =>
-  left.districtName.localeCompare(right.districtName, "id-ID", { sensitivity: "base" }) ||
-  left.villageName.localeCompare(right.villageName, "id-ID", { sensitivity: "base" }) ||
-  left.id.localeCompare(right.id),
-);
+  const bundle = await fetchProjectBundle();
+  const projects = [...bundle.projects].sort((left, right) =>
+    left.districtName.localeCompare(right.districtName, "id-ID", { sensitivity: "base" }) ||
+    left.villageName.localeCompare(right.villageName, "id-ID", { sensitivity: "base" }) ||
+    left.id.localeCompare(right.id),
+  );
 
-if (projects.length !== 119) {
-  throw new Error(`Jumlah project live tidak sesuai ekspektasi: ${projects.length}, seharusnya 119.`);
+  if (projects.length !== 119) {
+    throw new Error(`Jumlah project live tidak sesuai ekspektasi: ${projects.length}, seharusnya 119.`);
+  }
+
+  const manifest: string[] = [];
+  for (const project of projects) {
+    if (!project.items.length) throw new Error(`Resume kosong: ${project.villageName} / ${project.districtName}`);
+    const workbook = await buildResumeWorkbook(project, vendors);
+    const districtDir = path.join(outputDir, `Kecamatan_${safeFolderSegment(project.districtName)}`);
+    await fs.mkdir(districtDir, { recursive: true });
+    const fileName = safeResumeExcelFileName(project);
+    const filePath = path.join(districtDir, fileName);
+    await fs.writeFile(filePath, Buffer.from(workbook));
+    manifest.push(`${project.districtName}\t${project.villageName}\t${project.items.length}\t${path.relative(outputDir, filePath)}`);
+    console.log(`[${manifest.length}/${projects.length}] ${project.districtName} / ${project.villageName} -> ${fileName}`);
+  }
+
+  await fs.writeFile(
+    path.join(outputDir, "DAFTAR_EXPORT.txt"),
+    `Export Excel Resume Web Nota KMP\nTanggal: 2026-09-08\nJumlah project: ${projects.length}\n\nKecamatan\tDesa/Kelurahan\tJumlah Item\tFile\n${manifest.join("\n")}\n`,
+    "utf8",
+  );
+
+  console.log(`EXPORT_OK project_count=${projects.length} output=${outputDir}`);
 }
 
-const manifest: string[] = [];
-for (const project of projects) {
-  if (!project.items.length) throw new Error(`Resume kosong: ${project.villageName} / ${project.districtName}`);
-  const workbook = await buildResumeWorkbook(project, vendors);
-  const districtDir = path.join(outputDir, `Kecamatan_${safeFolderSegment(project.districtName)}`);
-  await fs.mkdir(districtDir, { recursive: true });
-  const fileName = safeResumeExcelFileName(project);
-  const filePath = path.join(districtDir, fileName);
-  await fs.writeFile(filePath, Buffer.from(workbook));
-  manifest.push(`${project.districtName}\t${project.villageName}\t${project.items.length}\t${path.relative(outputDir, filePath)}`);
-  console.log(`[${manifest.length}/${projects.length}] ${project.districtName} / ${project.villageName} -> ${fileName}`);
-}
-
-await fs.writeFile(
-  path.join(outputDir, "DAFTAR_EXPORT.txt"),
-  `Export Excel Resume Web Nota KMP\nTanggal: 2026-09-08\nJumlah project: ${projects.length}\n\nKecamatan\tDesa/Kelurahan\tJumlah Item\tFile\n${manifest.join("\n")}\n`,
-  "utf8",
-);
-
-console.log(`EXPORT_OK project_count=${projects.length} output=${outputDir}`);
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
