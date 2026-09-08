@@ -301,16 +301,64 @@ async function collectChoiceOptions(page: Page, selectId: string) {
   return options;
 }
 
+async function selectedKdkmpState(page: Page, selectId: string) {
+  const select = page.locator(`#${selectId}`).first();
+  const value = await select.inputValue().catch(() => "");
+  const nativeText = normalizeBelanjaText(await select.locator("option:checked").first().textContent().catch(() => ""));
+  const choiceText = normalizeBelanjaText(await choiceRoot(page, selectId).locator(".choices__list--single").innerText().catch(() => ""));
+  return { value, text: nativeText || choiceText };
+}
+
+function selectedKdkmpMatches(state: { value: string; text: string }, expectedOption: NativeOptionSnapshot, identity: KdkmpIdentity) {
+  if (expectedOption.value && state.value !== expectedOption.value) return false;
+  try {
+    findKdkmpOption([{ value: state.value || expectedOption.value || "selected", text: state.text || expectedOption.text }], identity);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForKdkmpSelection(
+  page: Page,
+  config: RunnerConfig,
+  selectId: string,
+  expectedOption: NativeOptionSnapshot,
+  identity: KdkmpIdentity,
+) {
+  const deadline = Date.now() + Math.max(5_000, config.choiceSearchTimeoutMs + 2_000);
+  let lastState = { value: "", text: "" };
+  do {
+    lastState = await selectedKdkmpState(page, selectId);
+    if (selectedKdkmpMatches(lastState, expectedOption, identity)) return;
+    await page.waitForTimeout(100);
+  } while (Date.now() < deadline);
+  throw new Error(`Dropdown ${selectId} belum berpindah ke KDKMP ${formatKdkmpIdentity(identity)}. selected="${lastState.text || lastState.value || "-"}" expected="${expectedOption.text}".`);
+}
+
+async function applyNativeKdkmpSelection(
+  page: Page,
+  config: RunnerConfig,
+  selectId: string,
+  option: NativeOptionSnapshot,
+  identity: KdkmpIdentity,
+) {
+  const select = page.locator(`#${selectId}`).first();
+  await select.selectOption({ value: option.value }, { timeout: 2_000 }).catch(async () => {
+    await select.selectOption({ label: option.text }, { timeout: 2_000 });
+  });
+  await select.dispatchEvent("input").catch(() => {});
+  await select.dispatchEvent("change").catch(() => {});
+  await waitForKdkmpSelection(page, config, selectId, option, identity);
+}
+
 async function selectKdkmpChoice(page: Page, config: RunnerConfig, selectId: string, identity: KdkmpIdentity) {
   const select = page.locator(`#${selectId}`).first();
   const native = await nativeOptions(select);
   const nativeCandidates = native.filter((option) => option.value && option.text);
   if (nativeCandidates.length > 1) {
     const option = findKdkmpOption(nativeCandidates, identity);
-    await select.selectOption({ value: option.value }, { timeout: 1_000 }).catch(async () => {
-      await select.selectOption({ label: option.text }, { timeout: 1_000 });
-    });
-    await select.dispatchEvent("change").catch(() => {});
+    await applyNativeKdkmpSelection(page, config, selectId, option, identity);
     return;
   }
 
@@ -344,20 +392,25 @@ async function selectKdkmpChoice(page: Page, config: RunnerConfig, selectId: str
     if (!matchedChoice) continue;
     await root.locator(".choices__list--dropdown .choices__item--choice").nth(matchedChoice.index).click();
     await select.dispatchEvent("change").catch(() => {});
-    return;
+    try {
+      await waitForKdkmpSelection(page, config, selectId, matchedChoice, identity);
+      return;
+    } catch {
+      // Choices.js kadang memperbarui label visual tanpa sinkron native select.
+      // Paksa value native yang sudah terverifikasi lalu validasi ulang.
+      await applyNativeKdkmpSelection(page, config, selectId, matchedChoice, identity);
+      return;
+    }
   }
 
   throw new Error(`KDKMP "${formatKdkmpIdentity(identity)}" tidak ditemukan pada dropdown ${selectId}. Opsi terlihat: ${lastSeen.slice(0, 8).join(" | ") || "-"}.`);
 }
 
-async function resolveDestination(page: Page, destination: KdkmpIdentity) {
+async function resolveDestination(page: Page, config: RunnerConfig, destination: KdkmpIdentity) {
   const select = page.locator("#geraiTujuan").first();
   await select.waitFor({ state: "attached", timeout: 5_000 });
   const option = findKdkmpOption(await nativeOptions(select), destination);
-  await select.selectOption({ value: option.value }, { timeout: 2_000 }).catch(async () => {
-    await select.selectOption({ label: option.text }, { timeout: 2_000 });
-  });
-  await select.dispatchEvent("change").catch(() => {});
+  await applyNativeKdkmpSelection(page, config, "geraiTujuan", option, destination);
   return option;
 }
 
@@ -970,6 +1023,43 @@ function rankRowsForTransaction(transaction: BelanjaTransactionPayload, rows: Ta
     .sort((left, right) => right.score - left.score || left.row.rowIndex - right.row.rowIndex);
 }
 
+function snapshotCandidateFit(
+  transaction: BelanjaTransactionPayload,
+  row: TargetTransactionRow,
+  snapshots: Map<string, TransactionSnapshot> | undefined,
+) {
+  const snapshot = snapshots?.get(row.editHref ?? "");
+  if (!snapshot) {
+    return { exact: false, differenceCount: Number.MAX_SAFE_INTEGER, semanticSignature: "" };
+  }
+  try {
+    const diff = compareTransactionSnapshot(transaction, snapshot);
+    const totalMismatch = Math.abs(rowTotalAmount(row) - transaction.totalAmount) > 1;
+    const exact = !totalMismatch && diff.differences.length === 0 && diff.expectedSignature === diff.actualSignature;
+    return {
+      exact,
+      differenceCount: diff.differences.length + (totalMismatch ? 1 : 0),
+      semanticSignature: transactionSignature([
+        targetRowIdentityKey(row),
+        normalizeBelanjaIsoDate(row.dateText),
+        roundBelanjaMoney(rowTotalAmount(row)),
+        diff.actualSignature,
+      ]),
+    };
+  } catch {
+    return {
+      exact: false,
+      differenceCount: Number.MAX_SAFE_INTEGER - 1,
+      semanticSignature: transactionSignature([
+        targetRowIdentityKey(row),
+        normalizeBelanjaIsoDate(row.dateText),
+        roundBelanjaMoney(rowTotalAmount(row)),
+        snapshot,
+      ]),
+    };
+  }
+}
+
 function chooseExactTargetRow(
   transaction: BelanjaTransactionPayload,
   rows: TargetTransactionRow[],
@@ -977,10 +1067,37 @@ function chooseExactTargetRow(
 ) {
   if (!rows.length) return null;
   const ranked = rankRowsForTransaction(transaction, rows, snapshots);
-  if (snapshots && ranked.length > 1 && ranked[0].score === ranked[1].score) {
-    throw new Error(`Mapping transaksi ambigu: ${transaction.namaItem}, tahap ${transactionStageKey(transaction)}. Dua target memiliki identitas yang sama.`);
+  if (!snapshots || ranked.length < 2 || ranked[0].score !== ranked[1].score) return ranked[0].row;
+
+  const topScore = ranked[0].score;
+  const tied = ranked
+    .filter((entry) => entry.score === topScore)
+    .map((entry) => ({ ...entry, fit: snapshotCandidateFit(transaction, entry.row, snapshots) }))
+    .sort((left, right) => Number(right.fit.exact) - Number(left.fit.exact)
+      || left.fit.differenceCount - right.fit.differenceCount
+      || left.row.rowIndex - right.row.rowIndex);
+
+  // Bila salah satu snapshot benar-benar identik dengan transaksi Web Nota,
+  // itu kandidat yang aman walaupun score kasar sebelumnya seri.
+  if (tied[0].fit.exact && !tied[1]?.fit.exact) return tied[0].row;
+
+  const bestFit = tied.filter((entry) => entry.fit.exact === tied[0].fit.exact
+    && entry.fit.differenceCount === tied[0].fit.differenceCount);
+  if (bestFit.length === 1) return bestFit[0].row;
+
+  // Template target dapat memiliki dua transaksi yang secara bisnis memang
+  // ekuivalen (contoh III.05 Kusen). Bila full comparison menyatakan semuanya
+  // exact, row mana pun aman; pilih row terkecil agar hasil deterministik.
+  if (bestFit.every((entry) => entry.fit.exact)) {
+    return bestFit.sort((left, right) => left.row.rowIndex - right.row.rowIndex)[0].row;
   }
-  return ranked[0].row;
+
+  const semanticSignatures = new Set(bestFit.map((entry) => entry.fit.semanticSignature));
+  if (semanticSignatures.size === 1) {
+    return bestFit.sort((left, right) => left.row.rowIndex - right.row.rowIndex)[0].row;
+  }
+
+  throw new Error(`Mapping transaksi ambigu: ${transaction.namaItem}, tahap ${transactionStageKey(transaction)}. Kandidat target berbeda dan tidak dapat dibedakan dengan aman: ${bestFit.slice(0, 5).map((entry) => `row #${entry.row.rowIndex} total=${entry.row.totalText} tanggal=${entry.row.dateText} diff=${entry.fit.differenceCount}`).join(" | ")}.`);
 }
 
 function remapCandidateRank(transaction: BelanjaTransactionPayload, row: TargetTransactionRow, snapshots?: Map<string, TransactionSnapshot>) {
@@ -1356,13 +1473,13 @@ async function selectAllSourceRows(page: Page, expectedCount: number) {
   }
 }
 
-async function verifyCopyModal(page: Page, claim: ClaimedBelanjaSyncJob) {
+async function verifyCopyModal(page: Page, config: RunnerConfig, claim: ClaimedBelanjaSyncJob) {
   const copyButton = page.locator("#btnSalinKeGerai").first();
   await copyButton.waitFor({ state: "visible", timeout: 5_000 });
   await copyButton.click();
   const submitButton = page.locator("#btnSubmitSalin").first();
   await submitButton.waitFor({ state: "visible", timeout: 5_000 });
-  await resolveDestination(page, claim.destinationKdkmp);
+  await resolveDestination(page, config, claim.destinationKdkmp);
 
   const modalText = await page.locator(".modal.show, [role='dialog']").first().innerText().catch(() => "");
   const detectedCount = Number(/(\d+)\s+transaksi/i.exec(modalText)?.[1] ?? claim.expectedTransactionCount);
@@ -1424,7 +1541,7 @@ export async function copyBaseTransactions(page: Page, config: RunnerConfig, api
     copiedTransactions: 0,
   });
 
-  const modal = await verifyCopyModal(page, claim);
+  const modal = await verifyCopyModal(page, config, claim);
   await checkpoint(api, claim, "COPY_STARTED", `Siap menyalin transaksi ke ${formatKdkmpIdentity(claim.destinationKdkmp)}.`, {
     current: 0,
     copiedTransactions: 0,

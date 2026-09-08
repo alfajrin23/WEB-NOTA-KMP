@@ -30,6 +30,24 @@ export function normalizeKdkmpName(value: string | null | undefined) {
     .trim();
 }
 
+function villageAliases(nameText: string) {
+  return [...nameText.matchAll(/\(([^()]*)\)/g)]
+    .map((match) => normalizeKdkmpName(match[1]))
+    .filter(Boolean);
+}
+
+/**
+ * Nama desa di database kadang menyimpan nama display sekaligus alias target,
+ * misalnya "Babakan Karet (Babakankaret)". Dropdown target memakai alias di
+ * hirarki lokasi. Gunakan alias terakhir sebagai identitas canonical agar
+ * source project dan dropdown target membentuk key yang sama.
+ */
+export function canonicalProjectVillageName(value: string | null | undefined) {
+  const normalized = normalizeKdkmpName(value);
+  const aliases = villageAliases(normalized);
+  return aliases.at(-1) || normalized;
+}
+
 export function kdkmpIdentityKey(identity: KdkmpIdentity) {
   return [
     normalizeKdkmpPart(identity.province ?? SOURCE_KDKMP.province),
@@ -61,7 +79,7 @@ export function buildDestinationKdkmp(project: Project): KdkmpIdentity {
     province,
     regency: normalizeKdkmpName(project.regencyName),
     district: normalizeKdkmpName(project.districtName),
-    village: normalizeKdkmpName(project.villageName),
+    village: canonicalProjectVillageName(project.villageName),
     label: normalizeBelanjaText(project.projectName),
   };
 
@@ -94,12 +112,6 @@ function hierarchySuffix(label: string) {
     nameText: label.slice(0, match.index).trim(),
     hierarchyText: match[1],
   };
-}
-
-function villageAliases(nameText: string) {
-  return [...nameText.matchAll(/\(([^()]*)\)/g)]
-    .map((match) => normalizeKdkmpName(match[1]))
-    .filter(Boolean);
 }
 
 export function parseKdkmpOptionText(text: string | null | undefined): KdkmpIdentity | null {
