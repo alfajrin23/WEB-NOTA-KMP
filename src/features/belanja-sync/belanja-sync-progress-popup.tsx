@@ -14,16 +14,17 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  fetchBelanjaSyncOverview,
-  readCachedBelanjaSyncOverview,
-  type BelanjaSyncOverviewPayload,
-} from "@/lib/belanja-sync/client-overview";
+  fetchBelanjaSyncProgress,
+  readCachedBelanjaSyncProgress,
+  type BelanjaSyncProgressSnapshot,
+} from "@/lib/belanja-sync/client-progress";
 import type { BelanjaCopyReconcileStage, BelanjaSyncJob } from "@/lib/belanja-sync/types";
 import { cn } from "@/lib/utils";
 
 const TERMINAL_FRESH_MS = 16_000;
-const ACTIVE_POLL_MS = 3_000;
-const IDLE_POLL_MS = 8_000;
+const ACTIVE_POLL_MS = 6_000;
+const BELANJA_PAGE_IDLE_POLL_MS = 10_000;
+const GLOBAL_IDLE_POLL_MS = 300_000;
 
 const STAGE_LABELS: Record<BelanjaCopyReconcileStage, string> = {
   PRE_FLIGHT: "Menyiapkan pengiriman",
@@ -101,52 +102,80 @@ function projectLabel(job: BelanjaSyncJob) {
   return village ? `Desa ${village}` : "Pengiriman Resume ke Web Belanja";
 }
 
-function chooseVisibleJob(overview: BelanjaSyncOverviewPayload | null, now: number) {
-  const jobs = (overview?.projects ?? [])
-    .map((project) => project.latestJob)
-    .filter((job): job is BelanjaSyncJob => Boolean(job));
+function visibleJob(snapshot: BelanjaSyncProgressSnapshot | null, now: number) {
+  const job = snapshot?.job ?? null;
+  if (!job) return null;
+  if (isActive(job)) return job;
+  return isTerminal(job) && finishedRecently(job, now) ? job : null;
+}
 
-  const active = jobs
-    .filter(isActive)
-    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
-  if (active.length > 0) return active[0];
-
-  return jobs
-    .filter((job) => isTerminal(job) && finishedRecently(job, now))
-    .sort((left, right) => Date.parse(right.finishedAt ?? right.createdAt) - Date.parse(left.finishedAt ?? left.createdAt))[0] ?? null;
+function idlePollInterval() {
+  if (typeof window === "undefined") return GLOBAL_IDLE_POLL_MS;
+  return window.location.pathname.startsWith("/belanja-sync")
+    ? BELANJA_PAGE_IDLE_POLL_MS
+    : GLOBAL_IDLE_POLL_MS;
 }
 
 export function BelanjaSyncProgressPopup() {
-  const [overview, setOverview] = useState<BelanjaSyncOverviewPayload | null>(() => readCachedBelanjaSyncOverview());
+  const [snapshot, setSnapshot] = useState<BelanjaSyncProgressSnapshot | null>(() => readCachedBelanjaSyncProgress());
   const [now, setNow] = useState(() => Date.now());
   const [dismissedJobId, setDismissedJobId] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
-      const payload = await fetchBelanjaSyncOverview({ force: true, retries: 0, timeoutMs: 5_000 });
-      setOverview(payload);
+      const payload = await fetchBelanjaSyncProgress(5_000);
+      setSnapshot(payload);
       setNow(Date.now());
     } catch {
       setNow(Date.now());
     }
   }, []);
 
-  const job = useMemo(() => chooseVisibleJob(overview, now), [now, overview]);
+  const job = useMemo(() => visibleJob(snapshot, now), [now, snapshot]);
   const hasActiveJob = Boolean(job && isActive(job));
 
   useEffect(() => {
     void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!hasActiveJob) return;
     const interval = window.setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
-    }, hasActiveJob ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+    }, ACTIVE_POLL_MS);
+    return () => window.clearInterval(interval);
+  }, [hasActiveJob, refresh]);
+
+  useEffect(() => {
+    if (hasActiveJob) return;
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refresh();
+    }, idlePollInterval());
     return () => window.clearInterval(interval);
   }, [hasActiveJob, refresh]);
 
   useEffect(() => {
     const handleFocus = () => void refresh();
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
     window.addEventListener("focus", handleFocus);
-    return () => window.removeEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, [refresh]);
+
+  useEffect(() => {
+    const latestJob = snapshot?.job;
+    if (!latestJob || !isTerminal(latestJob) || !latestJob.finishedAt) return;
+    const finishedAt = Date.parse(latestJob.finishedAt);
+    if (!Number.isFinite(finishedAt)) return;
+    const remaining = Math.max(0, TERMINAL_FRESH_MS - (Date.now() - finishedAt));
+    const timeout = window.setTimeout(() => setNow(Date.now()), remaining + 50);
+    return () => window.clearTimeout(timeout);
+  }, [snapshot?.job]);
 
   useEffect(() => {
     if (job && job.id !== dismissedJobId && isActive(job)) setDismissedJobId(null);
@@ -157,8 +186,8 @@ export function BelanjaSyncProgressPopup() {
   const success = job ? isSuccessful(job) : false;
   const failed = job?.status === "failed" || job?.status === "cancelled";
   const warning = Boolean(job && !failed && (job.status === "completed_with_errors" || job.failedItems > 0));
-  const runnerOnline = overview?.runner?.online ?? false;
-  const targetConnected = overview?.runner?.targetStatus === "connected";
+  const runnerOnline = snapshot?.runner?.online ?? false;
+  const targetConnected = snapshot?.runner?.targetStatus === "connected";
   const pendingBlocked = job?.status === "pending" && (!runnerOnline || !targetConnected);
 
   const message = job?.stageMessage || job?.progress?.message || (pendingBlocked
