@@ -4,7 +4,9 @@ import test from "node:test";
 import { EXCEL_BASE_ROWS } from "../src/constants/excel-base-data.ts";
 import {
   SIRNAGALIH_PATTERN_START_DATE,
+  daysBetweenIsoDates,
   shiftReferencePatternDateToProject,
+  shiftResumeItemsByDays,
   shiftResumeItemsFromDefault,
   shiftSourceTemplateDateToReferencePattern,
 } from "../src/lib/project-date-shift.ts";
@@ -51,4 +53,32 @@ test("tanggal dasar resume mengikuti offset Excel Haurwangi/Sirnagalih Cilaku", 
   assert.equal(bySourceRow.get(426)?.itemName, "Honorarium Tim Survei (Pengukuran & Pemetaan)");
   assert.equal(bySourceRow.get(426)?.durationDays, 1);
   assert.equal(bySourceRow.get(458)?.date, "2026-02-11");
+});
+
+test("perubahan anchor tanggal menggeser tanggal item dan tanggal di teks dengan delta yang sama", () => {
+  const source = {
+    ...makeItem("2026-01-10", "Belanja tanggal 10/01/2026"),
+    notes: "Laporan 10-01-2026",
+  };
+  const delta = daysBetweenIsoDates("2026-01-10", "2026-01-17");
+  assert.equal(delta, 7);
+
+  const [shifted] = shiftResumeItemsByDays([source], delta);
+  assert.equal(shifted.expenseDate, "2026-01-17");
+  assert.equal(shifted.itemName, "Belanja tanggal 17/01/2026");
+  assert.equal(shifted.notes, "Laporan 17-01-2026");
+});
+
+test("pergeseran tanggal ke belakang tetap konsisten", () => {
+  const source = {
+    ...makeItem("2026-01-10", "Belanja tanggal 10/01/2026"),
+    notes: "Laporan 10-01-2026",
+  };
+  const delta = daysBetweenIsoDates("2026-01-10", "2026-01-05");
+  assert.equal(delta, -5);
+
+  const [shifted] = shiftResumeItemsByDays([source], delta);
+  assert.equal(shifted.expenseDate, "2026-01-05");
+  assert.equal(shifted.itemName, "Belanja tanggal 05/01/2026");
+  assert.equal(shifted.notes, "Laporan 05-01-2026");
 });
