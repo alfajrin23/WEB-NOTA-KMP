@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Check, Download, FileCheck2, Loader2, Pencil, ReceiptText, Save } from "lucide-react";
+import { Check, Download, FileCheck2, Loader2, Pencil, ReceiptText, Save, Search } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,7 @@ export function VendorNoteView() {
   const [generating, setGenerating] = useState(false);
   const [persisting, setPersisting] = useState(false);
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[] | null>(null);
+  const [projectSearch, setProjectSearch] = useState("");
   const [generatedEntries, setGeneratedEntries] = useState<GeneratedProjectEntry[]>([]);
   const [previewPayload, setPreviewPayload] = useState<PreviewPayload | null>(null);
 
@@ -82,16 +83,45 @@ export function VendorNoteView() {
     return [...groups.values()];
   }, [rows]);
 
+  const normalizedProjectSearch = projectSearch.trim().toLowerCase();
+  const filteredProjectGroups = useMemo(() => {
+    if (!normalizedProjectSearch) return projectGroups;
+    return projectGroups.filter((group) => {
+      const project = group[0].project;
+      const searchText = [
+        formatProjectWilayah(project),
+        project.villageName,
+        project.districtName,
+        project.regencyName,
+        project.projectName,
+      ].join(" ").toLowerCase();
+      return searchText.includes(normalizedProjectSearch);
+    });
+  }, [normalizedProjectSearch, projectGroups]);
+
   const selectedIds = selectedProjectIds ?? projectGroups.map((group) => group[0].project.id);
   const selectedGroups = useMemo(
     () => projectGroups.filter((group) => selectedIds.includes(group[0].project.id)),
     [projectGroups, selectedIds],
   );
-  const allProjectsSelected = projectGroups.length > 0 && selectedGroups.length === projectGroups.length;
+  const visibleProjectIds = filteredProjectGroups.map((group) => group[0].project.id);
+  const allVisibleProjectsSelected = visibleProjectIds.length > 0 && visibleProjectIds.every((id) => selectedIds.includes(id));
   const total = useMemo(
     () => selectedGroups.flat().reduce((sum, row) => sum + getResumeItemAmount(draftItem(row.item, drafts[row.item.id])), 0),
     [drafts, selectedGroups],
   );
+
+  function toggleAllVisibleProjects() {
+    setSelectedProjectIds((current) => {
+      const next = new Set(current ?? projectGroups.map((group) => group[0].project.id));
+      const shouldDeselect = visibleProjectIds.length > 0 && visibleProjectIds.every((id) => next.has(id));
+      for (const projectId of visibleProjectIds) {
+        if (shouldDeselect) next.delete(projectId);
+        else next.add(projectId);
+      }
+      return [...next];
+    });
+  }
 
   function startEdit(row: VendorRow) {
     const current = draftItem(row.item, drafts[row.item.id]);
@@ -242,7 +272,7 @@ export function VendorNoteView() {
             <CardDescription>Data wilayah dan material akan muncul setelah vendor dipilih.</CardDescription>
           </CardHeader>
           <CardContent>
-            <Select value={selectedVendorId} onValueChange={(value) => { setSelectedVendorId(value); setSelectedProjectIds(null); setDrafts({}); setGeneratedEntries([]); setPreviewPayload(null); cancelEdit(); }}>
+            <Select value={selectedVendorId} onValueChange={(value) => { setSelectedVendorId(value); setSelectedProjectIds(null); setProjectSearch(""); setDrafts({}); setGeneratedEntries([]); setPreviewPayload(null); cancelEdit(); }}>
               <SelectTrigger className="max-w-xl"><SelectValue placeholder="Pilih vendor" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">Pilih vendor</SelectItem>
@@ -263,20 +293,38 @@ export function VendorNoteView() {
             <Card>
               <CardHeader>
                 <CardTitle>Desa yang Akan Di-generate</CardTitle>
-                <CardDescription>Centang desa yang ingin dibuatkan nota. Desa yang tidak dicentang akan dilewati.</CardDescription>
+                <CardDescription>Cari lalu centang desa yang ingin dibuatkan nota. Pilihan yang sudah dicentang tetap tersimpan saat pencarian diganti.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                  <div className="relative">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                    <Input
+                      value={projectSearch}
+                      onChange={(event) => setProjectSearch(event.target.value)}
+                      placeholder="Cari nama desa, kecamatan, atau kabupaten..."
+                      className="pl-9"
+                    />
+                  </div>
+                  <Badge className="w-fit bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                    {filteredProjectGroups.length} tampil · {selectedGroups.length} dipilih
+                  </Badge>
+                </div>
+
                 <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold dark:border-blue-900 dark:bg-blue-950/30">
                   <input
                     type="checkbox"
-                    checked={allProjectsSelected}
-                    onChange={() => setSelectedProjectIds(allProjectsSelected ? [] : projectGroups.map((group) => group[0].project.id))}
+                    checked={allVisibleProjectsSelected}
+                    onChange={toggleAllVisibleProjects}
+                    disabled={filteredProjectGroups.length === 0}
                     className="h-4 w-4 accent-blue-600"
                   />
-                  Centang semua desa ({projectGroups.length})
+                  {normalizedProjectSearch
+                    ? `Centang semua hasil pencarian (${filteredProjectGroups.length})`
+                    : `Centang semua desa (${projectGroups.length})`}
                 </label>
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {projectGroups.map((group) => {
+                  {filteredProjectGroups.map((group) => {
                     const project = group[0].project;
                     const checked = selectedIds.includes(project.id);
                     const groupTotal = group.reduce((sum, row) => sum + getResumeItemAmount(draftItem(row.item, drafts[row.item.id])), 0);
@@ -298,6 +346,11 @@ export function VendorNoteView() {
                     );
                   })}
                 </div>
+                {filteredProjectGroups.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500 dark:border-slate-700">
+                    Tidak ada desa yang cocok dengan pencarian “{projectSearch}”. Desa yang sudah dipilih sebelumnya tetap tersimpan.
+                  </p>
+                ) : null}
               </CardContent>
             </Card>
 
