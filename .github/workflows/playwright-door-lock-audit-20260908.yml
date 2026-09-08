@@ -22,33 +22,7 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Apply audited matching patch
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('scripts/patch-playwright-door-lock-audit-20260908.mjs')
-          s = p.read_text()
-          s = s.replace('  const combined = `${name}${specification}`;', '  const combined = name + specification;')
-          p.write_text(s)
-          PY
-          node scripts/patch-playwright-door-lock-audit-20260908.mjs
-          python - <<'PY'
-          from pathlib import Path
-          p = Path('automation/belanja-runner/copy-reconcile.ts')
-          s = p.read_text()
-          old = '''    if (new Set(tied.map(semanticKey)).size > 1) {
-      throw new Error(`Item ambigu: ${expected.namaItem}. Kandidat: ${tied.map((item) => JSON.stringify(item.line)).join(" | ")}`);
-    }'''
-          new = '''    const hasBusinessEvidence = tied.every((item) => Boolean(
-      item.line.unit || item.line.qty != null || item.line.unitPrice != null || item.line.subtotal != null
-      || item.line.paymentDate || item.line.recipient
-    ));
-    if (!hasBusinessEvidence || new Set(tied.map(semanticKey)).size > 1) {
-      throw new Error(`Item ambigu: ${expected.namaItem}. Kandidat: ${tied.map((item) => JSON.stringify(item.line)).join(" | ")}`);
-    }'''
-          if old not in s:
-              raise SystemExit('matchLine evidence anchor not found')
-          p.write_text(s.replace(old, new, 1))
-          PY
+        run: node scripts/run-playwright-door-lock-audit-patch-20260908.mjs
       - name: Door-lock regression
         run: npx tsx --test tests/iii05-door-lock-mapping.test.mjs
       - name: Belanja sync regression
