@@ -56,7 +56,9 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeContext.Provider value={value}>
       {children}
-      <BelanjaSyncProgressPopup />
+      <div className="no-print">
+        <BelanjaSyncProgressPopup />
+      </div>
       <Toaster richColors position="top-right" />
     </ThemeContext.Provider>
   );
