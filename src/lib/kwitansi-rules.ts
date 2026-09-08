@@ -294,7 +294,7 @@ export function getAutofillKwitansiReceiver(doc: GeneratedNota) {
   if (isSnackboxMeeting || isEscortTravel) return responsibleName;
   if (isSurveyFeasibility || isSurveyMappingHonor) return "Mandor";
   if (text.includes("pratama project mandiri") || text.includes("sumur bor") || text.includes("cut n fill")) return "H. Nana";
-  if (text.includes("baja ringan")) return "Dadang Bahtiar";
+  if (text.includes("baja ringan") || text.includes("tukang borongan baja") || text.includes("jasa borongan baja") || text.includes("borongan baja")) return "Dadang Bahtiar";
   if (text.includes("pintu kaca frameless")) return "Sarwoto";
   if (text.includes("pintu besi")) return "Sarwoto";
   if (text.includes("partisi kaca")) return "Sarwoto";
