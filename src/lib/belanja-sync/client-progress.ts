@@ -1,6 +1,7 @@
 "use client";
 
 import type { BelanjaSyncProgressSnapshot } from "./progress-server";
+export type { BelanjaSyncProgressSnapshot } from "./progress-server";
 
 const CACHE_KEY = "kdkmp.belanja-sync.progress.v1";
 
