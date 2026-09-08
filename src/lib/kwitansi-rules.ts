@@ -20,6 +20,16 @@ function normalized(value: string | undefined | null) {
     .toLowerCase();
 }
 
+function isElectricalWorkerText(value: string | undefined | null) {
+  const text = normalized(value);
+  return (
+    text.includes("tukang listrik") ||
+    text.includes("pekerja listrik") ||
+    text.includes("sumuran grounding") ||
+    text.includes("sumur grounding")
+  );
+}
+
 function dynamicStringFields(value: unknown, keys: string[]) {
   const record = value && typeof value === "object" ? value as Record<string, unknown> : {};
   return keys
@@ -81,6 +91,7 @@ function joinedDocText(doc: GeneratedNota) {
 function syncGroupFromText(value: string | undefined | null): KwitansiSyncGroup | null {
   const text = normalized(value);
   if (!text) return null;
+  if (isElectricalWorkerText(text)) return null;
   if (text.includes("kepala tukang")) return "kepala_tukang";
   if (text.includes("tukang borongan") || text.includes("jasa borong")) return null;
   if (text.includes("mandor")) return "mandor";
@@ -154,6 +165,7 @@ export function kwitansiSyncKeyFromText(value: string | undefined | null): Kwita
 }
 
 export function kwitansiSyncKeyForDoc(doc: GeneratedNota, roleText?: string): KwitansiSyncKey | null {
+  if (isElectricalWorkerText([roleText, joinedDocText(doc)].filter(Boolean).join(" "))) return null;
   const group = syncGroupFromText(roleText) ?? syncGroupFromText(joinedDocText(doc));
   return group ? syncKey(group, getKwitansiWorkerSlot(doc, roleText)) : null;
 }
@@ -171,6 +183,7 @@ export function buildKwitansiSyncKeyMap(
 
   for (const doc of docs) {
     const roleText = roleForDoc(doc);
+    if (isElectricalWorkerText([roleText, joinedDocText(doc)].filter(Boolean).join(" "))) continue;
     const group = syncGroupFromText(roleText) ?? syncGroupFromText(joinedDocText(doc));
     if (!group) continue;
     if (group === "mandor" || group === "kepala_tukang") {
@@ -220,6 +233,9 @@ export function getKwitansiReceiverSyncPlan(
     targetStages?: ReadonlySet<StageCode>;
   } = {},
 ) {
+  if (isElectricalWorkerText([options.roleText, joinedDocText(sourceDoc)].filter(Boolean).join(" "))) {
+    return { syncKey: null, targets: [] };
+  }
   const syncKey = kwitansiSyncKeyForDoc(sourceDoc, options.roleText)
     ?? syncKeysByDocId.get(sourceDoc.id)
     ?? null;
