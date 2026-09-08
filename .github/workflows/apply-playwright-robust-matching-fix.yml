@@ -28,7 +28,9 @@ jobs:
         run: npm ci
 
       - name: Apply source patch
-        run: node scripts/apply-playwright-robust-matching-fix.mjs
+        run: |
+          node scripts/apply-playwright-robust-matching-fix.mjs
+          node scripts/fix-verify-copy-modal-config.mjs
 
       - name: Run focused regression tests
         run: |
