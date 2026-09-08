@@ -21,7 +21,9 @@
     "test:belanja-sync": "tsx --test tests/belanja-sync.test.mjs",
     "test:kdkmp": "tsx --test tests/kdkmp-option-matching.test.mjs",
     "test:print-layout": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/print-layout.test.mjs",
-    "test:acceptance": "npm run test:nota-order && npm run test:kwitansi-sync && npm run test:kdkmp && npm run test:belanja-sync && npm run test:print-layout && npm run test:date-shift"
+    "test:acceptance": "npm run test:nota-order && npm run test:kwitansi-sync && npm run test:kdkmp && npm run test:belanja-sync && npm run test:door-lock && npm run test:playwright-matching && npm run test:print-layout && npm run test:date-shift",
+    "test:door-lock": "tsx --test tests/iii05-door-lock-mapping.test.mjs",
+    "test:playwright-matching": "tsx --test tests/playwright-robust-matching.test.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",

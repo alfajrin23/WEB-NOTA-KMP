@@ -63,6 +63,7 @@ type LookupBelanjaItem = {
   nama?: string | null;
   spesifikasi?: string | null;
   satuan?: string | null;
+  hargaSatuan?: number | null;
 };
 
 type BudgetTransactionIssue = {
@@ -127,7 +128,7 @@ export type StageBudgetReconcilePlan = {
 };
 
 const CHOICE_ROOT_XPATH = "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' choices ')]";
-const FINAL_BUDGET_REPAIR_MAX_PASSES = 2;
+const FINAL_BUDGET_REPAIR_MAX_PASSES = 4;
 const TARGET_NAVIGATION_ATTEMPTS = 3;
 const MAX_DATATABLE_PAGES_TO_SCAN = 12;
 const PRESERVED_HONORARIUM_OPERASIONAL_TOTAL = 18_400_000;
@@ -1827,7 +1828,11 @@ async function setTopSelectByText(page: Page, config: RunnerConfig, selectId: st
     throw new Error(`Opsi "${expectedText}" tidak ditemukan pada dropdown ${selectId}. Opsi terlihat: ${options.slice(0, 10).map((option) => option.text).join(" | ") || "-"}.`);
   }
   if (ranked.length > 1 && ranked[0].score === ranked[1].score && ranked[0].option.value !== ranked[1].option.value) {
-    throw new Error(`Opsi "${expectedText}" ambigu pada dropdown ${selectId}: ${ranked.slice(0, 5).map((entry) => entry.option.text).join(" | ")}.`);
+    const tied = ranked.filter((entry) => entry.score === ranked[0].score);
+    const normalizedLabels = new Set(tied.map((entry) => normalizeIdentityPart(entry.option.text)));
+    if (normalizedLabels.size > 1) {
+      throw new Error(`Opsi "${expectedText}" ambigu pada dropdown ${selectId}: ${tied.slice(0, 5).map((entry) => entry.option.text).join(" | ")}.`);
+    }
   }
 
   await select.selectOption({ value: ranked[0].option.value }, { timeout: 2_000 });
@@ -2052,7 +2057,18 @@ export function matchLine(expected: BelanjaTransactionLine, actualLines: DetailL
       + (options.allowGenericHonorariumLabel && line.recipient === honorariumRecipient(expected, "") ? 200 : 0) }))
     .sort((left, right) => right.score - left.score || left.line.index - right.line.index);
   if (ranked.length > 1 && ranked[0].score === ranked[1].score && !options.allowDuplicateNames) {
-    throw new Error(`Item ambigu: ${expected.namaItem}. Kandidat: ${ranked.filter((item) => item.score === ranked[0].score).map((item) => JSON.stringify(item.line)).join(" | ")}`);
+    const tied = ranked.filter((item) => item.score === ranked[0].score);
+    const semanticKey = (item: typeof tied[number]) => [
+      detailNameBase(item.line.name), unitIdentity(item.line.unit), item.line.qty ?? "", item.line.unitPrice ?? "",
+      item.line.subtotal ?? "", item.line.paymentDate ?? "", normalizeIdentityPart(item.line.recipient),
+    ].join("|");
+    const hasBusinessEvidence = tied.every((item) => Boolean(
+      item.line.unit || item.line.qty != null || item.line.unitPrice != null || item.line.subtotal != null
+      || item.line.paymentDate || item.line.recipient
+    ));
+    if (!hasBusinessEvidence || new Set(tied.map(semanticKey)).size > 1) {
+      throw new Error(`Item ambigu: ${expected.namaItem}. Kandidat: ${tied.map((item) => JSON.stringify(item.line)).join(" | ")}`);
+    }
   }
   const match = ranked[0].line;
   if (matches.length > 1 && !options.allowDuplicateNames && process.env.BELANJA_TARGET_DEBUG === "true") {
@@ -2081,35 +2097,91 @@ function detailLookupLabel(kind: BelanjaTransactionKind, item: LookupBelanjaItem
 
 function unitIdentity(value: string | null | undefined) {
   const normalized = normalizeIdentityPart(value?.normalize("NFKC"));
-  const aliases: Record<string, string> = { ltr: "liter", lt: "liter", btg: "batang", bh: "buah", lbr: "lembar", roll: "rol", truk: "truck" };
+  const aliases: Record<string, string> = {
+    ltr: "liter", lt: "liter", liter: "liter",
+    btg: "batang", batang: "batang",
+    pcs: "piece", pc: "piece", piece: "piece", bh: "piece", buah: "piece",
+    lbr: "lembar", lembar: "lembar", roll: "rol", truk: "truck", truck: "truck",
+  };
   return aliases[normalized] ?? normalized;
+}
+
+function lookupItemPrice(item: LookupBelanjaItem) {
+  const numeric = Number(item.hargaSatuan);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function normalizedSpecification(item: LookupBelanjaItem) {
+  return normalizeIdentityPart(item.spesifikasi);
+}
+
+function doorLockSpecificationScore(item: LookupBelanjaItem, expected: "pvc" | "standard") {
+  const specification = normalizedSpecification(item);
+  const name = normalizeIdentityPart(item.nama);
+  const combined = name + specification;
+  if (expected === "pvc") {
+    if (specification === "pvc") return 900;
+    if (combined.includes("pvc")) return 700;
+    return 0;
+  }
+  if (/^(standar|standard|standart|setandar)$/.test(specification)) return 900;
+  if (/(standar|standard|standart|setandar)/.test(combined)) return 700;
+  if (!specification && /^kuncipintu(?:pcs|piece|buah|bh)?$/.test(name)) return 450;
+  return 0;
 }
 
 export function findLookupItemForLine(items: LookupBelanjaItem[], line: BelanjaTransactionLine, kind: BelanjaTransactionKind) {
   const expectedDoorLock = kind === "material" ? doorLockVariant(line.namaItem) : null;
   const matches = items.filter((item) => {
     const label = detailLookupLabel(kind, item);
-    if (expectedDoorLock) {
-      // For Kunci Pintu, always map from the complete lookup label so target
-      // specifications such as PVC vs Standar are part of the identity.
-      return doorLockVariant(label) === expectedDoorLock;
-    }
+    if (expectedDoorLock) return doorLockVariant(label) === expectedDoorLock;
     return detailNamesMatch(label, line.namaItem) || detailNamesMatch(item.nama ?? "", line.namaItem);
   });
   if (matches.length === 0) {
     throw new Error(`Opsi target untuk "${line.namaItem}" tidak ditemukan pada lookup ${kind}.`);
   }
-  const specification = (item: LookupBelanjaItem) => normalizeIdentityPart(item.spesifikasi).replace(/^(standar|standard|standart|setandar)$/, "");
-  const ranked = matches.map((item) => ({ item,
-    score: (normalizeIdentityPart(item.nama) === normalizeIdentityPart(line.namaItem) ? 1000 : 0)
-      + (unitIdentity(item.satuan) === unitIdentity(line.satuan) ? 200 : 0)
-      + (!specification(item) ? 50 : 0),
-  })).sort((a, b) => b.score - a.score || a.item.uuid.localeCompare(b.item.uuid));
-  const semanticKey = (item: LookupBelanjaItem) => [normalizeIdentityPart(item.nama), unitIdentity(item.satuan), specification(item)].join("|");
-  if (ranked.some((candidate) => candidate.score === ranked[0].score && semanticKey(candidate.item) !== semanticKey(ranked[0].item))) {
-    throw new Error(`Opsi target ambigu untuk ${line.namaItem}; spesifikasi/satuan kandidat berbeda.`);
+
+  const expectedUnit = unitIdentity(line.satuan);
+  const expectedPrice = Number(line.hargaSatuan);
+  const ranked = matches.map((item) => {
+    const itemPrice = lookupItemPrice(item);
+    const itemUnit = unitIdentity(item.satuan);
+    const priceExact = itemPrice != null && Number.isFinite(expectedPrice) && Math.abs(itemPrice - expectedPrice) <= 0.01;
+    const unitExact = Boolean(expectedUnit) && itemUnit === expectedUnit;
+    const fullLabel = detailLookupLabel(kind, item);
+    const exactName = normalizeIdentityPart(item.nama) === normalizeIdentityPart(line.namaItem);
+    const exactLabel = normalizeIdentityPart(fullLabel) === normalizeIdentityPart(line.namaItem);
+    const variantScore = expectedDoorLock ? doorLockSpecificationScore(item, expectedDoorLock) : 0;
+    const score = (exactName ? 1800 : 0)
+      + (exactLabel ? 1400 : 0)
+      + (priceExact ? 2200 : itemPrice == null ? 0 : -1200)
+      + (unitExact ? 600 : expectedUnit && itemUnit ? -500 : 0)
+      + variantScore;
+    return { item, score, itemPrice, itemUnit, variantScore };
+  }).sort((a, b) => b.score - a.score || b.variantScore - a.variantScore || a.item.uuid.localeCompare(b.item.uuid));
+
+  const best = ranked[0];
+  const tied = ranked.filter((candidate) => candidate.score === best.score);
+  if (tied.length > 1) {
+    if (expectedDoorLock) {
+      const businessKey = (candidate: typeof best) => [
+        expectedDoorLock,
+        candidate.itemUnit || expectedUnit,
+        candidate.itemPrice ?? expectedPrice,
+      ].join("|");
+      if (new Set(tied.map(businessKey)).size === 1) return tied[0].item;
+    }
+    const semanticKey = (candidate: typeof best) => [
+      normalizeIdentityPart(candidate.item.nama),
+      candidate.itemUnit,
+      normalizedSpecification(candidate.item),
+      candidate.itemPrice ?? "",
+    ].join("|");
+    if (new Set(tied.map(semanticKey)).size > 1) {
+      throw new Error(`Opsi target ambigu untuk ${line.namaItem}; kandidat terbaik masih berbeda pada nama/spesifikasi/satuan/harga.`);
+    }
   }
-  return ranked[0].item;
+  return best.item;
 }
 
 async function fetchCurrentLookupItems(page: Page): Promise<LookupBelanjaItem[]> {
@@ -2124,6 +2196,11 @@ async function fetchCurrentLookupItems(page: Page): Promise<LookupBelanjaItem[]>
       nama: item.nama || '',
       spesifikasi: item.spesifikasi || '',
       satuan: item.satuan || '',
+      hargaSatuan: (() => {
+        const raw = item.harga_satuan ?? item.hargaSatuan ?? item.harga ?? item.price ?? null;
+        const numeric = Number(raw);
+        return Number.isFinite(numeric) ? numeric : null;
+      })(),
     })) : [];
   })()`);
 }

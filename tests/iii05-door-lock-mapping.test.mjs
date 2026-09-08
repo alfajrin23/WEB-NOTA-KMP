@@ -56,3 +56,24 @@ test("Playwright lookup also supports target options with explicit names", () =>
   assert.equal(findLookupItemForLine(targetLookup, line("Kunci Pintu PVC", 5000), "material").uuid, "lock-pvc");
   assert.equal(findLookupItemForLine(targetLookup, line("Kunci Pintu (Standar) - Pcs", 35000), "material").uuid, "lock-standard");
 });
+
+
+test("door-lock lookup normalizes Pcs and Buah and resolves duplicate Standard metadata", () => {
+  const targetLookup = [
+    { uuid: "std-a", nama: "Kunci Pintu", spesifikasi: "Standar", satuan: "Buah", hargaSatuan: 35000 },
+    { uuid: "std-b", nama: "Kunci Pintu", spesifikasi: "Standard", satuan: "Pcs", hargaSatuan: 35000 },
+    { uuid: "std-wrong-price", nama: "Kunci Pintu", spesifikasi: "Standar premium", satuan: "Buah", hargaSatuan: 50000 },
+    { uuid: "pvc", nama: "Kunci Pintu", spesifikasi: "PVC", satuan: "Buah", hargaSatuan: 5000 },
+  ];
+  const resolved = findLookupItemForLine(targetLookup, line("Kunci Pintu (Standar) - Pcs", 35000), "material");
+  assert.ok(["std-a", "std-b"].includes(resolved.uuid));
+  assert.equal(findLookupItemForLine(targetLookup, line("Kunci Pintu PVC", 5000), "material").uuid, "pvc");
+});
+
+test("door-lock lookup uses price when target exposes multiple same-variant candidates", () => {
+  const targetLookup = [
+    { uuid: "std-correct", nama: "Kunci Pintu", spesifikasi: "Standar", satuan: "Buah", hargaSatuan: 35000 },
+    { uuid: "std-other", nama: "Kunci Pintu", spesifikasi: "Standar", satuan: "Buah", hargaSatuan: 45000 },
+  ];
+  assert.equal(findLookupItemForLine(targetLookup, line("Kunci Pintu (Standar) - Pcs", 35000), "material").uuid, "std-correct");
+});
