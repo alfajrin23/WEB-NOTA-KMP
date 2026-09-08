@@ -1,0 +1,51 @@
+name: Apply III.05 door lock fix
+
+on:
+  push:
+    branches:
+      - fix/iii05-door-lock-mapping-20260908
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/iii05-door-lock-mapping-20260908
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Apply source patch
+        run: node scripts/apply-iii05-door-lock-fix.mjs
+
+      - name: Run regression tests
+        run: |
+          npx tsx --test tests/iii05-door-lock-mapping.test.mjs
+          npm run test:belanja-sync
+
+      - name: Build
+        run: npm run build
+
+      - name: Commit patched source
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/constants/excel-base-data.ts automation/belanja-runner/copy-reconcile.ts
+          if git diff --cached --quiet; then
+            echo "No patch changes to commit"
+            exit 0
+          fi
+          git commit -m "fix: separate III.05 PVC and standard door locks"
+          git push origin HEAD:fix/iii05-door-lock-mapping-20260908
