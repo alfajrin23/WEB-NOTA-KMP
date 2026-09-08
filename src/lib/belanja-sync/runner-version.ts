@@ -1,5 +1,5 @@
-export const BELANJA_RUNNER_VERSION = "playwright-v2.4.2";
-export const MIN_COPY_RECONCILE_RUNNER_VERSION = "playwright-v2.4.2";
+export const BELANJA_RUNNER_VERSION = "playwright-v2.4.3";
+export const MIN_COPY_RECONCILE_RUNNER_VERSION = "playwright-v2.4.3";
 
 type VersionTuple = [number, number, number];
 

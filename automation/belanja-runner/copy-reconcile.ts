@@ -2095,15 +2095,28 @@ function detailLookupLabel(kind: BelanjaTransactionKind, item: LookupBelanjaItem
   return normalizeBelanjaText(item.nama);
 }
 
+function lookupItemNameSpecIdentity(item: LookupBelanjaItem) {
+  return normalizeIdentityPart([item.nama, item.spesifikasi].filter(Boolean).join(" "));
+}
+
 function unitIdentity(value: string | null | undefined) {
   const normalized = normalizeIdentityPart(value?.normalize("NFKC"));
   const aliases: Record<string, string> = {
     ltr: "liter", lt: "liter", liter: "liter",
+    kg: "kilogram", kilo: "kilogram", kilogram: "kilogram",
     btg: "batang", batang: "batang",
     pcs: "piece", pc: "piece", piece: "piece", bh: "piece", buah: "piece",
     lbr: "lembar", lembar: "lembar", roll: "rol", truk: "truck", truck: "truck",
   };
   return aliases[normalized] ?? normalized;
+}
+
+function lookupPriceScore(itemPrice: number | null, expectedPrice: number) {
+  if (itemPrice == null || !Number.isFinite(expectedPrice) || expectedPrice <= 0) return 0;
+  const difference = Math.abs(itemPrice - expectedPrice);
+  if (difference <= 0.01) return 2200;
+  const ratio = Math.min(difference / Math.max(Math.abs(expectedPrice), 1), 1);
+  return Math.round(350 - ratio * 850);
 }
 
 function lookupItemPrice(item: LookupBelanjaItem) {
@@ -2132,6 +2145,7 @@ function doorLockSpecificationScore(item: LookupBelanjaItem, expected: "pvc" | "
 
 export function findLookupItemForLine(items: LookupBelanjaItem[], line: BelanjaTransactionLine, kind: BelanjaTransactionKind) {
   const expectedDoorLock = kind === "material" ? doorLockVariant(line.namaItem) : null;
+  const expectedNameSpec = normalizeIdentityPart(line.namaItem);
   const matches = items.filter((item) => {
     const label = detailLookupLabel(kind, item);
     if (expectedDoorLock) return doorLockVariant(label) === expectedDoorLock;
@@ -2150,11 +2164,13 @@ export function findLookupItemForLine(items: LookupBelanjaItem[], line: BelanjaT
     const unitExact = Boolean(expectedUnit) && itemUnit === expectedUnit;
     const fullLabel = detailLookupLabel(kind, item);
     const exactName = normalizeIdentityPart(item.nama) === normalizeIdentityPart(line.namaItem);
+    const exactNameSpec = kind === "material" && lookupItemNameSpecIdentity(item) === expectedNameSpec;
     const exactLabel = normalizeIdentityPart(fullLabel) === normalizeIdentityPart(line.namaItem);
     const variantScore = expectedDoorLock ? doorLockSpecificationScore(item, expectedDoorLock) : 0;
     const score = (exactName ? 1800 : 0)
+      + (exactNameSpec ? 1600 : 0)
       + (exactLabel ? 1400 : 0)
-      + (priceExact ? 2200 : itemPrice == null ? 0 : -1200)
+      + (priceExact ? 2200 : lookupPriceScore(itemPrice, expectedPrice))
       + (unitExact ? 600 : expectedUnit && itemUnit ? -500 : 0)
       + variantScore;
     return { item, score, itemPrice, itemUnit, variantScore };
@@ -2170,6 +2186,13 @@ export function findLookupItemForLine(items: LookupBelanjaItem[], line: BelanjaT
         candidate.itemPrice ?? expectedPrice,
       ].join("|");
       if (new Set(tied.map(businessKey)).size === 1) return tied[0].item;
+    }
+    if (kind === "material") {
+      const materialBusinessKey = (candidate: typeof best) => [
+        lookupItemNameSpecIdentity(candidate.item),
+        candidate.itemUnit || expectedUnit,
+      ].join("|");
+      if (new Set(tied.map(materialBusinessKey)).size === 1) return tied[0].item;
     }
     const semanticKey = (candidate: typeof best) => [
       normalizeIdentityPart(candidate.item.nama),

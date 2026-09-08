@@ -20,6 +20,20 @@ function line(name, unitPrice) {
   };
 }
 
+function materialLine(patch = {}) {
+  return {
+    lineId: "material-line",
+    namaItem: "Paku 10 Cm",
+    qty: 5,
+    satuan: "Kg",
+    hargaSatuan: 21000,
+    jumlah: 105000,
+    tanggal: "2026-01-21",
+    vendor: "CBB",
+    ...patch,
+  };
+}
+
 test("base resume III.05 separates PVC 5k from Standard 35k", () => {
   const locks = EXCEL_BASE_ROWS.filter((row) => row.categoryCode === "III.05" && /Kunci Pintu/i.test(row.itemName));
   assert.equal(locks.length, 2);
@@ -76,4 +90,26 @@ test("door-lock lookup uses price when target exposes multiple same-variant cand
     { uuid: "std-other", nama: "Kunci Pintu", spesifikasi: "Standar", satuan: "Buah", hargaSatuan: 45000 },
   ];
   assert.equal(findLookupItemForLine(targetLookup, line("Kunci Pintu (Standar) - Pcs", 35000), "material").uuid, "std-correct");
+});
+
+test("material lookup resolves Paku 10 Cm when target splits size between name and specification", () => {
+  const targetLookup = [
+    { uuid: "paku-7", nama: "Paku", spesifikasi: "7 Cm", satuan: "Kg", hargaSatuan: 21000 },
+    { uuid: "paku-10-a", nama: "Paku", spesifikasi: "10 Cm", satuan: "Kg", hargaSatuan: 20000 },
+    { uuid: "paku-10-b", nama: "Paku 10 Cm", spesifikasi: "", satuan: "Kilogram", hargaSatuan: 22000 },
+  ];
+
+  const resolved = findLookupItemForLine(targetLookup, materialLine(), "material");
+
+  assert.ok(["paku-10-a", "paku-10-b"].includes(resolved.uuid));
+  assert.notEqual(resolved.uuid, "paku-7");
+});
+
+test("material lookup prefers exact resume price but does not fail on duplicate default prices", () => {
+  const targetLookup = [
+    { uuid: "paku-10-old-price", nama: "Paku", spesifikasi: "10 Cm", satuan: "Kg", hargaSatuan: 18000 },
+    { uuid: "paku-10-resume-price", nama: "Paku", spesifikasi: "10 Cm", satuan: "Kg", hargaSatuan: 21000 },
+  ];
+
+  assert.equal(findLookupItemForLine(targetLookup, materialLine(), "material").uuid, "paku-10-resume-price");
 });
