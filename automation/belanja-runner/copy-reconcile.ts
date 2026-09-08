@@ -2,7 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { createHash } from "node:crypto";
 import type { Locator, Page } from "playwright";
-import { findKdkmpOption, formatKdkmpIdentity, normalizeKdkmpPart, parseKdkmpOptionText, sameKdkmpIdentity } from "../../src/lib/belanja-sync/kdkmp";
+import { canonicalProjectVillageName, findKdkmpOption, formatKdkmpIdentity, normalizeKdkmpPart, parseKdkmpOptionText, sameKdkmpIdentity } from "../../src/lib/belanja-sync/kdkmp";
 import { classifyBelanjaAutomationError } from "../../src/lib/belanja-sync/automation-errors";
 import {
   belanjaTextMatches,
@@ -1966,7 +1966,7 @@ async function readDetailLines(page: Page, kind: BelanjaTransactionKind): Promis
 function detailNameBase(value: string | null | undefined) {
   return normalizeIdentityPart(normalizeBelanjaText(value)
     .replace(/\([^)]*\)/g, " ")
-    .replace(/\s*[-–]\s*(unit|bh|buah|set|lbr|lembar|btg|batang|kg|m3|m³|liter|tube|hari|jam)\s*$/i, ""));
+    .replace(/\s*[-–]\s*(unit|pcs|pc|piece|bh|buah|set|lbr|lembar|btg|batang|kg|m3|m³|liter|tube|hari|jam)\s*$/i, ""));
 }
 
 export function genericHonorariumNameMatches(actualName: string | null | undefined, expectedName: string | null | undefined) {
@@ -1987,6 +1987,19 @@ function doorLockVariant(value: string | null | undefined): "pvc" | "standard" |
   return null;
 }
 
+function normalizePakuText(value: string | null | undefined) {
+  return normalizeBelanjaText(value)
+    .toLowerCase()
+    .replace(/\bpaku\s*[\[(]?\s*(?:#|no\.?|nomor)?\s*(\d+(?:[.,]\d+)?)\s*(?:cm|mm)?\s*[\])]?\b/g, "paku $1");
+}
+
+function pakuVariant(value: string | null | undefined) {
+  const text = normalizePakuText(value);
+  if (!/\bpaku\b/.test(text)) return null;
+  const match = /\bpaku\s*(\d+(?:[.,]\d+)?)\b/.exec(text);
+  return match ? `paku:${match[1].replace(",", ".")}` : "paku";
+}
+
 export function detailNamesMatch(actual: string, expected: string, honorarium = false) {
   // III.05 has two different physical products that used to share the same
   // resume name. Never allow fuzzy/substring matching to merge PVC with the
@@ -1995,6 +2008,9 @@ export function detailNamesMatch(actual: string, expected: string, honorarium = 
   const actualDoorLock = doorLockVariant(actual);
   const expectedDoorLock = doorLockVariant(expected);
   if ((actualDoorLock || expectedDoorLock) && actualDoorLock !== expectedDoorLock) return false;
+  const actualPaku = pakuVariant(actual);
+  const expectedPaku = pakuVariant(expected);
+  if (actualPaku || expectedPaku) return actualPaku === expectedPaku;
   // Do not let substring matching merge different sizes, such as 8 and 18 mm.
   const numbers = (value: string): string[] => value.match(/\d+(?:[.,]\d+)?/g) ?? [];
   const a = numbers(actual), e = numbers(expected);
@@ -2095,8 +2111,12 @@ function detailLookupLabel(kind: BelanjaTransactionKind, item: LookupBelanjaItem
   return normalizeBelanjaText(item.nama);
 }
 
+function lookupComparableIdentity(value: string | null | undefined) {
+  return normalizeIdentityPart(normalizePakuText(value));
+}
+
 function lookupItemNameSpecIdentity(item: LookupBelanjaItem) {
-  return normalizeIdentityPart([item.nama, item.spesifikasi].filter(Boolean).join(" "));
+  return lookupComparableIdentity([item.nama, item.spesifikasi].filter(Boolean).join(" "));
 }
 
 function unitIdentity(value: string | null | undefined) {
@@ -2145,7 +2165,7 @@ function doorLockSpecificationScore(item: LookupBelanjaItem, expected: "pvc" | "
 
 export function findLookupItemForLine(items: LookupBelanjaItem[], line: BelanjaTransactionLine, kind: BelanjaTransactionKind) {
   const expectedDoorLock = kind === "material" ? doorLockVariant(line.namaItem) : null;
-  const expectedNameSpec = normalizeIdentityPart(line.namaItem);
+  const expectedNameSpec = lookupComparableIdentity(line.namaItem);
   const matches = items.filter((item) => {
     const label = detailLookupLabel(kind, item);
     if (expectedDoorLock) return doorLockVariant(label) === expectedDoorLock;
@@ -2163,9 +2183,9 @@ export function findLookupItemForLine(items: LookupBelanjaItem[], line: BelanjaT
     const priceExact = itemPrice != null && Number.isFinite(expectedPrice) && Math.abs(itemPrice - expectedPrice) <= 0.01;
     const unitExact = Boolean(expectedUnit) && itemUnit === expectedUnit;
     const fullLabel = detailLookupLabel(kind, item);
-    const exactName = normalizeIdentityPart(item.nama) === normalizeIdentityPart(line.namaItem);
+    const exactName = lookupComparableIdentity(item.nama) === lookupComparableIdentity(line.namaItem);
     const exactNameSpec = kind === "material" && lookupItemNameSpecIdentity(item) === expectedNameSpec;
-    const exactLabel = normalizeIdentityPart(fullLabel) === normalizeIdentityPart(line.namaItem);
+    const exactLabel = lookupComparableIdentity(fullLabel) === lookupComparableIdentity(line.namaItem);
     const variantScore = expectedDoorLock ? doorLockSpecificationScore(item, expectedDoorLock) : 0;
     const score = (exactName ? 1800 : 0)
       + (exactNameSpec ? 1600 : 0)
@@ -2428,7 +2448,11 @@ async function reconcileOneTransaction(page: Page, config: RunnerConfig, transac
 
 async function reconcileTransactionAttempt(page: Page, config: RunnerConfig, transaction: BelanjaTransactionPayload, row: TargetTransactionRow) {
   const before = await readSnapshotForReconcile(page, config, transaction, row);
-  const expectedDestination: KdkmpIdentity = { village: transaction.desa ?? "", district: transaction.kecamatan ?? "", regency: transaction.kabupaten ?? "" };
+  const expectedDestination: KdkmpIdentity = {
+    village: canonicalProjectVillageName(transaction.desa ?? ""),
+    district: transaction.kecamatan ?? "",
+    regency: transaction.kabupaten ?? "",
+  };
   const expectedKey = planIdentityKey(transaction);
   assertSnapshotDestination(before, expectedDestination);
   const beforeKey = transactionIdentityKey({ stageText: before.stage, itemText: before.category, belanjaCategoryText: before.kind });

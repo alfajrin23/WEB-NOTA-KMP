@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { buildDestinationKdkmp } from "../src/lib/belanja-sync/kdkmp.ts";
 import { buildBelanjaTransactionPlan } from "../src/lib/belanja-sync/transaction-plan.ts";
-import { matchResumeToTargetTransaction } from "../automation/belanja-runner/copy-reconcile.ts";
+import { assertSnapshotDestination, matchResumeToTargetTransaction } from "../automation/belanja-runner/copy-reconcile.ts";
 
 function makeBabakankaretProject() {
   return {
@@ -103,6 +103,22 @@ test("Babakan Karet display alias becomes canonical Babakankaret destination", (
   assert.equal(destination.village, "Babakankaret");
   assert.equal(destination.district, "Cianjur");
   assert.equal(destination.regency, "Cianjur");
+});
+
+test("snapshot destination accepts Babakan Karet display alias against target canonical village", () => {
+  assert.doesNotThrow(() => assertSnapshotDestination({
+    destination: "Koperasi Desa Babakan Karet (Babakankaret) (Jawa Barat, Cianjur, Cianjur, Babakankaret)",
+    stage: "I - PEKERJAAN STRUKTUR",
+    category: "I.01 Pembersihan Lahan",
+    kind: "Bahan / Material",
+    date: "2026-01-01",
+    lines: [{ index: 0, name: "Cangkul", qty: 1, unit: "Buah", unitPrice: 1, subtotal: 1, paymentDate: "2026-01-01", recipient: "MURAH MAJU" }],
+  }, {
+    village: "Babakan Karet (Babakankaret)",
+    district: "Cianjur",
+    regency: "Cianjur",
+    province: "Jawa Barat",
+  }));
 });
 
 test("equivalent duplicate target rows are mapped deterministically instead of failing ambiguous", () => {

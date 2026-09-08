@@ -53,7 +53,7 @@ export function kdkmpIdentityKey(identity: KdkmpIdentity) {
     normalizeKdkmpPart(identity.province ?? SOURCE_KDKMP.province),
     normalizeKdkmpPart(identity.regency),
     normalizeKdkmpPart(identity.district),
-    normalizeKdkmpPart(identity.village),
+    normalizeKdkmpPart(canonicalProjectVillageName(identity.village)),
   ].join("|");
 }
 

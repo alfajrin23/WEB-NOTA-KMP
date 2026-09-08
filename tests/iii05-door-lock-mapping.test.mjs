@@ -49,6 +49,7 @@ test("base resume III.05 separates PVC 5k from Standard 35k", () => {
 test("door-lock matcher never treats PVC and Standard as the same item", () => {
   assert.equal(detailNamesMatch("Kunci Pintu PVC - Pcs", "Kunci Pintu PVC"), true);
   assert.equal(detailNamesMatch("Kunci Pintu (Standar) - Pcs", "Kunci Pintu (Standar) - Pcs"), true);
+  assert.equal(detailNamesMatch("Kunci Pintu (Standart) - Buah", "Kunci Pintu (Standar) - Pcs"), true);
   assert.equal(detailNamesMatch("Kunci Pintu (Standar) - Pcs", "Kunci Pintu PVC"), false);
   assert.equal(detailNamesMatch("Kunci Pintu PVC", "Kunci Pintu (Standar) - Pcs"), false);
 });
@@ -112,4 +113,35 @@ test("material lookup prefers exact resume price but does not fail on duplicate 
   ];
 
   assert.equal(findLookupItemForLine(targetLookup, materialLine(), "material").uuid, "paku-10-resume-price");
+});
+
+test("material matcher treats Paku #10 and Paku 10 Cm as the same size only", () => {
+  assert.equal(detailNamesMatch("paku #10 - kg", "Paku 10 Cm"), true);
+  assert.equal(detailNamesMatch("paku #5 - kg", "Paku 10 Cm"), false);
+  assert.equal(detailNamesMatch("paku #8 - kg", "Paku 10 Cm"), false);
+});
+
+test("material lookup selects Paku #10 when all paku sizes share unit and price", () => {
+  const targetLookup = [
+    { uuid: "paku-5", nama: "paku #5", spesifikasi: "", satuan: "Kg", hargaSatuan: 25000 },
+    { uuid: "paku-8", nama: "paku #8", spesifikasi: "", satuan: "Kg", hargaSatuan: 25000 },
+    { uuid: "paku-10", nama: "paku #10", spesifikasi: "", satuan: "Kg", hargaSatuan: 25000 },
+  ];
+
+  assert.equal(
+    findLookupItemForLine(targetLookup, materialLine({ hargaSatuan: 25000, jumlah: 125000 }), "material").uuid,
+    "paku-10",
+  );
+});
+
+test("material lookup selects split Paku #10 specification", () => {
+  const targetLookup = [
+    { uuid: "paku-5", nama: "paku", spesifikasi: "#5", satuan: "Kg", hargaSatuan: 25000 },
+    { uuid: "paku-10", nama: "paku", spesifikasi: "#10", satuan: "Kg", hargaSatuan: 25000 },
+  ];
+
+  assert.equal(
+    findLookupItemForLine(targetLookup, materialLine({ hargaSatuan: 25000, jumlah: 125000 }), "material").uuid,
+    "paku-10",
+  );
 });
