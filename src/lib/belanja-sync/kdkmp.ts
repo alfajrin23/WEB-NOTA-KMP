@@ -10,6 +10,7 @@ export const SOURCE_KDKMP: Required<Pick<KdkmpIdentity, "province" | "regency" |
 };
 
 const REGION_PREFIX_PATTERN = /^(provinsi|prov\.|kabupaten|kab\.|kota|kecamatan|kec\.|desa|des\.|kelurahan|kel\.)\s+/i;
+const COOPERATIVE_PREFIX_PATTERN = /^koperasi(?:\s+(?:desa|kelurahan))?\s+/i;
 
 export function normalizeKdkmpPart(value: string | null | undefined) {
   return normalizeBelanjaText(value)
@@ -22,7 +23,7 @@ export function normalizeKdkmpPart(value: string | null | undefined) {
 
 export function normalizeKdkmpName(value: string | null | undefined) {
   return normalizeBelanjaText(value)
-    .replace(/^koperasi\s+(desa|kelurahan)\s+/i, "")
+    .replace(COOPERATIVE_PREFIX_PATTERN, "")
     .replace(/^kdkmp\s+/i, "")
     .replace(REGION_PREFIX_PATTERN, "")
     .replace(/\s+/g, " ")
@@ -84,24 +85,43 @@ export function isMaleberSource(identity: KdkmpIdentity) {
   return sameKdkmpIdentity(identity, SOURCE_KDKMP);
 }
 
+function hierarchySuffix(label: string) {
+  // Ambil grup kurung PALING AKHIR yang berisi hirarki lokasi. Ini penting
+  // untuk label seperti "Babakan Karet (Babakankaret) (Jawa Barat, ...)".
+  const match = /\(([^()]*(?:,[^()]*){2,})\)\s*$/.exec(label);
+  if (!match || match.index === undefined) return null;
+  return {
+    nameText: label.slice(0, match.index).trim(),
+    hierarchyText: match[1],
+  };
+}
+
+function villageAliases(nameText: string) {
+  return [...nameText.matchAll(/\(([^()]*)\)/g)]
+    .map((match) => normalizeKdkmpName(match[1]))
+    .filter(Boolean);
+}
+
 export function parseKdkmpOptionText(text: string | null | undefined): KdkmpIdentity | null {
   const label = normalizeBelanjaText(text);
-  if (!label) return null;
+  if (!label || /^(?:--\s*)?pilih\s+kdkmp|pilih\s+gerai/i.test(label)) return null;
 
-  const match = /^(.*?)\s*\((.*?)\)\s*$/.exec(label);
-  const nameText = match ? match[1] : label;
-  const hierarchy = (match ? match[2] : "")
+  const suffix = hierarchySuffix(label);
+  const nameText = suffix?.nameText ?? label;
+  const hierarchy = (suffix?.hierarchyText ?? "")
     .split(",")
     .map((part) => normalizeBelanjaText(part))
     .filter(Boolean);
+  const aliases = villageAliases(nameText);
+  const displayVillage = normalizeKdkmpName(nameText.replace(/\([^()]*\)/g, " "));
 
-  const village = normalizeKdkmpName(nameText);
   if (hierarchy.length >= 4) {
+    const hierarchyVillage = normalizeKdkmpName(hierarchy.at(-1));
     return {
       province: normalizeKdkmpName(hierarchy[0]),
       regency: normalizeKdkmpName(hierarchy[1]),
       district: normalizeKdkmpName(hierarchy[2]),
-      village,
+      village: hierarchyVillage || aliases.at(-1) || displayVillage,
       label,
     };
   }
@@ -111,7 +131,7 @@ export function parseKdkmpOptionText(text: string | null | undefined): KdkmpIden
       province: SOURCE_KDKMP.province,
       regency: normalizeKdkmpName(hierarchy[0]),
       district: normalizeKdkmpName(hierarchy[1]),
-      village: normalizeKdkmpName(hierarchy[2]) || village,
+      village: normalizeKdkmpName(hierarchy.at(-1)) || aliases.at(-1) || displayVillage,
       label,
     };
   }
@@ -120,25 +140,60 @@ export function parseKdkmpOptionText(text: string | null | undefined): KdkmpIden
     province: SOURCE_KDKMP.province,
     regency: "",
     district: "",
-    village,
+    village: aliases.at(-1) || displayVillage,
     label,
   };
+}
+
+function samePart(left: string | null | undefined, right: string | null | undefined) {
+  return normalizeKdkmpPart(left) === normalizeKdkmpPart(right);
+}
+
+function compatibleKnownPart(actual: string | null | undefined, expected: string | null | undefined) {
+  const normalizedActual = normalizeKdkmpPart(actual);
+  return !normalizedActual || normalizedActual === normalizeKdkmpPart(expected);
 }
 
 export function findKdkmpOption(
   options: Array<{ value: string; text: string }>,
   expected: KdkmpIdentity,
 ) {
-  const matches = options
+  const candidates = options
     .map((option) => ({ option, identity: parseKdkmpOptionText(option.text || option.value) }))
-    .filter((entry): entry is { option: { value: string; text: string }; identity: KdkmpIdentity } => Boolean(entry.identity))
-    .filter((entry) => sameKdkmpIdentity(entry.identity, expected));
+    .filter((entry): entry is { option: { value: string; text: string }; identity: KdkmpIdentity } => Boolean(entry.identity));
 
-  if (matches.length === 0) {
-    throw new Error(`KDKMP tujuan "${formatKdkmpIdentity(expected)}" tidak ditemukan.`);
+  const exact = candidates.filter((entry) => sameKdkmpIdentity(entry.identity, expected));
+  if (exact.length === 1) return exact[0].option;
+  if (exact.length > 1) {
+    throw new Error(`KDKMP tujuan "${formatKdkmpIdentity(expected)}" ambigu: ${exact.map((entry) => entry.option.text || entry.option.value).join(" | ")}.`);
   }
-  if (matches.length > 1) {
-    throw new Error(`KDKMP tujuan "${formatKdkmpIdentity(expected)}" ambigu: ${matches.map((entry) => entry.option.text || entry.option.value).join(" | ")}.`);
+
+  // Fallback aman untuk variasi label target. Desa wajib sama. Provinsi,
+  // kabupaten, dan kecamatan yang tersedia juga harus cocok. Field lokasi yang
+  // tidak ditampilkan target diperlakukan sebagai unknown, bukan mismatch.
+  const compatible = candidates.filter((entry) => (
+    samePart(entry.identity.village, expected.village)
+    && compatibleKnownPart(entry.identity.province, expected.province ?? SOURCE_KDKMP.province)
+    && compatibleKnownPart(entry.identity.regency, expected.regency)
+    && compatibleKnownPart(entry.identity.district, expected.district)
+  ));
+  if (compatible.length === 1) return compatible[0].option;
+  if (compatible.length > 1) {
+    throw new Error(`KDKMP tujuan "${formatKdkmpIdentity(expected)}" ambigu: ${compatible.map((entry) => entry.option.text || entry.option.value).join(" | ")}.`);
   }
-  return matches[0].option;
+
+  // Jika target punya typo/variasi kecamatan tetapi desa tersebut unik di
+  // kabupaten yang sama, izinkan match. Jangan lakukan fallback ini bila ada
+  // dua desa dengan nama sama (mis. Batulawang), agar tidak salah gerai.
+  const sameVillageRegion = candidates.filter((entry) => (
+    samePart(entry.identity.village, expected.village)
+    && compatibleKnownPart(entry.identity.province, expected.province ?? SOURCE_KDKMP.province)
+    && compatibleKnownPart(entry.identity.regency, expected.regency)
+  ));
+  if (sameVillageRegion.length === 1) return sameVillageRegion[0].option;
+  if (sameVillageRegion.length > 1) {
+    throw new Error(`KDKMP tujuan "${formatKdkmpIdentity(expected)}" ambigu antar kecamatan: ${sameVillageRegion.map((entry) => entry.option.text || entry.option.value).join(" | ")}.`);
+  }
+
+  throw new Error(`KDKMP tujuan "${formatKdkmpIdentity(expected)}" tidak ditemukan.`);
 }
