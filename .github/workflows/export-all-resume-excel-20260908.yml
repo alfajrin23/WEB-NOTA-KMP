@@ -1,0 +1,48 @@
+name: Export all resume Excel 20260908
+
+on:
+  push:
+    branches:
+      - export/resume-all-20260908
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-resume:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: https://xpbdzebwvsjerpetmisi.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: sb_publishable_-O9a0kbdyQ8xZbd-dS6pnA_i64jnXLr
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: export/resume-all-20260908
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate exact Web Nota resume workbooks
+        run: npx tsx scripts/export-all-resume-excel-20260908.ts
+
+      - name: Verify workbook count
+        shell: bash
+        run: |
+          COUNT=$(find resume-export-all -type f -name '*.xlsx' | wc -l | tr -d ' ')
+          echo "Workbook count: $COUNT"
+          test "$COUNT" = "119"
+
+      - name: Upload resume Excel archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: Resume_Excel_Seluruh_Desa_2026-09-08
+          path: resume-export-all/
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 6
