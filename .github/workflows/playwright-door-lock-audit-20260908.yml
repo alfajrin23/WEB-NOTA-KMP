@@ -22,7 +22,15 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Apply audited matching patch
-        run: node scripts/patch-playwright-door-lock-audit-20260908.mjs
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/patch-playwright-door-lock-audit-20260908.mjs')
+          s = p.read_text()
+          s = s.replace('  const combined = `${name}${specification}`;', '  const combined = name + specification;')
+          p.write_text(s)
+          PY
+          node scripts/patch-playwright-door-lock-audit-20260908.mjs
       - name: Door-lock regression
         run: npx tsx --test tests/iii05-door-lock-mapping.test.mjs
       - name: Belanja sync regression
