@@ -1972,7 +1972,24 @@ export function genericHonorariumNameMatches(actualName: string | null | undefin
   return false;
 }
 
+function doorLockVariant(value: string | null | undefined): "pvc" | "standard" | null {
+  const normalized = normalizeIdentityPart(value);
+  if (!normalized.includes("kuncipintu")) return null;
+  if (normalized.includes("pvc")) return "pvc";
+  if (/(standar|standard|standart|setandar)/.test(normalized) || /^kuncipintu(?:pcs|buah|bh)?$/.test(normalized)) {
+    return "standard";
+  }
+  return null;
+}
+
 export function detailNamesMatch(actual: string, expected: string, honorarium = false) {
+  // III.05 has two different physical products that used to share the same
+  // resume name. Never allow fuzzy/substring matching to merge PVC with the
+  // standard lock, including target lookup variants that store the distinction
+  // in the specification field rather than the item name.
+  const actualDoorLock = doorLockVariant(actual);
+  const expectedDoorLock = doorLockVariant(expected);
+  if ((actualDoorLock || expectedDoorLock) && actualDoorLock !== expectedDoorLock) return false;
   // Do not let substring matching merge different sizes, such as 8 and 18 mm.
   const numbers = (value: string): string[] => value.match(/\d+(?:[.,]\d+)?/g) ?? [];
   const a = numbers(actual), e = numbers(expected);
@@ -2069,8 +2086,14 @@ function unitIdentity(value: string | null | undefined) {
 }
 
 export function findLookupItemForLine(items: LookupBelanjaItem[], line: BelanjaTransactionLine, kind: BelanjaTransactionKind) {
+  const expectedDoorLock = kind === "material" ? doorLockVariant(line.namaItem) : null;
   const matches = items.filter((item) => {
     const label = detailLookupLabel(kind, item);
+    if (expectedDoorLock) {
+      // For Kunci Pintu, always map from the complete lookup label so target
+      // specifications such as PVC vs Standar are part of the identity.
+      return doorLockVariant(label) === expectedDoorLock;
+    }
     return detailNamesMatch(label, line.namaItem) || detailNamesMatch(item.nama ?? "", line.namaItem);
   });
   if (matches.length === 0) {
