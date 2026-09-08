@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { Toaster } from "sonner";
+import { BelanjaSyncProgressPopup } from "@/features/belanja-sync/belanja-sync-progress-popup";
 
 type ThemeMode = "light" | "dark" | "system";
 
@@ -55,6 +56,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeContext.Provider value={value}>
       {children}
+      <BelanjaSyncProgressPopup />
       <Toaster richColors position="top-right" />
     </ThemeContext.Provider>
   );
