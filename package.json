@@ -19,8 +19,9 @@
     "test:nota-order": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/nota-output-order.test.mjs",
     "test:kwitansi-sync": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/kwitansi-sync.test.mjs",
     "test:belanja-sync": "tsx --test tests/belanja-sync.test.mjs",
+    "test:kdkmp": "tsx --test tests/kdkmp-option-matching.test.mjs",
     "test:print-layout": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-strip-types --test tests/print-layout.test.mjs",
-    "test:acceptance": "npm run test:nota-order && npm run test:kwitansi-sync && npm run test:belanja-sync && npm run test:print-layout && npm run test:date-shift"
+    "test:acceptance": "npm run test:nota-order && npm run test:kwitansi-sync && npm run test:kdkmp && npm run test:belanja-sync && npm run test:print-layout && npm run test:date-shift"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.4.0",
@@ -60,7 +61,7 @@
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
-    "@types/react-dom": "^19",
+    "@types/react-dom": "^19.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
     "pg": "^8.23.0",
