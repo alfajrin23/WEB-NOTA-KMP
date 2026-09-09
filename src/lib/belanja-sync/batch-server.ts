@@ -55,6 +55,13 @@ function progressPercent(row: BatchProgressRow) {
   return Math.max(0, Math.min(100, Math.round((completed / jobTotal) * 100)));
 }
 
+function isTerminalStatus(status: BelanjaSyncJobStatus | "failed") {
+  return status === "completed"
+    || status === "completed_with_errors"
+    || status === "failed"
+    || status === "cancelled";
+}
+
 function jobFailureReason(row: BatchProgressRow) {
   const details = Array.isArray(row.error_details)
     ? row.error_details.filter((value): value is string => typeof value === "string" && value.trim().length > 0)
@@ -95,7 +102,7 @@ export async function createBelanjaBatch(input: CreateBelanjaBatchInput) {
         .from("resume_items")
         .select("id")
         .eq("project_id", projectId)
-        .neq("is_included_in_resume_total", false)
+        .or("is_included_in_resume_total.is.null,is_included_in_resume_total.eq.true")
         .order("urutan", { ascending: true });
       if (itemsError) throw itemsError;
       const itemIds = (items ?? []).map((row) => String(row.id)).filter(Boolean);
@@ -160,7 +167,10 @@ export async function getBelanjaBatchProgress(jobIds: string[]) {
   });
 
   const totalPercent = jobs.length > 0 ? Math.round(jobs.reduce((sum, job) => sum + job.percent, 0) / jobs.length) : 0;
-  const remainingFraction = jobs.reduce((sum, job) => sum + Math.max(0, 1 - job.percent / 100), 0);
+  const remainingFraction = jobs.reduce(
+    (sum, job) => sum + (isTerminalStatus(job.status) ? 0 : Math.max(0, 1 - job.percent / 100)),
+    0,
+  );
   return {
     jobs,
     totalPercent,
