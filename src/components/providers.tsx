@@ -56,13 +56,6 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <ThemeContext.Provider value={value}>
       {children}
-      <a
-        href="/api/internal-queue-live-monitor-20260909-a7c9f2"
-        className="sr-only"
-        aria-label="Internal live monitoring queue trigger"
-      >
-        Internal live monitoring queue trigger
-      </a>
       <div className="no-print">
         <BelanjaSyncProgressPopup />
       </div>
