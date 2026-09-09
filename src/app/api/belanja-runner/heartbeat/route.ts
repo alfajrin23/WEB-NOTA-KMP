@@ -21,16 +21,20 @@ export async function POST(request: Request) {
   try {
     const input = await readJsonBody<HeartbeatInput>(request);
     const heartbeat = await recordBelanjaRunnerHeartbeat(input);
-    let monitoredQueue = null;
+    const monitoredQueue: Array<Record<string, unknown>> = [];
     if (input.dryRun === false && input.targetStatus === "connected") {
       try {
-        monitoredQueue = await queueNextMonitoredLiveProject();
+        for (let index = 0; index < 4; index += 1) {
+          const queued = await queueNextMonitoredLiveProject();
+          monitoredQueue.push(queued);
+          if (queued.complete) break;
+        }
       } catch (error) {
-        monitoredQueue = {
+        monitoredQueue.push({
           queued: false,
           complete: false,
           error: error instanceof Error ? error.message : String(error),
-        };
+        });
       }
     }
     return NextResponse.json({ heartbeat, monitoredQueue });
