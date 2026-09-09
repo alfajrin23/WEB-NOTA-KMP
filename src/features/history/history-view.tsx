@@ -10,6 +10,7 @@ import { DateInput } from "@/components/ui/date-input";
 import { Input } from "@/components/ui/input";
 import { MotionPage } from "@/components/ui/motion-page";
 import { fetchBelanjaSyncOverview, readCachedBelanjaSyncOverview } from "@/lib/belanja-sync/client-overview";
+import { fetchLiveResumeTotals } from "@/lib/history/live-resume-totals";
 import { groupDocumentsForPresentation } from "@/lib/pln-document-groups";
 import { buildProjectSummary } from "@/lib/resume-calculations";
 import { useKdkmpStore } from "@/hooks/use-kdkmp-store";
@@ -54,6 +55,9 @@ export function HistoryView() {
   const [belanjaOverview, setBelanjaOverview] = useState<Record<string, BelanjaSyncOverviewProject>>({});
   const [belanjaOverviewLoading, setBelanjaOverviewLoading] = useState(false);
   const [belanjaOverviewError, setBelanjaOverviewError] = useState<string | null>(null);
+  const [resumeTotals, setResumeTotals] = useState<Record<string, number>>({});
+  const [resumeTotalsLoading, setResumeTotalsLoading] = useState(false);
+  const [resumeTotalsError, setResumeTotalsError] = useState<string | null>(null);
 
   const loadBelanjaOverview = useCallback(async (options: { force?: boolean } = {}) => {
     setBelanjaOverviewLoading(true);
@@ -70,11 +74,32 @@ export function HistoryView() {
     }
   }, []);
 
+  const loadResumeTotals = useCallback(async (projectIds: string[]) => {
+    if (projectIds.length === 0) {
+      setResumeTotals({});
+      setResumeTotalsError(null);
+      return;
+    }
+    setResumeTotalsLoading(true);
+    try {
+      setResumeTotals(await fetchLiveResumeTotals(projectIds));
+      setResumeTotalsError(null);
+    } catch (error) {
+      setResumeTotalsError(error instanceof Error ? error.message : "Gagal memuat total Resume terbaru.");
+    } finally {
+      setResumeTotalsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     const cached = readCachedBelanjaSyncOverview();
     if (cached?.projects?.length) setBelanjaOverview(overviewMap(cached.projects));
     void loadBelanjaOverview();
   }, [loadBelanjaOverview]);
+
+  useEffect(() => {
+    void loadResumeTotals(projects.map((project) => project.id));
+  }, [loadResumeTotals, projects]);
 
   const dashboardStatsByProject = useMemo(() => {
     return new Map(dashboardProjectStats.map((row) => [row.projectId, row]));
@@ -83,15 +108,21 @@ export function HistoryView() {
   function retryDataLoad() {
     void refresh();
     void loadBelanjaOverview({ force: true });
+    void loadResumeTotals(projects.map((project) => project.id));
   }
 
   const rows = useMemo(() => {
     return projects
       .map((project) => {
         const dashboardStats = dashboardStatsByProject.get(project.id);
-        const summary = dashboardSummaryOnly && project.items.length === 0 && dashboardStats
+        const baseSummary = dashboardSummaryOnly && project.items.length === 0 && dashboardStats
           ? { grandTotal: dashboardStats.grandTotal }
           : buildProjectSummary(project, vendors);
+        const liveGrandTotal = resumeTotals[project.id];
+        const summary = {
+          ...baseSummary,
+          grandTotal: typeof liveGrandTotal === "number" ? liveGrandTotal : baseSummary.grandTotal,
+        };
         const docs = groupDocumentsForPresentation(generatedNotas.filter((doc) => doc.projectId === project.id));
         const customs = customNotes.filter((doc) => doc.projectId === project.id);
         const docCount = dashboardSummaryOnly && dashboardStats
@@ -107,11 +138,14 @@ export function HistoryView() {
       .filter(({ project }) => !dateFrom || (project.reportDate ?? project.projectDate) >= dateFrom)
       .filter(({ project }) => !dateTo || (project.reportDate ?? project.projectDate) <= dateTo)
       .sort((a, b) => new Date(b.project.updatedAt).getTime() - new Date(a.project.updatedAt).getTime());
-  }, [customNotes, dashboardStatsByProject, dashboardSummaryOnly, dateFrom, dateTo, generatedNotas, history, projects, query, vendors]);
+  }, [customNotes, dashboardStatsByProject, dashboardSummaryOnly, dateFrom, dateTo, generatedNotas, history, projects, query, resumeTotals, vendors]);
 
   if (loading && projects.length === 0) {
     return <Card><CardContent className="p-8">Memuat ringkasan history dari Supabase...</CardContent></Card>;
   }
+
+  const dataError = syncError ?? resumeTotalsError ?? belanjaOverviewError;
+  const dataLoading = loading || resumeTotalsLoading || belanjaOverviewLoading;
 
   return (
     <MotionPage>
@@ -126,15 +160,15 @@ export function HistoryView() {
           </Button>
         </div>
 
-        {syncError || belanjaOverviewError ? (
+        {dataError ? (
           <Card className="border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/30">
             <CardContent className="flex flex-col gap-3 p-4 text-sm text-amber-900 dark:text-amber-100 md:flex-row md:items-center md:justify-between">
               <div className="flex gap-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <p>Data cache tetap ditampilkan. Sinkronisasi terbaru gagal: {syncError ?? belanjaOverviewError}</p>
+                <p>Data terakhir tetap ditampilkan. Sinkronisasi terbaru gagal: {dataError}</p>
               </div>
-              <Button variant="outline" size="sm" onClick={retryDataLoad} disabled={loading || belanjaOverviewLoading}>
-                {loading || belanjaOverviewLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
+              <Button variant="outline" size="sm" onClick={retryDataLoad} disabled={dataLoading}>
+                {dataLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCcw className="h-4 w-4" />}
                 Refresh
               </Button>
             </CardContent>
@@ -144,7 +178,7 @@ export function HistoryView() {
         <Card>
           <CardHeader>
             <CardTitle>Filter History</CardTitle>
-            <CardDescription>Data diambil dari ringkasan Supabase yang dioptimalkan untuk history.</CardDescription>
+            <CardDescription>Total Resume dibaca langsung dari agregat item Resume terbaru di Supabase agar selalu sinkron.</CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid gap-3 lg:grid-cols-[1fr_190px_190px]">
