@@ -85,10 +85,8 @@ export class BelanjaSyncApiClient {
   }
 
   async pendingCount() {
-    const overview = await this.request<{
-      projects?: Array<{ pendingItems: number }>;
-    }>("/api/belanja-sync/overview", { auth: false });
-    return (overview.projects ?? []).reduce((sum, project) => sum + project.pendingItems, 0);
+    const queue = await this.request<{ pendingCount?: number }>("/api/belanja-runner/queue-count");
+    return Number(queue.pendingCount ?? 0);
   }
 
   claim() {

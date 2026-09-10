@@ -35,6 +35,10 @@ import {
   isPlaywrightTargetClosedError,
 } from "../src/lib/belanja-sync/automation-errors.ts";
 import {
+  overviewPendingItemsFromJob,
+  overviewStatusFromJob,
+} from "../src/lib/belanja-sync/server.ts";
+import {
   BELANJA_RUNNER_VERSION,
   MIN_COPY_RECONCILE_RUNNER_VERSION,
   isBelanjaRunnerVersionSupported,
@@ -335,6 +339,20 @@ test("guard destination menolak desa atau kecamatan yang berbeda", () => {
   assert.doesNotThrow(() => assertSnapshotDestination(snapshot, expected));
   assert.throws(() => assertSnapshotDestination(snapshot, { ...expected, district: "Karangtengah" }), /Destination salah/);
   assert.throws(() => assertSnapshotDestination({ ...snapshot, destination: "" }, expected), /Destination salah/);
+});
+
+test("overview menampilkan job cancelled tanpa success sebagai belum dikirim", () => {
+  const cancelled = { status: "cancelled", totalItems: 43, successItems: 0, failedItems: 0, skippedItems: 43 };
+  assert.equal(overviewStatusFromJob(cancelled), "belum_dikirim");
+  assert.equal(overviewPendingItemsFromJob(cancelled), 43);
+
+  const partialCancelled = { status: "cancelled", totalItems: 43, successItems: 11, failedItems: 0, skippedItems: 32 };
+  assert.equal(overviewStatusFromJob(partialCancelled), "sebagian");
+  assert.equal(overviewPendingItemsFromJob(partialCancelled), 32);
+
+  const alreadyCovered = { status: "completed", totalItems: 43, successItems: 0, failedItems: 0, skippedItems: 43 };
+  assert.equal(overviewStatusFromJob(alreadyCovered), "selesai");
+  assert.equal(overviewPendingItemsFromJob(alreadyCovered), 0);
 });
 
 test("matching menolak ukuran berbeda dan kandidat ambigu", () => {

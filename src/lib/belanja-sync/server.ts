@@ -673,12 +673,17 @@ export async function getBelanjaProjectState(projectId: string): Promise<Belanja
   }
 }
 
-function overviewStatusFromJob(job: BelanjaSyncJob): BelanjaSyncOverviewProject["status"] {
+type BelanjaOverviewJobCounts = Pick<BelanjaSyncJob, "status" | "totalItems" | "successItems" | "failedItems" | "skippedItems">;
+
+export function overviewStatusFromJob(job: BelanjaOverviewJobCounts): BelanjaSyncOverviewProject["status"] {
   if (job.status === "failed" || job.status === "completed_with_errors" || job.failedItems > 0) {
     return "ada_error";
   }
   if (job.status === "pending" || job.status === "processing") {
     return "sebagian";
+  }
+  if (job.status === "cancelled") {
+    return job.successItems > 0 ? "sebagian" : "belum_dikirim";
   }
   const completedItems = job.successItems + job.skippedItems;
   if (job.totalItems > 0 && completedItems >= job.totalItems) {
@@ -688,6 +693,13 @@ function overviewStatusFromJob(job: BelanjaSyncJob): BelanjaSyncOverviewProject[
     return "sebagian";
   }
   return "belum_dikirim";
+}
+
+export function overviewPendingItemsFromJob(job: BelanjaOverviewJobCounts) {
+  if (job.status === "cancelled") {
+    return Math.max(job.totalItems - job.successItems - job.failedItems, 0);
+  }
+  return Math.max(job.totalItems - job.successItems - job.failedItems - job.skippedItems, 0);
 }
 
 export async function getBelanjaSyncOverview() {
@@ -710,7 +722,7 @@ export async function getBelanjaSyncOverview() {
         if (!row.latest_job_json) return null;
         const job = rowToJob(row.latest_job_json);
         const failedDetails = (row.failed_details ?? []).map(rowToOverviewFailedDetail);
-        const pendingItems = Math.max(job.totalItems - job.successItems - job.failedItems - job.skippedItems, 0);
+        const pendingItems = overviewPendingItemsFromJob(job);
         return {
           projectId: job.projectId,
           status: overviewStatusFromJob(job),
@@ -731,6 +743,58 @@ export async function getBelanjaSyncOverview() {
     }
     throw error;
   }
+}
+
+export async function getBelanjaRunnerQueueCount() {
+  const client = clientOrThrow();
+  await markStaleProcessingItems(client);
+  await markStaleCopyReconcileJobs(client);
+
+  const { data: jobRows, error: jobsError } = await client
+    .from("belanja_sync_jobs")
+    .select("id,metadata_json")
+    .eq("status", "pending")
+    .limit(1000);
+  if (jobsError) throwDatabaseError(jobsError, "Gagal menghitung antrean job Belanja Sync.");
+
+  const pendingCopyJobs = ((jobRows ?? []) as Array<{ id: string; metadata_json: JsonRecord | null }>)
+    .filter((row) => isCopyReconcileMetadata(asRecord(row.metadata_json)))
+    .length;
+
+  const { data: itemRows, error: itemsError } = await client
+    .from("belanja_sync_items")
+    .select("id,job_id")
+    .eq("status", "pending")
+    .limit(1000);
+  if (itemsError) throwDatabaseError(itemsError, "Gagal menghitung antrean item Belanja Sync.");
+
+  const pendingItems = (itemRows ?? []) as Array<{ id: string; job_id: string }>;
+  const jobIds = [...new Set(pendingItems.map((item) => item.job_id).filter(Boolean))];
+  let pendingLegacyItems = 0;
+
+  for (let index = 0; index < jobIds.length; index += 1000) {
+    const chunk = jobIds.slice(index, index + 1000);
+    const { data: relatedJobs, error: relatedError } = await client
+      .from("belanja_sync_jobs")
+      .select("id,status,metadata_json")
+      .in("id", chunk);
+    if (relatedError) throwDatabaseError(relatedError, "Gagal memuat job aktif Belanja Sync.");
+
+    const activeLegacyJobIds = new Set(((relatedJobs ?? []) as Array<{
+      id: string;
+      status: BelanjaSyncJobStatus;
+      metadata_json: JsonRecord | null;
+    }>)
+      .filter((job) => isActiveJobStatus(job.status) && !isCopyReconcileMetadata(asRecord(job.metadata_json)))
+      .map((job) => job.id));
+    pendingLegacyItems += pendingItems.filter((item) => activeLegacyJobIds.has(item.job_id)).length;
+  }
+
+  return {
+    pendingCount: pendingCopyJobs + pendingLegacyItems,
+    pendingCopyJobs,
+    pendingLegacyItems,
+  };
 }
 
 async function createLegacyBelanjaSyncJob(input: CreateBelanjaSyncJobInput) {
