@@ -22,6 +22,7 @@ export function cleanKwitansiWorkerRole(value: string | undefined | null) {
     .trim();
 
   if (withoutOvertime.includes("tebas lahan") && withoutOvertime.includes("pembersihan")) return "Mandor";
+  if (withoutOvertime.includes("snackbox") && withoutOvertime.includes("rapat")) return "Babinsa";
   if (withoutOvertime === "mandor") return "Mandor";
   if (withoutOvertime === "kepala tukang") return "Kepala Tukang";
   if (withoutOvertime === "tukang") return "Tukang";
