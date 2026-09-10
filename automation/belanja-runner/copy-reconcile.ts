@@ -2074,15 +2074,21 @@ export function matchLine(expected: BelanjaTransactionLine, actualLines: DetailL
     .sort((left, right) => right.score - left.score || left.line.index - right.line.index);
   if (ranked.length > 1 && ranked[0].score === ranked[1].score && !options.allowDuplicateNames) {
     const tied = ranked.filter((item) => item.score === ranked[0].score);
-    const semanticKey = (item: typeof tied[number]) => [
+    const semanticKey = (item: typeof tied[number], includePaymentDate = true) => [
       detailNameBase(item.line.name), unitIdentity(item.line.unit), item.line.qty ?? "", item.line.unitPrice ?? "",
-      item.line.subtotal ?? "", item.line.paymentDate ?? "", normalizeIdentityPart(item.line.recipient),
+      item.line.subtotal ?? "", includePaymentDate ? item.line.paymentDate ?? "" : "", normalizeIdentityPart(item.line.recipient),
     ].join("|");
     const hasBusinessEvidence = tied.every((item) => Boolean(
       item.line.unit || item.line.qty != null || item.line.unitPrice != null || item.line.subtotal != null
       || item.line.paymentDate || item.line.recipient
     ));
-    if (!hasBusinessEvidence || new Set(tied.map(semanticKey)).size > 1) {
+    const semanticKeys = new Set(tied.map((item) => semanticKey(item)));
+    const semanticKeysWithoutPaymentDate = new Set(tied.map((item) => semanticKey(item, false)));
+    const onlyPaymentDateDiffers = Boolean(expected.tanggal)
+      && semanticKeys.size > 1
+      && semanticKeysWithoutPaymentDate.size === 1
+      && tied.every((item) => Boolean(item.line.paymentDate));
+    if (!hasBusinessEvidence || (semanticKeys.size > 1 && !onlyPaymentDateDiffers)) {
       throw new Error(`Item ambigu: ${expected.namaItem}. Kandidat: ${tied.map((item) => JSON.stringify(item.line)).join(" | ")}`);
     }
   }
@@ -2148,6 +2154,34 @@ function normalizedSpecification(item: LookupBelanjaItem) {
   return normalizeIdentityPart(item.spesifikasi);
 }
 
+const HONORARIUM_GENERIC_TOKENS = new Set([
+  "honorarium", "jasa", "orang", "hari", "pek", "pekerjaan", "setandar",
+  "standar", "standard", "standart", "tukang", "upah", "borong", "borongan",
+]);
+
+function honorariumSpecificTokens(value: string | null | undefined) {
+  return normalizeBelanjaText(value)
+    .toLowerCase()
+    .replace(/\bpolding\b/g, "folding")
+    .replace(/\bfolding\s*dor\b/g, "folding door")
+    .replace(/\bpolding\s*dor\b/g, "folding door")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 1 && !HONORARIUM_GENERIC_TOKENS.has(token));
+}
+
+function honorariumLookupSpecificityScore(item: LookupBelanjaItem, line: BelanjaTransactionLine) {
+  const expectedTokens = new Set(honorariumSpecificTokens(line.namaItem));
+  if (expectedTokens.size === 0) return 0;
+  const candidateTokens = new Set(honorariumSpecificTokens([item.nama, item.spesifikasi].filter(Boolean).join(" ")));
+  let overlap = 0;
+  for (const token of expectedTokens) {
+    if (candidateTokens.has(token)) overlap += 1;
+  }
+  return overlap * 500;
+}
+
 function doorLockSpecificationScore(item: LookupBelanjaItem, expected: "pvc" | "standard") {
   const specification = normalizedSpecification(item);
   const name = normalizeIdentityPart(item.nama);
@@ -2169,6 +2203,7 @@ export function findLookupItemForLine(items: LookupBelanjaItem[], line: BelanjaT
   const matches = items.filter((item) => {
     const label = detailLookupLabel(kind, item);
     if (expectedDoorLock) return doorLockVariant(label) === expectedDoorLock;
+    if (kind === "honorarium" && honorariumLookupSpecificityScore(item, line) > 0) return true;
     return detailNamesMatch(label, line.namaItem) || detailNamesMatch(item.nama ?? "", line.namaItem);
   });
   if (matches.length === 0) {
@@ -2187,14 +2222,16 @@ export function findLookupItemForLine(items: LookupBelanjaItem[], line: BelanjaT
     const exactNameSpec = kind === "material" && lookupItemNameSpecIdentity(item) === expectedNameSpec;
     const exactLabel = lookupComparableIdentity(fullLabel) === lookupComparableIdentity(line.namaItem);
     const variantScore = expectedDoorLock ? doorLockSpecificationScore(item, expectedDoorLock) : 0;
+    const specificityScore = kind === "honorarium" ? honorariumLookupSpecificityScore(item, line) : 0;
     const score = (exactName ? 1800 : 0)
       + (exactNameSpec ? 1600 : 0)
       + (exactLabel ? 1400 : 0)
       + (priceExact ? 2200 : lookupPriceScore(itemPrice, expectedPrice))
       + (unitExact ? 600 : expectedUnit && itemUnit ? -500 : 0)
-      + variantScore;
-    return { item, score, itemPrice, itemUnit, variantScore };
-  }).sort((a, b) => b.score - a.score || b.variantScore - a.variantScore || a.item.uuid.localeCompare(b.item.uuid));
+      + variantScore
+      + specificityScore;
+    return { item, score, itemPrice, itemUnit, variantScore, specificityScore };
+  }).sort((a, b) => b.score - a.score || b.specificityScore - a.specificityScore || b.variantScore - a.variantScore || a.item.uuid.localeCompare(b.item.uuid));
 
   const best = ranked[0];
   const tied = ranked.filter((candidate) => candidate.score === best.score);

@@ -46,6 +46,7 @@ import {
   assertSnapshotDestination,
   compareTransactionSnapshot,
   detailNamesMatch,
+  findLookupItemForLine,
   matchLine,
   matchResumeToTargetTransaction,
   formatBudgetDiagnostics,
@@ -358,6 +359,48 @@ test("matching memilih material duplicate berdasarkan tanggal bayar dan vendor",
     { index: 24, name: "Besi Polos 8 (-) - Btg", qty: 118, unitPrice: 37000, subtotal: 4366000, paymentDate: "2026-03-30", recipient: "CBB" },
   ], new Set());
   assert.equal(selected.index, 24);
+});
+
+test("matching memilih duplicate identik berdasarkan urutan saat hanya tanggal bayar target berbeda", () => {
+  const used = new Set();
+  const lines = [
+    { index: 2, name: "Besi Polos 8 (-) - Btg", qty: 118, unitPrice: 37000, subtotal: 4366000, paymentDate: "2026-01-21", recipient: "CBB" },
+    { index: 24, name: "Besi Polos 8 (-) - Btg", qty: 118, unitPrice: 37000, subtotal: 4366000, paymentDate: "2026-02-11", recipient: "CBB" },
+  ];
+  const first = matchLine({
+    namaItem: "Besi Polos 8 mm",
+    qty: 118,
+    hargaSatuan: 37000,
+    jumlah: 4366000,
+    tanggal: "2026-01-14",
+    vendor: "CBB",
+  }, lines, used);
+  const second = matchLine({
+    namaItem: "Besi Polos 8 mm",
+    qty: 118,
+    hargaSatuan: 37000,
+    jumlah: 4366000,
+    tanggal: "2026-02-11",
+    vendor: "CBB",
+  }, lines, used);
+  assert.equal(first.index, 2);
+  assert.equal(second.index, 24);
+});
+
+test("lookup honorarium memilih opsi pekerjaan spesifik dibanding tukang borongan generik", () => {
+  const selected = findLookupItemForLine([
+    { uuid: "generic", nama: "Tukang Borongan", spesifikasi: "Upah Tukang Borongan", satuan: "", hargaSatuan: 390000 },
+    { uuid: "gate", nama: "PEK POLDING GATE", spesifikasi: "STANDAR", satuan: "", hargaSatuan: 390000 },
+    { uuid: "door", nama: "PEK FOLDINGDOR", spesifikasi: "STANDAR", satuan: "", hargaSatuan: 200000 },
+  ], {
+    namaItem: "Tukang Borongan Pek. Folding Gate",
+    qty: 45,
+    satuan: "Orang-Hari",
+    hargaSatuan: 390000,
+    jumlah: 17550000,
+    tanggal: "2026-02-18",
+  }, "honorarium");
+  assert.equal(selected.uuid, "gate");
 });
 
 test("normalisasi angka dan tanggal untuk payload Belanja", () => {
