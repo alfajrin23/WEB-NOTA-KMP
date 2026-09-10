@@ -92,6 +92,7 @@ function syncGroupFromText(value: string | undefined | null): KwitansiSyncGroup 
   const text = normalized(value);
   if (!text) return null;
   if (isElectricalWorkerText(text)) return null;
+  if (text.includes("tebas lahan") && text.includes("pembersihan")) return "mandor";
   if (text.includes("kepala tukang")) return "kepala_tukang";
   if (text.includes("tukang borongan") || text.includes("jasa borong")) return null;
   if (text.includes("mandor")) return "mandor";

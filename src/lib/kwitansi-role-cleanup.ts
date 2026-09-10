@@ -21,6 +21,7 @@ export function cleanKwitansiWorkerRole(value: string | undefined | null) {
     .replace(/\s+/g, " ")
     .trim();
 
+  if (withoutOvertime.includes("tebas lahan") && withoutOvertime.includes("pembersihan")) return "Mandor";
   if (withoutOvertime === "mandor") return "Mandor";
   if (withoutOvertime === "kepala tukang") return "Kepala Tukang";
   if (withoutOvertime === "tukang") return "Tukang";
